@@ -47,19 +47,29 @@ def main():
     loop.Agent(sb).add_task("tester", "survive being killed")
     proc = subprocess.Popen([PY, LOOP, "run", "--drain", "--root", sb],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    deadline = time.time() + 30
+    # Wait for the first step to land before killing. The window is generous
+    # on purpose: this test is about surviving a kill, not about how fast a
+    # loaded machine gets to its first step, and a tight bound here would
+    # make the suite fail for a reason that has nothing to do with the
+    # invariant.
+    deadline = time.time() + 120
+    stepped = False
     while time.time() < deadline:
         st = read_state(sb)
         if st["tasks"] and st["tasks"][0].get("steps"):
+            stepped = True
             break
         time.sleep(0.2)
     proc.kill()                      # SIGKILL equivalent: no cleanup runs
-    proc.wait(timeout=30)
+    proc.wait(timeout=60)
     st = read_state(sb)              # must still parse: never a torn file
     assert isinstance(st.get("tasks"), list), "state.json was left torn"
     assert run_drain(sb) == 0, "the loop must pick the work back up"
     t = read_state(sb)["tasks"][0]
-    assert t["status"] == "done", t["status"]
+    assert t["status"] == "done", (
+        f"after kill -9 the task must still finish; status={t['status']!r} "
+        f"error={(t.get('error') or '')[:200]!r} "
+        f"(a step had{'' if stepped else ' NOT'} started before the kill)")
     for f in ("out/a.txt", "out/b.txt", "out/c.txt"):
         assert os.path.exists(os.path.join(sb, f.replace("/", os.sep))), f
     print("[kill] killed mid-task with no cleanup: state parsed, the task "
