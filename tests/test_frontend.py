@@ -36,10 +36,32 @@ def main():
     with open(page, "r", encoding="utf-8") as f:
         html = f.read()
 
-    # every tab the page offers must map to something the backend serves
+    # ---- UI spec §2: navigation follows JOBS, not architecture ------------
     tabs = re.findall(r"\['(\w+)','[^']+'\]", html)
-    assert set(tabs) == {"home", "guide", "agents", "work", "memory",
-                         "models", "system"}, tabs
+    assert tabs == ["home", "work", "agents", "resources", "proof", "admin"],         f"the primary nav is not the six jobs the spec names: {tabs}"
+    # every nav item states its PURPOSE — a label alone teaches nothing
+    for k in tabs:
+        assert re.search(r"^\s*%s:\s*\"" % k, html, re.M),             f"nav item {k!r} has no NAV_PURPOSE line"
+        assert f'if (S.view==="{k}")' in html,             f"nav item {k!r} has no branch in the router"
+    # ---- UI spec §16: the migration MOVED views, it did not delete them ---
+    # This is the invariant that matters: a redesign that silently drops a
+    # screen loses whatever only that screen could do. Enumerate every
+    # previously-primary view and prove it is still reachable.
+    for retired_tab, renderer in (("guide", "renderGuide"),
+                                  ("memory", "renderMemory"),
+                                  ("models", "renderModels"),
+                                  ("system", "renderSystem")):
+        assert f'if (S.view==="{retired_tab}")' in html,             f"§16 moved {retired_tab!r} but the router can no longer reach it"
+        assert f"function {renderer}(" in html,             f"{renderer} was deleted rather than re-filed"
+    # and each one is reachable by a control a person can actually click,
+    # not only by typing a view name nobody knows exists
+    # `nested` suppresses the moved view's own page title so a page has exactly
+    # one <h1>; the view itself is unchanged, which is what §16 asked for
+    for reached_from in ("renderMemory(b, true)",   # Resources -> Knowledge
+                         "renderModels(b, true)",   # Admin -> Models & cost
+                         "renderSystem(b, true)",   # Admin -> Health
+                         "go('guide')"):            # palette + contextual help
+        assert reached_from in html,             f"nothing in the new IA reaches {reached_from}"
     for endpoint in ("/api/system", "/api/experts", "/tasks", "/tree",
                      "/settings", "/file", "/scan", "/answer", "/task",
                      "/api/goals", "/api/commons", "/api/doctor",
@@ -64,7 +86,20 @@ def main():
                      "/self", "loadSelf(", "/knowledge", "loadKnowledge(",
                      "knowDlg(", "openCmd(", "renderCmd(", "/api/systems",
                      "loadSystemsMap(", "/api/preflight", "runPreflight(",
-                     "/api/backup", "runBackup(", "openEvidence("):
+                     "/api/backup", "runBackup(", "openEvidence(",
+                     # §6 mission page, §7 computers, §8 resources, §9 proof
+                     "/api/missions", "renderMission(", "openMission(",
+                     "/api/proof", "proofDetail(", "refreshProof(",
+                     "/api/proof/refresh", "renderWorkProof(",
+                     "/api/workers", "dlgComputer(", "setWorkerState(",
+                     "/api/workers/choose", "dlgChoose(",
+                     "/api/org", "dlgInvite(", "/api/audit", "renderAudit(",
+                     "/api/training", "renderTrainingLab(",
+                     "renderResources(", "renderProof(", "renderAdmin(",
+                     "renderComputers(", "renderToolsTab(", "renderSkillsTab(",
+                     # manual §29 metrics, and §21 per-user access
+                     "/api/metrics", "renderMetrics(",
+                     "/api/org/token", "issueToken(", "revokeToken("):
         assert endpoint in html, f"the page never calls {endpoint}"
     # verify/memcheck are reached through runTool(), which builds the URL
     for action in ("runTool('verify')", "runTool('memcheck')", "runTool('probe')",
@@ -96,7 +131,10 @@ def main():
     # design contract: both themes defined at token level, no theme-only colors
     assert "prefers-color-scheme:dark" in html and '[data-theme="dark"]' in html
     assert "--bg:" in html and "background:var(--bg)" in html
-    print("[page] ui.html serves 7 sections, calls every endpoint incl. memory/retired/history, defines both themes")
+    print("[page] the six job-shaped sections each state their purpose and "
+          "route to a renderer; guide/memory/models/system were MOVED, not "
+          "deleted, and each is still reachable from a clickable control; "
+          "every endpoint the page names exists; both themes defined")
 
     proc = subprocess.Popen([PY, os.path.join(AGENT_DIR, "ui.py"),
                              "--home", home, "--port", str(PORT)],

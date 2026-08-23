@@ -34,7 +34,16 @@ import hashlib
 import json
 import os
 import re
+import sys
 import time
+
+# A Windows console defaults to cp1252, which cannot encode the arrows in this
+# module's own docstring — so `acquire.py --help` died before printing a word.
+# Same guard chief.py, mission.py and ui.py already use.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except (AttributeError, OSError):        # pragma: no cover
+    pass
 
 LEDGER = "acquisitions.json"
 
@@ -331,6 +340,16 @@ def summary(root):
 
 
 def main():
+    try:
+        _main()
+    except Refused as e:
+        # every rung refuses with a sentence, never a traceback: the
+        # operator reading this is the person who has to act on it
+        print(f"REFUSED: {e}")
+        raise SystemExit(1)
+
+
+def _main():
     import argparse
     ap = argparse.ArgumentParser(description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -346,7 +365,62 @@ def main():
     p = sub.add_parser("remove"); p.add_argument("id")
     p.add_argument("--why", default=""); p.add_argument("--root", default=".")
     p = sub.add_parser("stages")
+    # The ladder's remaining rungs, reachable from a terminal. The library had
+    # them; the CLI did not, so the manual promised commands that did not
+    # exist — an operator following the documented recovery path would have
+    # found nothing there.
+    p = sub.add_parser("search"); p.add_argument("need")
+    p.add_argument("--root", default=".")
+    p = sub.add_parser("inspect"); p.add_argument("name")
+    p.add_argument("--source", required=True); p.add_argument("--version", default="")
+    p = sub.add_parser("install"); p.add_argument("id")
+    p.add_argument("--root", default="."); p.add_argument("--home", default=".")
+    p.add_argument("--worker", default=None); p.add_argument("--for", dest="task",
+                                                             default="")
+    p = sub.add_parser("test"); p.add_argument("id")
+    p.add_argument("--root", default="."); p.add_argument("--evidence", required=True)
+    p.add_argument("--command", default="")
+    p.add_argument("--failed", action="store_true",
+                   help="record that the capability test did NOT pass")
     a = ap.parse_args()
+    if a.cmd == "search":
+        rows = search_known(os.path.abspath(a.root), a.need)
+        if not rows:
+            print(f"nothing known provides {a.need!r}. That is an answer, not "
+                  f"an error: acquire it deliberately with `request`.")
+            return
+        for r in rows:
+            print(f"{r['name']:<24} {r.get('source', ''):<12} {r.get('why', '')}")
+        return
+    if a.cmd == "inspect":
+        v = inspect(a.name, a.source, a.version)
+        print(f"{a.name}: {v['verdict']}")
+        for f in v["blocking"]:
+            print(f"  BLOCKING: {f}")
+        for f in v["findings"]:
+            print(f"  review: {f}")
+        if v["requires_secrets"]:
+            print(f"  asks for: {', '.join(v['requires_secrets'])}")
+        # the verdicts are clean / review / blocked; a blocked one must not
+        # report success to a script that only reads the exit code
+        raise SystemExit(1 if v["verdict"] == "blocked" else 0)
+    if a.cmd == "install":
+        rec = install(os.path.abspath(a.root), os.path.abspath(a.home),
+                      a.id, a.worker, a.task)
+        ev = rec.get("install_evidence", {})
+        print(f"{rec['name']}: {rec['stage']} on {ev.get('worker', '?')} "
+              f"({ev.get('zone', '?')} zone)")
+        print("  a capability test must still pass before this is usable")
+        return
+    if a.cmd == "test":
+        rec = capability_test(os.path.abspath(a.root), a.id, not a.failed,
+                              a.evidence, a.command)
+        print(f"{rec['name']}: {rec['stage']}")
+        if rec["stage"] != "tested":
+            raise SystemExit(1)
+        print("  a tool that installed has proven it installs; this proves it "
+              "does the job")
+        return
     if a.cmd == "stages":
         print("requested -> inspected -> installed -> tested -> trusted")
         print("  each rung is earned by recorded evidence; nothing arrives "
@@ -354,15 +428,10 @@ def main():
         return
     root = os.path.abspath(a.root)
     if a.cmd == "request":
-        try:
-            rec = request(root, a.name, a.source, a.need, a.version)
-            print(f"{rec['id']}: {rec['stage']} "
-                  f"({rec['inspection']['verdict']})")
-            for f in rec["inspection"]["findings"]:
-                print(f"  review: {f}")
-        except Refused as e:
-            print(f"REFUSED: {e}")
-            raise SystemExit(1)
+        rec = request(root, a.name, a.source, a.need, a.version)
+        print(f"{rec['id']}: {rec['stage']} ({rec['inspection']['verdict']})")
+        for f in rec["inspection"]["findings"]:
+            print(f"  review: {f}")
         return
     if a.cmd == "promote":
         rec = promote(root, a.id, permissions=a.can)

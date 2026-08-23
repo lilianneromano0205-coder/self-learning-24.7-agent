@@ -49,6 +49,7 @@ KINDS = {
         "zone": "trusted", "cost_per_hour": 0.0, "starts_in_s": 0,
         "scales_to_zero": False,
         "what": "this machine",
+        "implies": ("gui", "windows-or-host-os"),
         "caution": "never the default for model-authored code: a mistake here "
                    "lands on the owner's own filesystem",
     },
@@ -56,24 +57,28 @@ KINDS = {
         "zone": "isolated", "cost_per_hour": 0.0, "starts_in_s": 3,
         "scales_to_zero": True,
         "what": "a disposable container on this machine",
+        "implies": ("docker", "install"),
         "caution": "",
     },
     "cloud-container": {
         "zone": "isolated", "cost_per_hour": 0.05, "starts_in_s": 5,
         "scales_to_zero": True,
         "what": "a short-lived cloud container for CPU work",
+        "implies": ("docker", "install"),
         "caution": "",
     },
     "cloud-vm": {
         "zone": "isolated", "cost_per_hour": 0.25, "starts_in_s": 45,
         "scales_to_zero": True,
         "what": "a full cloud computer with a browser and a desktop",
+        "implies": ("browser", "gui", "install", "docker"),
         "caution": "",
     },
     "gpu-worker": {
         "zone": "isolated", "cost_per_hour": 2.50, "starts_in_s": 90,
         "scales_to_zero": True,
         "what": "an accelerated worker for training or heavy inference",
+        "implies": ("gpu", "cuda", "install"),
         "caution": "burst only — never a baseline per-agent cost",
     },
     "fleet-worker": {
@@ -81,12 +86,27 @@ KINDS = {
         "scales_to_zero": False,
         "what": "an organization computer that dialled in and advertised "
                 "what it can do",
+        "implies": ("internal-network",),
         "caution": "reaches the internal network: policy decides which "
                    "experts may use it",
     },
 }
 
 STATES = ("online", "paused", "stopped", "unreachable")
+
+
+def capabilities_of(row):
+    """What a computer can do = what it declared + what its KIND implies.
+
+    Found live: a machine registered with --kind gpu-worker was refused GPU
+    work because nobody had typed "gpu" into its capability list. The registry
+    already knew it was accelerated; requiring the owner to say so twice is a
+    trap, and one that only shows up on the routing path rather than at
+    registration. The implication is stated in KINDS so it is inspectable
+    rather than inferred by a matcher nobody can predict.
+    """
+    kind = KINDS.get(row.get("kind"), {})
+    return sorted(set(row.get("capabilities") or []) | set(kind.get("implies", ())))
 
 
 def _path(home):
@@ -188,7 +208,7 @@ def requirements(text, home=None):
     need = set()
     if home:
         for r in load(home):
-            for cap in r.get("capabilities", []):
+            for cap in capabilities_of(r):
                 if cap and cap in t:
                     need.add(cap)
     for word, cap in (
@@ -230,7 +250,7 @@ def choose(home, task_text, expert=None, allow_trusted=False):
             why_not = ("trusted machine — not used automatically for "
                        "model-authored work")
         else:
-            missing = need - set(r["capabilities"])
+            missing = need - set(capabilities_of(r))
             if missing:
                 why_not = "cannot: " + ", ".join(sorted(missing))
         considered.append({"id": r["id"], "name": r["name"],
@@ -294,7 +314,12 @@ def bootstrap(home):
 def summary(home):
     rows = load(home)
     return {
-        "workers": rows,
+        "workers": [{**r, "capabilities": capabilities_of(r),
+                     "declared": sorted(r.get("capabilities") or []),
+                     "implied": sorted(set(KINDS.get(r.get("kind"), {})
+                                           .get("implies", ()))
+                                       - set(r.get("capabilities") or []))}
+                    for r in rows],
         "total": len(rows),
         "online": sum(1 for r in rows if r["state"] == "online"),
         "spend_usd": round(sum(r["spend_usd"] for r in rows), 4),

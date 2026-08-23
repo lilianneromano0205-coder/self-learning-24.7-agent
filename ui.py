@@ -43,6 +43,9 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HOME = os.path.dirname(os.path.abspath(__file__))
+# Who a request is from when no organization exists, or when the caller
+# holds the panel's master token — which already grants everything.
+OWNER_ACTOR = "owner"
 sys.path.insert(0, HOME)
 import fleet
 import ingest
@@ -56,10 +59,30 @@ MAX_FILE_CHARS = 200_000
 SKIP_DIRS = {"__pycache__", ".git", "node_modules"}
 
 
+def _expert_slugs(home):
+    base = os.path.join(home, "experts")
+    try:
+        return sorted(d for d in os.listdir(base)
+                      if os.path.isdir(os.path.join(base, d)))
+    except OSError:
+        return []
+
+
+class NoSuchExpert(KeyError):
+    """There is no expert by that name.
+
+    A distinct type because `except KeyError -> 404 unknown expert` used to
+    catch a MISSING REQUEST FIELD as well, so a POST that forgot `role`
+    answered "unknown expert" about an expert that plainly existed. An error
+    that names the wrong thing sends the reader looking in the wrong place,
+    which is worse than no error at all (UI spec §12).
+    """
+
+
 def expert_root(home, slug):
     p = os.path.join(home, "experts", slug)
     if not os.path.isdir(p) or not re.fullmatch(r"[a-z0-9-]+", slug):
-        raise KeyError(slug)
+        raise NoSuchExpert(slug)
     return p
 
 
@@ -378,6 +401,209 @@ def _fleet_tool_stats(home):
 
 
 
+# UI spec §11: "Never label a model 'best' without the workload and sample
+# size." The floor lives here, next to the code that applies it, so the
+# panel cannot quietly render a rank the data does not support.
+MIN_PROFILE_SAMPLE = 5
+
+
+def performance(home, slug):
+    """UI spec §5 Performance and §11 Model UX, from ledgers that already exist.
+
+    "Verified success, false-success, failures/cases, cost, model/worker
+    profile." Every number here is READ from a ledger some other subsystem
+    already writes; nothing is computed twice, because two counts of the same
+    thing eventually disagree and then nobody knows which to believe.
+
+    §11's rule is enforced at the source rather than in the template: each
+    model profile carries its own sample size, and `too_few` is set when the
+    sample is small — so a panel physically cannot render "best model" without
+    also rendering the n it was measured over.
+    """
+    import cases
+    import memory
+    import modelgateway
+    import modelrouter
+    import trace as TR
+    root = expert_root(home, slug)
+
+    comp = memory.competence(home, slug) or {}
+    fails = memory.failure_summary(home, slug) or {}
+    case_stats = cases.stats(root)
+    spend = modelgateway.summary(root)
+    profiles = modelrouter.profiles(root)
+    for name, prof in profiles.items():
+        prof["too_few"] = prof.get("n", 0) < MIN_PROFILE_SAMPLE
+        prof["caveat"] = (
+            f"measured over {prof.get('n', 0)} task(s) — too few to rank"
+            if prof["too_few"] else
+            f"measured over {prof.get('n', 0)} task(s) of this agent's own work")
+    try:
+        tools = TR.tool_stats(root)
+    except Exception:
+        tools = {}
+
+    # which computers this agent's work has actually run on
+    import workers
+    used = [{"id": w["id"], "name": w["name"], "zone": w["zone"],
+             "used_seconds": w["used_seconds"], "spend_usd": w["spend_usd"]}
+            for w in workers.load(home)
+            if (not w["experts"] or slug in w["experts"]) and w["used_seconds"]]
+
+    return {
+        "expert": slug,
+        "competence": comp,
+        "failures": fails,
+        "cases": case_stats,
+        "spend": spend,
+        "models": profiles,
+        "tools": tools,
+        "computers": used,
+        "min_sample": MIN_PROFILE_SAMPLE,
+        "honesty": ("Every rate below is over this agent's own completed work. "
+                    "A model is never called best without the sample size it "
+                    "was measured over, and a rate over fewer than "
+                    f"{MIN_PROFILE_SAMPLE} tasks is marked as too few to rank."),
+    }
+
+
+def training_view(home, slug):
+    """UI spec §10 — "Training should look like certification, not a spinner."
+
+    Sources -> Coverage -> Gaps -> Exercises -> Exams -> Competence, per
+    course. The rule that shapes the payload is the last line of §10:
+
+        "Never show '100% learned' unless the denominator is explicit."
+
+    So no percentage is computed here. Every stage reports a numerator AND a
+    denominator, and the panel can only render what it is given — which is why
+    the arithmetic is refused at the source rather than discouraged in a
+    style guide.
+    """
+    import selfmodel
+    root = expert_root(home, slug)
+    courses = []
+    for rec in selfmodel.study(root):
+        course = rec["course"]
+        cdir = os.path.join(root, "courses", course)
+
+        # SOURCES — authority tier, and whether each one was actually read
+        tiers = rec.get("sources", {})
+        n_sources = sum(tiers.values())
+
+        # COVERAGE — requirements in the spec vs requirements with evidence.
+        # Both numbers, never their ratio: a bare "97%" hides whether the
+        # denominator was 3 or 300.
+        spec_ids, checked_ids = set(), set()
+        try:
+            with open(os.path.join(cdir, "spec.md"), encoding="utf-8") as f:
+                for line in f:
+                    m = re.match(r"\s*(R-\d+)", line)
+                    if m:
+                        spec_ids.add(m.group(1))
+        except OSError:
+            pass
+        results = ""
+        try:
+            with open(os.path.join(cdir, "exam-results.md"), encoding="utf-8") as f:
+                results = f.read()
+        except OSError:
+            pass
+        for m in re.finditer(r"(R-\d+):\s*PASS", results):
+            checked_ids.add(m.group(1))
+
+        # EXERCISES — lessons studied vs lessons ingested
+        lessons_dir = os.path.join(cdir, "lessons")
+        lessons, studied = [], 0
+        try:
+            for name in sorted(os.listdir(lessons_dir)):
+                notes = os.path.join(lessons_dir, name, "notes.md")
+                has = os.path.isfile(notes)
+                studied += 1 if has else 0
+                lessons.append({"lesson": name, "studied": has})
+        except OSError:
+            pass
+
+        # EXAMS — held-out status, score, when, and what comes next
+        ex = rec.get("exam") or {}
+        exam_dir = os.path.join(cdir, "exam")
+        held_out = os.path.isdir(exam_dir) and bool(os.listdir(exam_dir)) \
+            if os.path.isdir(exam_dir) else False
+        when = None
+        try:
+            when = time.strftime(
+                "%Y-%m-%d %H:%M",
+                time.localtime(os.path.getmtime(
+                    os.path.join(cdir, "exam-results.md"))))
+        except OSError:
+            pass
+
+        courses.append({
+            "course": course,
+            "sources": {"total": n_sources, "by_tier": tiers,
+                        "contested": rec.get("contested", 0)},
+            "coverage": {"required": len(spec_ids),
+                         "with_evidence": len(spec_ids & checked_ids),
+                         "missing": sorted(spec_ids - checked_ids)[:20]},
+            "gaps": rec.get("gaps", []),
+            "exercises": {"total": len(lessons), "studied": studied,
+                          "lessons": lessons[:40]},
+            "exam": {"sat": bool(ex), "score": ex.get("score"),
+                     "verdict": ex.get("verdict"), "sittings": ex.get("sittings", 0),
+                     "closed_book": held_out, "when": when,
+                     "next": ("a re-exam is scheduled after new material or a "
+                              "spaced interval, whichever comes first")},
+            "atoms": rec.get("atoms", 0),
+        })
+
+    import memory
+    comp = (memory.competence(home, slug) or {}).get(slug, {})
+    return {
+        "expert": slug, "courses": courses, "competence": comp,
+        "rule": ("Every figure below is a count over a stated total. This "
+                 "platform will not print '100% learned': 42/42 requirements "
+                 "covered with 3 unresolved conflicts is a sentence somebody "
+                 "can check, and a percentage is not."),
+    }
+
+
+# UI spec / manual §21 — what each write costs, in permissions. Declared as a
+# table rather than sprinkled through the handlers, so "which routes are
+# gated?" is a question somebody can answer by reading twelve lines.
+#
+# `org.check` returns True for every permission when no organization exists,
+# so a solo install behaves exactly as it always did.
+POST_PERMISSION = {
+    "/api/experts":            "create_agent",
+    "/api/quick":              "create_agent",
+    "/api/learner":            "create_agent",
+    "/api/team":               "run",
+    "/api/missions":           "run",
+    "/api/curriculum":         "run",
+    "/api/workers":            "connect_tool",
+    "/api/workers/choose":     "read",
+    "/api/org":                "manage_users",
+    "/api/org/users":          "manage_users",
+    "/api/proof/refresh":      "run",
+    "/api/preflight":          "read",
+    "/api/backup":             "manage_secrets",
+    "/api/federation":         "connect_tool",
+    "/api/shutdown":           "run",
+}
+# per-expert actions: POST /api/experts/<slug>/<action>
+ACTION_PERMISSION = {
+    "task": "run", "goal": "run", "consult": "run", "answer": "run",
+    "start": "run", "stop": "run", "launch": "run", "wake": "run",
+    "scan": "run", "url": "run", "verify": "run", "memcheck": "run",
+    "probe": "run", "workflow": "run", "intention": "run",
+    "routine": "run", "variant": "create_agent", "skill": "create_agent",
+    "template": "create_agent", "provider": "manage_secrets",
+    "role": "manage_budget", "policy": "manage_budget",
+    "approval": "approve",
+}
+DEFAULT_WRITE_PERMISSION = "create_agent"   # anything unlisted: assume it builds
+
+
 FEED_EVENTS = {
     # event -> (icon, severity, human phrasing)
     "task_start":       ("run",   "info", "picked up a task"),
@@ -595,7 +821,19 @@ class Handler(BaseHTTPRequestHandler):
         return True
 
     def _authed(self, path, query):
-        """The page itself is public (it contains nothing); the API is not."""
+        """The page itself is public (it contains nothing); the API is not.
+
+        This also resolves WHO is calling. `org.py` says `check()` is "the
+        single question every mutating path asks" — and the panel, which is
+        the main mutating path, never asked it, because with one shared token
+        it had no idea who was on the other end. Each member can now hold
+        their own bearer token, so the permission model and the audit trail
+        mean the same thing here as they do on the command line.
+
+        With no organization the behaviour is exactly what it always was:
+        `org.check` returns True for everybody, because adding RBAC must not
+        make the person who owns the machine ask themselves for permission.
+        """
         if not path.startswith("/api"):
             return True
         # every mutating verb must be same-origin, token or no token
@@ -604,15 +842,83 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": "cross-origin request refused (CSRF): the "
                                  "panel only accepts same-origin writes"}, 403)
             return False
+        presented = ""
+        header = self.headers.get("Authorization", "")
+        if header.startswith("Bearer "):
+            presented = header[7:]
+        elif query.get("token", [""])[0]:
+            presented = query.get("token", [""])[0]
+        self.actor, member = self._resolve_actor(presented)
         if not self.token:
             return True
-        header = self.headers.get("Authorization", "")
-        if header == f"Bearer {self.token}":
-            return True
-        if query.get("token", [""])[0] == self.token:
+        if presented == self.token or member:
             return True
         self._json({"error": "auth required — send Authorization: Bearer <token>"}, 401)
         return False
+
+    def _resolve_actor(self, presented):
+        """-> (actor, is_member). The identity behind this request.
+
+        A member's own token names them. The panel's master token, and the
+        no-org case, resolve to the owner — the correct answer for a solo
+        install and an honest one for a shared one, because whoever holds the
+        master token can already do everything anyway.
+        """
+        try:
+            import org
+        except ImportError:                      # pragma: no cover
+            return OWNER_ACTOR, False
+        try:
+            u = org.user_for_token(self.home, presented) if presented else None
+        except Exception:
+            u = None
+        if u:
+            return u["email"], True
+        rec = org.load(self.home)
+        if rec and (not self.token or presented == self.token):
+            owner = next((x["email"] for x in rec["users"]
+                          if x["role"] == "owner"), OWNER_ACTOR)
+            return owner, False
+        return OWNER_ACTOR, False
+
+    def _may_write(self, path):
+        """The permission this POST needs, from the declared table.
+
+        An unlisted route is treated as a BUILD, not as public: a route added
+        without an entry should be refused for a viewer, not waved through.
+        """
+        perm = POST_PERMISSION.get(path)
+        if perm is None:
+            m = re.fullmatch(r"/api/experts/([a-z0-9-]+)/(\w+)", path)
+            if m:
+                perm = ACTION_PERMISSION.get(m.group(2),
+                                             DEFAULT_WRITE_PERMISSION)
+            elif re.fullmatch(r"/api/workers/([a-z0-9-]+)/state", path):
+                perm = "connect_tool"
+            elif re.fullmatch(r"/api/retired/([a-z0-9-]+)/restore", path):
+                perm = "create_agent"
+            else:
+                perm = DEFAULT_WRITE_PERMISSION
+        return self._may(perm, path)
+
+    def _may(self, permission, obj=""):
+        """Ask the ONE question, and turn a refusal into a 403 with its reason.
+
+        True means the action may proceed. False means the reply has already
+        been sent and the caller must return immediately.
+        """
+        try:
+            import org
+        except ImportError:                      # pragma: no cover
+            return True
+        try:
+            org.check(self.home, getattr(self, "actor", OWNER_ACTOR),
+                      permission, obj)
+            return True
+        except Exception as e:
+            self._json({"error": str(e), "permission": permission,
+                        "actor": getattr(self, "actor", OWNER_ACTOR)}, 403)
+            return False
 
     def _events(self, q):
         """AG-UI-style live stream: the panel stops polling and simply WATCHES.
@@ -738,6 +1044,14 @@ class Handler(BaseHTTPRequestHandler):
                       else bool(d["native_tools"]), hdrs)
             return {"added": d["name"], "base_url": p["base_url"],
                     "key_env": p["api_key_env"]}
+        if action == "policy":
+            import modelrouter
+            d = self._data
+            r = modelrouter.set_policy(root, d.get("policy", "balanced"),
+                                       d.get("min_pass"), d.get("prefer"))
+            return {"applied": r["policy"], "min_pass": r["min_pass"],
+                    "prefer": r["prefer"], "roles": len(r["roles"]),
+                    "now": modelrouter.policy_of(root)}
         if action == "role":
             import providers as P
             d = self._data
@@ -1004,6 +1318,87 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(system_overview(self.home))
             elif path == "/api/systems":
                 self._json(systems_map(self.home))
+            elif path == "/api/proof":
+                # UI spec §9 Proof Center: the panel READS generated proof,
+                # it never sets a level. A regression or expired live check
+                # downgrades the badge with nobody deciding to.
+                # Platform proof is about the CODE, not this installation:
+                # evidence is recorded against a code hash, so it is read
+                # from the code tree rather than from a fleet home that may
+                # have been created five minutes ago.
+                import proof
+                self._json(proof.summary(HOME))
+            elif (m := re.fullmatch(r"/api/proof/([a-z0-9-]+)", path)):
+                import proof
+                try:
+                    self._json(proof.evaluate(HOME, m.group(1)))
+                except KeyError:
+                    self._json({"error": "unknown capability"}, 404)
+            elif path == "/api/workers":
+                # UI spec §7 Resources -> Computers
+                import workers
+                self._json(workers.summary(self.home))
+            elif path == "/api/missions":
+                import mission
+                out = []
+                for slug in _expert_slugs(self.home):
+                    root = os.path.join(self.home, "experts", slug)
+                    for st in mission.list_missions(root):
+                        st["expert"] = slug
+                        out.append(st)
+                self._json({"missions": out})
+            elif (m := re.fullmatch(r"/api/experts/([a-z0-9-]+)/missions", path)):
+                import mission
+                self._json({"missions": mission.list_missions(
+                    expert_root(self.home, m.group(1)))})
+            elif (m := re.fullmatch(
+                    r"/api/experts/([a-z0-9-]+)/missions/([\w.-]+)", path)):
+                import mission
+                root = expert_root(self.home, m.group(1))
+                try:
+                    rec = mission.load(root, m.group(2)) or {}
+                    st = mission.compile_state(root, m.group(2))
+                    self._json({**st, "record": rec,
+                                "contract": mission.render(st)})
+                except KeyError:
+                    self._json({"error": "unknown mission"}, 404)
+            elif (m := re.fullmatch(r"/api/experts/([a-z0-9-]+)/acquisitions",
+                                    path)):
+                import acquire
+                self._json(acquire.summary(expert_root(self.home, m.group(1))))
+            elif path == "/api/org":
+                import org
+                self._json(org.summary(self.home))
+            elif path == "/api/audit":
+                import org
+                self._json({"trail": org.trail(
+                    self.home, int(q.get("limit", ["100"])[0]))})
+            elif path == "/api/metrics":
+                # manual §29 — the twelve numbers, and the three this
+                # platform refuses to invent
+                import metrics
+                self._json(metrics.report(
+                    self.home, q.get("expert", [None])[0]))
+            elif path == "/api/training":
+                import training
+                self._json(training.status(self.home))
+            elif (m := re.fullmatch(r"/api/experts/([a-z0-9-]+)/training", path)):
+                # UI spec §10: certification, not a spinner
+                self._json(training_view(self.home, m.group(1)))
+            elif (m := re.fullmatch(r"/api/experts/([a-z0-9-]+)/policy", path)):
+                # UI spec §11: a policy the owner picks, not a model name
+                import modelrouter
+                self._json({"current": modelrouter.policy_of(
+                                expert_root(self.home, m.group(1))),
+                            "presets": modelrouter.POLICIES})
+            elif (m := re.fullmatch(r"/api/experts/([a-z0-9-]+)/performance",
+                                    path)):
+                # UI spec §5 Performance tab
+                self._json(performance(self.home, m.group(1)))
+            elif (m := re.fullmatch(r"/api/experts/([a-z0-9-]+)/spend", path)):
+                import modelgateway
+                self._json(modelgateway.summary(
+                    expert_root(self.home, m.group(1))))
             elif path == "/api/gates":
                 import gates
                 self._json({"gates": gates.describe()})
@@ -1299,8 +1694,10 @@ class Handler(BaseHTTPRequestHandler):
                             "content": content})
             else:
                 self._json({"error": "not found"}, 404)
-        except KeyError:
-            self._json({"error": "unknown expert"}, 404)
+        except NoSuchExpert as e:
+            self._json({"error": f"no expert called {e.args[0]!r}"}, 404)
+        except KeyError as e:
+            self._json({"error": f"the request is missing {e.args[0]!r}"}, 400)
         except ValueError as e:
             self._json({"error": str(e)}, 400)
         except Exception as e:
@@ -1364,6 +1761,8 @@ class Handler(BaseHTTPRequestHandler):
         path, q = self._route()
         if not self._authed(path, q):
             return
+        if not self._may_write(path):
+            return
         try:
             self._data = json.loads(self._body() or b"{}")
             if path == "/api/experts":
@@ -1406,6 +1805,87 @@ class Handler(BaseHTTPRequestHandler):
                 gid = start_goal(self.home, slug, dest, goal_text,
                                  cycles=d.get("cycles") or 6)
                 self._json({"created": slug, "pursuing": gid})
+            elif path == "/api/missions":
+                # UI spec §6: a mission is created with its success criteria,
+                # because "done" must be defined before any planning starts
+                import mission
+                d = self._data
+                slug = d.get("expert")
+                root = expert_root(self.home, slug) if slug else self.home
+                rec = mission.create(
+                    root, d.get("objective", ""), d.get("criteria") or [],
+                    d.get("constraints") or [], d.get("non_goals") or [],
+                    expert=slug)
+                self._json({"mission": rec["id"],
+                            "criteria": len(rec["criteria"]),
+                            "fingerprint": rec["fingerprint"]})
+            elif path == "/api/workers":
+                import workers
+                d = self._data
+                w = workers.register(self.home, d["name"], d["kind"],
+                                     d.get("capabilities") or [],
+                                     d.get("experts") or [], d.get("note", ""))
+                self._json({"worker": w["id"], "zone": w["zone"],
+                            "state": w["state"]})
+            elif (m := re.fullmatch(r"/api/workers/([a-z0-9-]+)/state", path)):
+                import workers
+                w = workers.set_state(self.home, m.group(1),
+                                      self._data.get("state", "stopped"))
+                self._json({"worker": w["id"], "state": w["state"]})
+            elif path == "/api/workers/choose":
+                # UI spec §7: "Using Office Windows PC because Excel +
+                # internal network are required" — the sentence, not a name
+                import workers
+                w, why = workers.choose(self.home, self._data.get("task", ""),
+                                        self._data.get("expert"))
+                # the SENTENCE is the answer; the rest is what makes it
+                # arguable. A user who cannot see why the other computers were
+                # passed over cannot disagree with the choice, and a routing
+                # decision nobody can disagree with is one nobody can correct.
+                self._json({"worker": w, "why": why["why"],
+                            "needed": why["needed"],
+                            "considered": why["considered"]})
+            elif path == "/api/proof/refresh":
+                import proof
+                self._json({"refreshed": proof.refresh(
+                    HOME, features=[self._data["feature"]]
+                    if self._data.get("feature") else None,
+                    stress=bool(self._data.get("stress")))})
+            elif path == "/api/org":
+                # the ONE place an actor comes from the body: before an
+                # organization exists there is nobody to resolve a token to
+                import org
+                d = self._data
+                self._json({"organization": org.create(
+                    self.home, d["name"], d["owner"],
+                    d.get("owner_name", ""))["name"]})
+            elif path == "/api/org/token":
+                # a member's own bearer token. Returned ONCE, in plain text,
+                # and never stored — what is stored is its SHA-256.
+                import org
+                d = self._data
+                tok = org.issue_token(self.home, self.actor,
+                                      d.get("email") or self.actor)
+                self._json({"for": (d.get("email") or self.actor),
+                            "token": tok,
+                            "note": "this value is shown once and is not "
+                                    "recorded anywhere; store it now"})
+            elif path == "/api/org/revoke":
+                import org
+                gone = org.revoke_token(self.home, self.actor,
+                                        self._data["email"])
+                self._json({"revoked": bool(gone),
+                            "email": self._data["email"]})
+            elif path == "/api/org/users":
+                import org
+                d = self._data
+                # The actor is the one the TOKEN resolved to, never one the
+                # request body claims. An audit trail whose author is a
+                # request field records whatever the caller typed, which is
+                # not the same thing as what happened.
+                org.add_user(self.home, self.actor, d["email"],
+                             d.get("role", "operator"), d.get("name", ""))
+                self._json({"added": d["email"], "role": d.get("role", "operator")})
             elif path == "/api/preflight":
                 # the production verdict, from the panel the owner already has
                 import preflight
@@ -1496,8 +1976,10 @@ class Handler(BaseHTTPRequestHandler):
                     self._json(out, status)
             else:
                 self._json({"error": "not found"}, 404)
-        except KeyError:
-            self._json({"error": "unknown expert"}, 404)
+        except NoSuchExpert as e:
+            self._json({"error": f"no expert called {e.args[0]!r}"}, 404)
+        except KeyError as e:
+            self._json({"error": f"the request is missing {e.args[0]!r}"}, 400)
         except ValueError as e:
             # a refused gate spec is the caller's mistake, not a server fault
             self._json({"error": str(e)}, 400)
@@ -1506,11 +1988,20 @@ class Handler(BaseHTTPRequestHandler):
         except subprocess.TimeoutExpired:
             self._json({"error": "command timed out"}, 504)
         except Exception as e:
-            self._json({"error": str(e)}, 500)
+            # an authorisation refusal is a 403, not a server fault: a 500
+            # tells the reader the platform broke when in fact it worked
+            if type(e).__name__ == "Denied":
+                self._json({"error": str(e),
+                            "actor": getattr(self, "actor", OWNER_ACTOR)}, 403)
+            else:
+                self._json({"error": str(e)}, 500)
 
     def do_PUT(self):
         path, q = self._route()
         if not self._authed(path, q):
+            return
+        # editing an identity, a prompt or the fleet-wide pins IS building
+        if not self._may("create_agent", path):
             return
         try:
             if path.endswith("/identity") or path == "/api/commons/pins":
@@ -1540,14 +2031,18 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"saved": name})
             else:
                 self._json({"error": "not found"}, 404)
-        except KeyError:
-            self._json({"error": "unknown expert"}, 404)
+        except NoSuchExpert as e:
+            self._json({"error": f"no expert called {e.args[0]!r}"}, 404)
+        except KeyError as e:
+            self._json({"error": f"the request is missing {e.args[0]!r}"}, 400)
         except Exception as e:
             self._json({"error": str(e)}, 500)
 
     def do_DELETE(self):
         path, q = self._route()
         if not self._authed(path, q):
+            return
+        if not self._may("delete_agent", path):
             return
         try:
             if (m := re.fullmatch(r"/api/experts/([a-z0-9-]+)", path)):
@@ -1563,8 +2058,10 @@ class Handler(BaseHTTPRequestHandler):
                                 "preserved": not purge, "detail": res})
             else:
                 self._json({"error": "not found"}, 404)
-        except KeyError:
-            self._json({"error": "unknown expert"}, 404)
+        except NoSuchExpert as e:
+            self._json({"error": f"no expert called {e.args[0]!r}"}, 404)
+        except KeyError as e:
+            self._json({"error": f"the request is missing {e.args[0]!r}"}, 400)
         except Exception as e:
             self._json({"error": str(e)}, 500)
 
@@ -1595,7 +2092,19 @@ def main():
     Handler.home = os.path.abspath(args.home)
     token = args.token
     exposed = args.host not in ("127.0.0.1", "localhost")
-    if exposed and not token:
+    # An organization with no token defeats itself: `_authed` returns early
+    # when there is nothing to check, so every caller resolves to the owner
+    # and the roles somebody carefully configured govern nothing. A token is
+    # what makes an actor identifiable, so a shared fleet auto-enables one for
+    # the same reason an exposed one does.
+    shared = False
+    if not token:
+        try:
+            import org
+            shared = org.load(Handler.home) is not None
+        except Exception:
+            shared = False
+    if (exposed or shared) and not token:
         token = secrets.token_urlsafe(24)
         tok_path = os.path.join(Handler.home, "ui-token.txt")
         with open(tok_path, "w", encoding="utf-8") as f:
@@ -1605,6 +2114,14 @@ def main():
         except OSError:            # pragma: no cover — Windows ACLs differ
             pass
         print(f"access token generated (saved to {tok_path}):\n  {token}\n")
+        if shared and not exposed:
+            print("this fleet belongs to an organization, so the panel needs "
+                  "a token to tell members apart.")
+            print("Give each member their own:  python org.py token <email> "
+                  "--as you@example.com")
+            print("Keep the one above to yourself — it resolves to the owner "
+                  "and grants everything.")
+            print()
     Handler.token = token
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"Expert Fleet mission control: http://{args.host}:{args.port}")

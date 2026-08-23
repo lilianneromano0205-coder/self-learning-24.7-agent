@@ -123,7 +123,10 @@ def main():
     print("[marking] injected directive fenced as untrusted data, rule present in grounding")
 
     # --- 5. secrets denial: credentials never pass through the file tools
-    sb = make_sandbox("secrets", providers={"m": {"script": "s.json"}},
+    sb = make_sandbox("guardrails-secrets",   # never share a sandbox name:
+                      # test_secrets.py owns "secrets", and two suites
+                      # racing the same directory failed only under load
+                      providers={"m": {"script": "s.json"}},
                       roles={"tester": "m"}, scripts={"s.json": TWO_STEP})
     with open(os.path.join(sb, "agent.env"), "w", encoding="utf-8") as f:
         f.write("DEEPSEEK_API_KEY=sk-live-secret\n")

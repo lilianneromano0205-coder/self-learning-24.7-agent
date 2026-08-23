@@ -143,11 +143,42 @@ def check_exposure(home, exposed=False):
             OK, "access",
             "the panel binds localhost only (token auto-enables if exposed)",
             ""))
-    out.append(_finding(
-        NOTE, "access",
-        "access is single-owner: one token grants everything",
-        "there are no per-user roles or audit-by-user — do not hand the "
-        "token to people you would not give the server to"))
+    # This note used to say "there are no per-user roles or audit-by-user".
+    # There are now, so the audit must report which of the two situations this
+    # installation is actually in — a stale reassurance is worse than none.
+    try:
+        import org
+        rec = org.load(home)
+    except Exception:
+        rec = None
+    if rec:
+        with_tokens = sum(1 for u in rec["users"] if u.get("token_sha256"))
+        n = len(rec["users"])
+        if with_tokens >= n:
+            out.append(_finding(
+                OK, "access",
+                f"{n} member(s), each with their own panel token and role",
+                "every write is checked against the role that token belongs "
+                "to, and the audit trail names the credential"))
+        else:
+            out.append(_finding(
+                RISK, "access",
+                f"{n - with_tokens} of {n} member(s) have no panel token",
+                "without one they fall back to the panel's master token, "
+                "which resolves to the owner: python org.py token <email> "
+                "--as you@example.com"))
+        out.append(_finding(
+            NOTE, "access",
+            "the panel's master token still grants everything",
+            "that is by design — it already implies control of the process — "
+            "so give people their own and keep the master one to yourself"))
+    else:
+        out.append(_finding(
+            NOTE, "access",
+            "access is single-owner: one token grants everything",
+            "no organization has been created, so there are no per-user roles "
+            "here yet (python org.py create ...). Do not hand the token to "
+            "people you would not give the server to"))
     return out
 
 

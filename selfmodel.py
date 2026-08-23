@@ -81,7 +81,14 @@ def _exam(root, course):
                  40_000)
     if not body:
         return None
-    scores = re.findall(r"(\d{1,3})\s*%", body)
+    # The canonical line the loop's own completion check reads is
+    # "SCORE: 95" (loop.py, course_status). This used to look only for a
+    # percent SIGN, which that line does not carry — so an expert could pass
+    # an exam at 95 and then describe itself, in its own self-model and in
+    # the panel, as never having been scored. Read the canonical form first,
+    # and keep accepting "95%" for anything already written that way.
+    scores = (re.findall(r"^\s*SCORE:\s*(\d{1,3})", body, re.M)
+              or re.findall(r"(\d{1,3})\s*%", body))
     passed = re.findall(r"\b(PASS|FAIL)\b", body.upper())
     return {"score": int(scores[-1]) if scores else None,
             "verdict": passed[-1].lower() if passed else None,

@@ -1,12 +1,19 @@
 # Gaps, Risks and Unfinished Work
 
-> **STATUS — REMEDIATED.** Every P0 and P1 in this document, and all four P2s,
-> have been fixed and carry a regression test. See **`REMEDIATION.md`** for the
-> disposition of each finding, the test that holds it closed, and the residual
-> risk that remains. This document is preserved as the AUDIT RECORD — it says
-> what was wrong and how it was proven, which is the half a changelog loses.
+> **STATUS — REMEDIATED.** Every P0 and P1 in this document, all four P2s, and
+> the eleven defects the third pass found, have been fixed and carry a
+> regression test. See **`REMEDIATION.md`** for the disposition of each
+> finding, the test that holds it closed, and the residual risk that remains.
+> This document is preserved as the AUDIT RECORD — it says what was wrong and
+> how it was proven, which is the half a changelog loses.
 >
-> Verified after remediation: 83/83 tests pass twice consecutively,
+> Three passes are recorded here. Passes one and two were **read-only forensic
+> audits**. The third (below, `U1`–`U11`) came from **building a specification
+> against the running system**, which executed paths the audits had only read —
+> and that is where five more instances of the audits' own central pattern were
+> waiting.
+>
+> Verified after remediation: 93/93 tests pass twice consecutively,
 > `harness.py --check` exits 0, `preflight.py` reports 0 blockers.
 > Still open by nature, not by neglect: live-provider behaviour, Docker/E2B
 > backends, real MCP/A2A servers, and 24/7 endurance — all listed under
@@ -694,3 +701,346 @@ a numeric gate. The conflict ruling itself is not bounded.
 **Options:** classify `_kind` from the host plus the final path segment only;
 match the owner table against the parsed hostname exactly, as `DOMAIN_TIERS`
 already does; make `by_ref` exact.
+
+---
+
+# Third pass — defects found while building the UI/UX redesign (2026-08-23)
+
+The first two passes were read-only forensic audits. This set is different in
+kind: it came from **implementing a specification against the running system**,
+which meant driving paths the audits had read but never executed. All seven
+are fixed and carry a regression test; the disposition is in `REMEDIATION.md`.
+
+The pattern the audits named — *a control defends the path its author was
+thinking about, and does not know about the other paths* — held again in five
+of the seven. Two are new shapes: **two readers of the same file that disagree**,
+and **documentation that promises a command the CLI refuses**.
+
+---
+
+## U1 — A fleet home that was never bootstrapped crashes expert creation
+
+**Severity:** P1 (a stated guarantee does not hold: `fleet.py create --home
+<dir>` is documented and does not work).
+
+`fleet.create()` copies `home/prompts/` into every new expert. Only
+`bootstrap.py` calls `bootstrap.seed_home()` first. There are four callers:
+
+| Caller | Seeds the home first? |
+|---|---|
+| `bootstrap.py` | yes |
+| `fleet.py` CLI | **no** |
+| `quick.py` | **no** |
+| `ui.py` POST `/api/experts` | **no** |
+
+**Observed:** `python fleet.py create "X" --home <fresh dir>` →
+`FileNotFoundError` from `shutil.copytree`, with a full traceback. The panel's
+create route turned the same exception into HTTP 500.
+
+**Second failure in the same code path:** a home whose parent is a file (a
+plausible typo) raised `FileNotFoundError` from `os.makedirs` rather than
+refusing with a sentence.
+
+**Fixed by** moving the seeding into `fleet.create()` — the single gateway all
+four callers already pass through — and catching `OSError` around both
+`makedirs` and `seed_home`. `bootstrap.seed_home` stays the one implementation
+of what a fleet home contains.
+
+**Test:** `tests/test_invariants.py::check_expert_birth_paths` enumerates the
+callers from the source tree, exercises the gateway on an unprepared
+directory, proves seeding is idempotent and does not clobber owner edits, runs
+the CLI from an unrelated working directory, and requires a sentence rather
+than a traceback for an impossible home.
+
+---
+
+## U2 — An expert can pass an exam and not know it
+
+**Severity:** P1 (the agent's own self-description, injected into every context
+window, contradicts the loop's own completion check).
+
+Two readers of `courses/<c>/exam-results.md` disagreed about its format:
+
+| Reader | Pattern | Matches `SCORE: 95`? |
+|---|---|---|
+| `loop.Agent.course_status` | `^\s*SCORE:\s*(\d+)` | yes |
+| `selfmodel._exam` | `(\d{1,3})\s*%` | **no** |
+
+**Consequence:** a course could pass at 95, `loop` would agree it was
+complete, and the self-model block — the text the agent reads about itself on
+every task, and the number the panel prints — reported no score at all. An
+expert describing itself as never examined, having been examined and passed.
+
+**Fixed by** reading the canonical line first and keeping the percent form as a
+fallback for anything already written that way.
+
+**Test:** `tests/test_invariants.py::check_exam_readers_agree` writes the file
+in four recorded formats and requires the loop, the self-model and the rendered
+context block to return the same number for each.
+
+---
+
+## U3 — Every directory in the file tree was a clickable file
+
+**Severity:** P3 (correctness and clarity; nothing unsafe).
+
+`expert_tree()` sends `{"p": …, "d": true, "s": …}`. The panel read `e.dir`,
+which is always `undefined`, so every folder rendered as a file. Clicking one
+answered *"approvals is a directory"*.
+
+**Fixed by** one shared `fileTreeHtml()` used by both the Skills tab and the
+new Advanced → Raw files pane, accepting either spelling and showing file
+sizes. Two copies of that markup would have drifted the first time a class
+changed, and the second copy is the one nobody would remember to fix.
+
+**Test:** `tests/test_ux.py::check_advanced_still_reachable` asserts the field
+read and that the API sends both directories and files.
+
+---
+
+## U4 — A GPU worker could not be chosen for GPU work
+
+**Severity:** P2 (a real defect with bounded blast radius: the work is refused,
+not misrouted).
+
+`workers.choose` matched a task's requirements against a machine's *typed*
+capability list only. A machine registered `--kind gpu-worker` with
+`--can cuda` was refused for "fine-tune on the gpu", because nobody had also
+typed `gpu`. The registry already knew what the machine was.
+
+**Fixed by** giving every `KINDS` entry an `implies` tuple and one
+`capabilities_of(row)` helper used by both `requirements()` and `choose()`.
+Implied capabilities are reported separately from declared ones, so
+*"why does it claim to do that?"* has an answer. Implying still cannot paper
+over a capability that is genuinely absent.
+
+**Test:** `tests/test_workers.py::check_kind_implies_capability` walks the
+whole `KINDS` table, registers a bare instance of each kind and requires it to
+be routable for what that kind *is*.
+
+---
+
+## U5 — The worker-routing endpoint returned an object where the panel showed a sentence
+
+**Severity:** P3.
+
+`workers.choose` returns `(worker, {chosen, needed, considered, why})`. The
+panel rendered `r.why` directly, producing `[object Object]` — the one string
+UI spec §7 says must be readable.
+
+**Fixed by** flattening at the endpoint: the sentence, the requirements, and
+what each rejected computer could not do. A routing decision nobody can
+disagree with is one nobody can correct.
+
+**Test:** `tests/test_ux.py::check_worker_connection`.
+
+---
+
+## U6 — `acquire.py --help` could not print on a Windows console
+
+**Severity:** P3 (the module is unusable from the CLI on the platform this
+runs on).
+
+The module docstring contains `→`. `argparse` writes the description through
+`sys.stdout`, which defaults to cp1252 on a Windows console, so
+`python acquire.py --help` died with `UnicodeEncodeError` before printing a
+word. `chief.py`, `mission.py` and `ui.py` already carried the
+`sys.stdout.reconfigure` guard; `acquire.py` did not.
+
+**Fixed by** adding the same guard.
+
+**Test:** `tests/test_invariants.py::check_documented_cli_exists` runs
+`--help` for every module the manual names, with `PYTHONUTF8=0`.
+
+---
+
+## U7 — The manual promised eight commands the CLI refuses
+
+**Severity:** P2 (a documented recovery path that does not exist is worse than
+none, because it is consulted at the moment it is needed).
+
+`MANUAL.md` named `acquire.py search/inspect/install/test`,
+`mission.py meet/block`, `training.py capture/rollback` and
+`proof.py refresh`. The library functions existed; the CLI had never been
+given them, and `proof.py` takes `--refresh` as a flag.
+
+**Fixed by** adding seven subcommands that genuinely belong on a terminal
+(`acquire search/inspect/install/test`, `mission meet/block/close`,
+`training rollback`), and correcting the two manual entries that were simply
+wrong (`training capture` is done by the loop, not by hand; `proof --refresh`
+is a flag). Adding the commands also surfaced a smaller defect: three of
+`acquire.py`'s existing branches caught `Refused` and three did not, so half
+its commands refused with a sentence and half with a traceback — the module's
+own CLI failing the standard the module enforces. There is now one refusal
+path for the whole CLI.
+
+**Test:** `tests/test_invariants.py::check_documented_cli_exists` parses every
+`` `python <mod>.py <sub>` `` in the manual — including bracketed optional
+subcommands, which the first version of the check skipped and which is exactly
+how `proof.py [refresh]` slipped past — and requires argparse to accept each.
+
+---
+
+## U8 — Two test files shared one sandbox directory
+
+**Severity:** P2 (an intermittent red suite that points at the wrong test).
+
+`test_guardrails.py` and `test_secrets.py` both called
+`make_sandbox("secrets")`, so they shared one directory under the suite's temp
+root. Each passed alone. In the suite the second to run raced the first's
+leftover directory and died with `FileExistsError` — and only once the suite
+had grown long enough to shift the timing.
+
+**Fixed by** renaming one, and by asserting the property rather than the
+incident.
+
+**Test:** `tests/test_invariants.py::check_sandbox_names_are_unique` parses
+every test file with `ast` (not a regex — this very docstring names the call,
+and a checker that cannot tell code from prose reports itself) and requires
+each of the 137 sandbox names to be claimed by exactly one file.
+
+---
+
+## U9 — The panel scrolled sideways on a phone, and two tables had no scroll container
+
+**Severity:** P3 (a phone is where §14 says supervision happens, and sideways
+scrolling makes a status page unusable there).
+
+Driven at 375 px, two pre-existing layout defects appeared:
+
+1. **A CSS grid item refuses to shrink below its widest child.** `.wswrap`
+   collapses to one column on a phone, but the column kept `min-width:auto`,
+   so the Performance tab's wide table pushed the whole document sideways by
+   81 px. The table's own `.tablewrap` could not help: the thing that would
+   not narrow was the *column*, not the table.
+2. **Two tables had no scroll container at all** — the harness manifest's
+   budgets table, and `taskTable()`, which two call sites wrapped and the
+   helper itself did not.
+
+**Fixed by** `.wswrap>*,.mindwrap>*{min-width:0}`, a `.tablewrap` on the
+budgets table, and moving the wrapper *into* `taskTable()` so it is correct
+wherever it is dropped rather than only where a caller remembered — the same
+gateway argument as U1, applied to markup.
+
+**Test:** `tests/test_ux.py::check_mobile_layout` asserts the shrink rule, the
+bottom-bar rules, the 40 px target rule, and that **every** `<table>` in the
+page has a scroll container within 220 characters before it. That last check
+is what found the two bare tables; it was written for the phone and caught a
+defect on every screen size.
+
+---
+
+## U10 — `org.check` was called by nothing but `org.py` and its own test
+
+**Severity:** P1 (a stated invariant does not hold, and the control it names
+is an authorization control).
+
+`org.py`'s own docstring says:
+
+> `check()` is the single question every mutating path asks: may THIS user do
+> THIS thing to THIS object?
+
+**Established by grep, in one line:**
+
+```
+$ grep -rn "org.check" --include=*.py . | grep -v tests/
+./org.py:...        # its own definition
+```
+
+Nothing else called it. Not `ui.py` — which is the *main* mutating path, with
+17 POST routes, a PUT and a DELETE. The reason is structural rather than an
+oversight: the panel authenticated with **one shared token**, so it had no way
+to know who was calling, and a permission check needs a subject.
+
+The consequence is not that anything was exploitable on a solo install — with
+no organization `org.check` returns True by design, which is correct. It is
+that **creating an organization did almost nothing**. Roles were enforced on
+the command line and recorded in an audit trail whose author came from a
+request field, so anyone with the panel token had every permission regardless
+of the role they had been given, and could attribute their actions to somebody
+else by typing their address.
+
+This is the audits' own central pattern, in the one place it is most
+expensive: *a control defends the path its author was thinking about, and does
+not know about the other path.*
+
+**Fixed by**
+
+1. **Personal bearer tokens** (`org.issue_token` / `org.user_for_token`).
+   The value is returned once and never stored — only its SHA-256 — and the
+   comparison is constant-time, because the alternative is a timing oracle
+   over a credential and "nobody would bother locally" is how that argument
+   always starts.
+2. **`_authed` resolves the token to a member** before every request, and
+   `_may_write` looks up the permission in a **declared table**. A route with
+   no entry falls through to `create_agent`, so a route added tomorrow is
+   refused for a viewer rather than waved through.
+3. **The audit records the resolved actor**, never one the body claims.
+4. **`Denied` maps to 403**, not 500: an authorisation refusal is the system
+   working, and reporting it as a server fault sends the reader to the wrong
+   place.
+
+**And the trap that would have swallowed the fix:** with an organization but
+**no** panel token, `_authed` returns early because there is nothing to check,
+so every caller resolves to the owner and the whole model governs nothing. A
+fleet that belongs to an organization now auto-enables a token on start-up —
+for the same reason an exposed one does — and says why.
+
+**Still true, and stated as a limit:** whoever holds the token the panel was
+*started* with resolves to the owner. That is not a hole so much as an
+identity — the master token already implies control of the process — and
+`REFERENCE.md` §20 now says so.
+
+**Also fixed in passing:** `except KeyError -> 404 "unknown expert"` caught a
+**missing request field** as well, so a POST that forgot `role` answered
+"unknown expert" about an expert that plainly existed. `NoSuchExpert` is now a
+distinct type, and a missing field is a 400 that names the field.
+
+**Test:** `tests/test_rbac.py` — solo install unaffected; tokens personal and
+unstored; a viewer refused all 8 write routes with the reason; the
+operator/builder boundaries in both directions; **every** POST route in
+`ui.py` gated (by table or by a strict default); and a request claiming a
+different author recorded against the token's real owner.
+
+---
+
+## U11 — two metrics that measured something other than their name
+
+**Severity:** P2 (a number that is wrong is worse than a number that is
+missing, because it is acted on).
+
+Both were introduced by this pass, in `metrics.py`, and both were caught by
+running the module against real data rather than by reading it — which is the
+same lesson as `U1`–`U10`, applied to code written an hour earlier.
+
+**1. Two rates that could sum past 100%.** Verified success came from
+`memory.competence`, which counts TASKS. False success came from
+`memory.failure_summary`, which counts EVENTS. A task retried twice therefore
+filed three false-success records against one competence attempt, and the
+demo fleet reported *67% verified success* alongside *100% false success*.
+
+The module's own docstring says "nothing is computed twice… two counts of the
+same thing eventually disagree". It was doing exactly that on its second and
+third lines. Both rates now come from one pass over `state.json`: verified
+success over gated tasks, false success over finish-*claims* — two honest
+units, derived together, neither able to exceed one.
+
+**2. An autonomy ratio that was really a success rate.** It read the task
+record for a marker of having been blocked. There is none: a task that
+stopped, was answered by a person and then finished is byte-for-byte
+indistinguishable from one that never stopped. So the metric counted
+`status == "done"` and reported it as autonomy.
+
+It now reads the log, where `approval_required` and `task_unblocked` are
+written at the moment a person was actually needed.
+
+**Test:** `tests/test_metrics.py` — the reliability check asserts that neither
+numerator can exceed its denominator and that both come from `state.json`;
+the autonomy check **appends one `approval_required` event and requires the
+number to move**, which is the only way to prove a metric is reading anything
+at all.
+
+**Why this is in the audit record at all.** Because the alternative is a
+changelog that lists ten defects found in somebody else's code and none in the
+code written to fix them. Both of these shipped as green tests for the length
+of an afternoon.

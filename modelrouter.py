@@ -222,13 +222,136 @@ def choose(agent, role):
             "routed": False, "rule": "static-fallback",
             "why": "no candidate has earned the bar yet: " + "; ".join(rejected),
             "rejected": rejected}
-    scored.sort()
+    # §11's policy decides the TIE-BREAK among models that already cleared the
+    # bar. "Cheapest that works" and "the one that works best" are different
+    # answers to the same evidence, and the owner is entitled to say which.
+    prefer = str(rc.get("route_prefer", "cost")).lower()
+    if prefer == "quality":
+        scored.sort(key=lambda t: (-t[4], t[0]))
+    else:
+        scored.sort()
     cost, prov, model, key, rate, n = scored[0]
     return prov, model, {
         "routed": True, "rule": "auto", "chosen": key, "cost": cost,
-        "why": (f"cheapest model clearing {min_pass:.0%} on this expert's own "
-                f"gated work: {key} at {rate:.0%} over {n} run(s)"),
+        "prefer": prefer,
+        "why": ((f"best verified pass rate clearing {min_pass:.0%} on this "
+                 f"expert's own gated work: {key} at {rate:.0%} over "
+                 f"{n} run(s)") if prefer == "quality" else
+                (f"cheapest model clearing {min_pass:.0%} on this expert's own "
+                 f"gated work: {key} at {rate:.0%} over {n} run(s)")),
         "rejected": rejected}
+
+
+# ---------------------------------------------------------------- policies
+# UI spec §11: "Move Models out of the primary navigation. Normal user chooses
+# policy: Cheapest, Balanced, Highest Quality, or Custom budget/risk profile."
+#
+# A policy is not a new mechanism. It is a NAME for the two numbers this
+# router already reads — the bar a model must clear, and what breaks the tie
+# among the models that clear it. Inventing a parallel decision path would
+# mean two things that pick models, and eventually they would disagree.
+POLICIES = {
+    "cheapest": {
+        "min_pass": 0.50, "prefer": "cost",
+        "label": "Cheapest",
+        "means": "the least expensive model that still passes half its gates",
+        "costs_you": "more retries, so the saving is smaller than it looks",
+    },
+    "balanced": {
+        "min_pass": 0.80, "prefer": "cost",
+        "label": "Balanced",
+        "means": "the cheapest model that clears a high bar on this expert's "
+                 "own gated work",
+        "costs_you": "nothing obvious — this is the default for a reason",
+    },
+    "quality": {
+        "min_pass": 0.90, "prefer": "quality",
+        "label": "Highest quality",
+        "means": "the model with the best verified pass rate, cost second",
+        "costs_you": "money; use it where being wrong is expensive",
+    },
+}
+
+
+def policy_of(root):
+    """Which named policy this expert's settings currently correspond to.
+
+    Derived by comparing the settings to the presets rather than stored, for
+    the same reason proof levels are derived: a stored label and the settings
+    it claims to describe drift apart, and then the label is a lie.
+    """
+    cfg = _load_cfg(root)
+    roles = cfg.get("roles", {})
+    on_auto = [r for r in roles.values()
+               if str(r.get("route", "")).lower() == "auto"]
+    if not on_auto:
+        return {"policy": "manual", "label": "Pinned models",
+                "means": "each role uses exactly the model you set; nothing "
+                         "is chosen automatically",
+                "roles_on_auto": 0, "roles_total": len(roles)}
+    bars = {float(r.get("route_min_pass", DEFAULT_MIN_PASS)) for r in on_auto}
+    prefs = {str(r.get("route_prefer", "cost")).lower() for r in on_auto}
+    for name, p in POLICIES.items():
+        if bars == {p["min_pass"]} and prefs == {p["prefer"]}:
+            return {"policy": name, **p, "roles_on_auto": len(on_auto),
+                    "roles_total": len(roles)}
+    say_bar = " or ".join(f"{b:.0%}" for b in sorted(bars))
+    say_pref = " and ".join("cheapest that clears it" if x == "cost"
+                            else "best that clears it" for x in sorted(prefs))
+    return {"policy": "custom", "label": "Custom",
+            "means": (f"a {say_bar} verified bar, then {say_pref} — your own "
+                      f"setting, not one of the presets"),
+            "min_pass": min(bars), "prefer": sorted(prefs)[0],
+            "roles_on_auto": len(on_auto), "roles_total": len(roles)}
+
+
+def set_policy(root, name, min_pass=None, prefer=None, roles=None):
+    """Apply a policy to every auto-routable role, or to the named ones.
+
+    Returns what changed, per role, because a settings write nobody can see
+    the effect of is a settings write nobody trusts.
+    """
+    import providers as P
+    if name in POLICIES:
+        bar = POLICIES[name]["min_pass"]
+        pref = POLICIES[name]["prefer"]
+    elif name == "manual":
+        # pin every role to exactly the model it is set to. The branch below
+        # is what does the work; these values are only what gets reported.
+        bar, pref = DEFAULT_MIN_PASS, "cost"
+    elif name == "custom":
+        if min_pass is None:
+            raise ValueError("a custom policy needs its own bar (min_pass)")
+        bar, pref = float(min_pass), str(prefer or "cost").lower()
+        if not 0.0 <= bar <= 1.0:
+            raise ValueError("the bar is a pass RATE between 0 and 1")
+        if pref not in ("cost", "quality"):
+            raise ValueError("prefer must be 'cost' or 'quality'")
+    else:
+        raise ValueError(f"unknown policy {name!r}; the presets are: "
+                         + ", ".join(sorted(POLICIES)) + ", custom, manual")
+    cfg = _load_cfg(root)
+    changed = {}
+    for role, rc in cfg.get("roles", {}).items():
+        if roles and role not in roles:
+            continue
+        if name == "manual":
+            was, rc["route"] = rc.get("route"), "static"
+        else:
+            was = (rc.get("route"), rc.get("route_min_pass"),
+                   rc.get("route_prefer"))
+            rc["route"] = "auto"
+            rc["route_min_pass"] = bar
+            rc["route_prefer"] = pref
+        changed[role] = {"was": was, "now": (rc.get("route"), bar, pref)}
+    P.save(root, cfg)
+    return {"policy": name, "min_pass": bar, "prefer": pref,
+            "roles": changed}
+
+
+def _load_cfg(root):
+    import providers as P
+    return P.load(root)
 
 
 def explain(agent, role):

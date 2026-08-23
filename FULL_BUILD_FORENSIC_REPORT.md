@@ -844,6 +844,15 @@ Stated plainly, because a report that omits its own blind spots is not an audit.
 > fixed**, each with a regression test; the 2 marked prompt/config-enforced are
 > now mechanically enforced. `REMEDIATION.md` maps every row to its fix, and
 > `tests/test_hardening.py` + `tests/test_csrf.py` keep them closed.
+>
+> **A twenty-first invariant, missed by this matrix.** The rows below cover
+> execution, credentials, filesystem containment, effects, exams, locks and
+> memory routing. They do not cover **authorization** — and §10 records why
+> that gap mattered: `org.check`, the control this platform's own module calls
+> "the single question every mutating path asks", was called by nothing but
+> `org.py` and its own test. The matrix enumerated the paths to every control
+> it thought of. The control it did not think of is the one that had no
+> callers at all. `tests/test_rbac.py` now enumerates that one too.
 
 For every major invariant: all code paths that can reach the protected
 operation, whether the primary path is defended, whether the alternates are,
@@ -892,3 +901,121 @@ was commissioned to hunt, now confirmed across nine subsystems.
 | `ARCHITECTURE_DECISIONS.md` | The decisions the code embodies, with the alternative rejected and the cost paid |
 | `GAPS_RISKS_AND_UNFINISHED.md` | Every finding, ranked P1–P4, with reproduction and options |
 | `SYSTEM_DIAGRAMS.md` | Execution, memory, governance, and trust-boundary diagrams |
+| `REMEDIATION.md` | What was done about every finding, the test that holds it closed, and the residual risk |
+| `CHANGELOG.md` | What shipped, in the order it shipped, with the defects each release found |
+
+---
+
+# 10. Third pass — an audit by construction (2026-08-23)
+
+Sections 1–9 are two **read-only** passes: I read the code and reported what it
+does. This section reports a third pass of a different kind. I was given a
+UI/UX product specification written by somebody else and asked to build it end
+to end, which meant **executing** paths the first two passes had only read.
+
+That difference is the finding. Eleven defects fell out of it — `U1`–`U11` in
+`GAPS_RISKS_AND_UNFINISHED.md`, one of them a P1 — and **not one of them was
+visible to reading**. Each needed a path to actually be taken.
+
+## 10.1 What building found that reading did not
+
+| # | Defect | Why reading missed it |
+|---|---|---|
+| U1 | `fleet.create` crashes on a home that was never bootstrapped | The code is correct in isolation. The defect is the *absence* of a call in three of four callers, which reads as nothing at all |
+| U2 | Two readers of `exam-results.md` use different regexes | Both regexes are reasonable. Only running them against the same file shows they disagree |
+| U3 | Every folder in the file tree was a clickable file | `e.dir` is plausible-looking JavaScript. The API sends `d`. Nothing is wrong on either side of the line |
+| U4 | A `gpu-worker` could not be chosen for GPU work | The matcher is exactly what its docstring says. The gap is between the registry's knowledge and the matcher's inputs |
+| U5 | `[object Object]` where a sentence belonged | A return type mismatch across a module boundary that both sides document correctly |
+| U6 | `acquire.py --help` crashed on a Windows console | Requires running it on a Windows console |
+| U7 | The manual promised eight commands the CLI refuses | Requires typing them |
+| U8 | Two test files shared a sandbox directory | Both files are individually correct; the collision is a property of the *set* |
+| U9 | The panel scrolled sideways at 375 px | Requires a browser at 375 px |
+| **U10** | **`org.check` was called by nothing but `org.py` and its own test** | **A one-line grep — which reading should have run and did not** |
+| U11 | two metrics measured something other than their name | Written during this pass. Both read plausibly and both were wrong; only running them against real data showed it |
+
+U10 is the one worth dwelling on. It was findable by reading, by exactly the
+technique the second pass used for execution, credentials and filesystem paths:
+*enumerate the callers of the control*. I applied that to five subsystems and
+did not apply it to the sixth. The reason is instructive: `org.py` is well
+written, `test_org.py` is thorough, and both are about a feature (multi-user
+RBAC) that a solo installation does not exercise — so nothing ever *failed*
+in a way that pointed at it.
+
+**A control nobody calls fails silently and permanently, and the better it is
+written the more convincing the silence.**
+
+## 10.2 The one-line evidence
+
+```
+$ grep -rn "org.check" --include=*.py . | grep -v tests/
+./org.py:...        # its own definition
+```
+
+`ui.py` — 17 POST routes, one PUT, one DELETE — appears nowhere. The panel
+authenticated with a single shared token, so it had no subject to check even if
+it had wanted to. Creating an organization therefore configured a permission
+model that governed the command line and nothing else, while the audit trail
+recorded whichever author the request body claimed.
+
+## 10.3 What was done about it
+
+Each fix moved the work to the **gateway every caller already passes through**,
+which is the same move the Five Authorities made in the second pass:
+
+| Defect | Gateway |
+|---|---|
+| U1 | `fleet.create` seeds the home itself |
+| U2 | one canonical format; a test over every recorded spelling |
+| U3 | one `fileTreeHtml()` shared by both panes |
+| U4 | `capabilities_of()` used by `requirements()` and `choose()` alike |
+| U7 | one `try/except Refused` for the whole CLI |
+| U9 | the scroll container moved *into* `taskTable()` |
+| U10 | `_authed` resolves an actor from the credential; `_may_write` reads a declared permission table whose default is strict |
+
+And each is held closed by a test that **enumerates** rather than exemplifies —
+callers of `fleet.create`, readers of `exam-results.md`, entries in `KINDS`,
+POST routes in `ui.py`, sandbox names across 93 test files, subcommands in
+`MANUAL.md`.
+
+## 10.3b The defect this pass introduced, and why it is here
+
+`U11` is two defects in `metrics.py` — code written during this pass, not
+found in the existing build. A verified-success rate and a false-success rate
+computed from different ledgers could sum past 100%; an "autonomy ratio" read
+the task record for a marker that does not exist and silently reported the
+success rate instead.
+
+Both shipped with passing tests for about an hour. Both were caught by running
+the module against a real fleet rather than by reading it — which is the same
+instrument that found the other ten, turned on the newest code in the tree.
+
+It is recorded because the alternative is a forensic report that finds eleven
+faults in somebody else's work and none in its own, and a reader is entitled
+to weigh those differently.
+
+## 10.4 What this pass did NOT establish
+
+Stated plainly, because a third pass that only reports wins is not an audit:
+
+- **No live provider was called.** Still true, still the largest gap.
+- **The UI has never been used by anyone but me.** Spec §17 asks for five
+  people at ≥90% task completion. That did not happen and cannot be simulated.
+- **Accessibility is unaudited** beyond keyboard reachability and target size.
+- **`test_rbac.py` proves authorisation, not authentication.** A bearer token
+  over loopback HTTP: no TLS, no session, no expiry, no rate limit.
+- **The mobile assertions read CSS source, not rendered layout.** The two
+  defects they cover were found in a browser, which no test here runs.
+- **Docker, E2B, MCP and A2A remain unexercised** against anything real.
+
+## 10.5 Verification for this section
+
+`python tests/run_all.py` → **ALL TESTS PASSED**, 93 tests, twice
+consecutively · `python harness.py --check` → exit 0 ·
+`python preflight.py --backups ../fleet-backups` → 0 blockers ·
+`python execution.py --audit` → 0 violations across 69 modules ·
+`python proof.py` → 15/15 capabilities **OFFLINE VERIFIED**, every level
+computed from evidence bound to the current code hash.
+
+The Proof System demonstrated itself twice more during this pass: editing
+seven modules dropped seven capabilities to IMPLEMENTED with nobody deciding
+that, and nothing but re-running the evidence could raise them again.

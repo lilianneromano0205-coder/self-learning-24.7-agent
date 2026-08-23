@@ -124,6 +124,67 @@ SYSTEMS = {
                  "parsed, but no test renders it in a browser. Layout, "
                  "contrast and touch targets are verified by eye, not by CI.",
     },
+    "7. The five authorities": {
+        "what": "one mandatory gateway per kind of power — execution, file, "
+                "credential, model gateway, effect — plus the invariant tests "
+                "that enumerate every caller of each",
+        "tests": ["test_invariants.py"],
+        "blind": "these tests enumerate every path in THIS tree. They cannot "
+                 "see a path added by a plugin, an MCP server or a future "
+                 "module that does not exist yet — which is why the execution "
+                 "audit is a source scan rather than a runtime check, and why "
+                 "it fails on a new raw subprocess call rather than warning.",
+    },
+    "8. Proof, missions and long-horizon work": {
+        "what": "capability proof levels derived from hash-bound evidence; "
+                "the mission contract that survives context resets, restarts "
+                "and model swaps",
+        "tests": ["test_proof.py", "test_mission.py", "test_metrics.py"],
+        "blind": "no mission here has run longer than a test. The contract is "
+                 "proven to survive a simulated reset, not a week of real "
+                 "drift, and no capability has ever been observed above level "
+                 "2 because that needs a real provider. Three of the manual's "
+                 "twelve metrics cannot be computed at all — supervision "
+                 "hours, 90-day retention, and anything that would need a "
+                 "real workload — and `metrics.py` names them rather than "
+                 "approximating them.",
+    },
+    "9. Computers, capability and organization": {
+        "what": "where work runs and why that computer was chosen; how a "
+                "capability is acquired without gaining authority; who may do "
+                "what, and the trail that records it",
+        "tests": ["test_workers.py", "test_acquire.py", "test_org.py",
+                  "test_rbac.py"],
+        "blind": "every worker is a RECORD. Nothing here has started a "
+                 "container, installed a package, or measured a real start-up "
+                 "time — the acquisition ladder is proven to refuse correctly, "
+                 "not to install correctly. And `test_rbac.py` proves "
+                 "AUTHORISATION given an identity; the identity itself is a "
+                 "bearer token over plain HTTP with no TLS, session or expiry.",
+    },
+    "10. Training lab": {
+        "what": "sanitised trajectory export, a deterministic non-overlapping "
+                "split, an immutable verifier, a promotion threshold and a "
+                "mandatory rollback target",
+        "tests": ["test_training.py"],
+        "blind": "this module performs no gradient updates at all, and says "
+                 "so on every export. What is proven is the governance around "
+                 "a training run — nothing here has trained anything, and no "
+                 "reward-hacking suite exists.",
+    },
+    "11. The interface itself": {
+        "what": "the UI/UX specification's own acceptance table: that each "
+                "flow's information is reachable, that the migration moved "
+                "views rather than deleting them, and that no proof level can "
+                "be set by hand",
+        "tests": ["test_ux.py"],
+        "blind": "this proves REACHABILITY, not usability. The spec asks for "
+                 "five people completing five flows at 90%; that has not "
+                 "happened and nothing in a repository can stand in for it. "
+                 "The mobile assertions read CSS source, not rendered layout — "
+                 "the two defects they cover were found in a real browser at "
+                 "375 px, which no test here runs.",
+    },
 }
 GLOBAL_CAVEAT = (
     "Every model call in every test is the scripted mock provider. A green "

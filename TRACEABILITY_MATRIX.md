@@ -208,3 +208,38 @@ closed-book isolation, exactly-once effects, backups-exclude-credentials, and
 panel authorisation. In each case the test exercises the well-defended primary
 path and the defect lives on an alternate path the test never visits — the same
 shape as the product defects themselves.
+
+---
+
+# Third pass — what the new tests establish, and what they do not
+
+Ten defects came out of *building a specification against the running system*
+rather than reading it (`U1`–`U10` in `GAPS_RISKS_AND_UNFINISHED.md`). Each has
+a test. Read the last column first, as with every row above.
+
+| Capability | Test | What it OBSERVED | What it does **not** establish |
+|---|---|---|---|
+| An expert can be created from any caller, on any home | `test_invariants::check_expert_birth_paths` | enumerated the 3 modules that call `fleet.create` from the source tree; created an expert on a never-bootstrapped directory, from the library and from the CLI in an unrelated working directory; proved seeding is idempotent and does not clobber an edited `settings.toml`; proved an impossible home refuses with a sentence | Does not create an expert on a **network** path, a read-only volume, or a path over Windows' 260-character limit — the third of which was hit by hand during this pass and is not covered |
+| Every reader of an exam agrees | `test_invariants::check_exam_readers_agree` | wrote `exam-results.md` in 4 recorded formats and required `loop.course_status`, `selfmodel.study` and the rendered self-model block to return the same score for each | Only covers the score. Verdict, sitting count and the *held-out* flag are read by one reader each, so the same class of disagreement could exist there and this would not see it |
+| A computer's kind implies its capabilities | `test_workers::check_kind_implies_capability` | walked the whole `KINDS` table, registered a bare instance of each kind, and required each to be routable for what that kind is | Every worker is a **record**, not a machine. Nothing here has installed anything, started a container, or measured a real start-up time |
+| The panel enforces roles | `test_rbac.py` | solo install unaffected; 4 personal tokens minted and absent from disk and from the API; a viewer refused all 8 write routes with the reason; operator and builder stopped at their boundaries in both directions; every POST route gated by table or by a strict default; an audit entry recorded against the token's owner rather than the claimed one | **Does not establish authentication.** A bearer token over loopback HTTP with no TLS, no session, no expiry and no rate limit. It establishes *authorisation given an identity*, which is a different property |
+| The UI spec's flows are reachable | `test_ux.py` | for each of §15's 8 flows, that the information the flow needs is reachable — usually in one request | **Does not establish usability.** §17 asks for five people completing five flows at ≥90%. Nothing in a repository can stand in for that, and the reference says so |
+| The panel does not scroll sideways on a phone | `test_ux::check_mobile_layout` | the shrink rule, the bottom-bar rules, the 40 px target rule, and that every one of the 36 `<table>` elements sits in a scroll container | Asserts CSS **source**, not rendered layout. The two defects it was written for were found by driving a real browser at 375 px, which no test here does |
+| Documentation matches the CLI | `test_invariants::check_documented_cli_exists` | parsed every `` `python <mod>.py <sub>` `` in `MANUAL.md`, including bracketed optional ones, and required argparse to accept each; ran every named module's `--help` with `PYTHONUTF8=0` | Checks that a command **parses**, not that it does what the manual says it does. `python org.py token` existing is not the same as it minting a usable token — `test_rbac.py` is what covers that |
+| No two tests share a sandbox | `test_invariants::check_sandbox_names_are_unique` | parsed all 93 test files with `ast` and required each of 138 names to be claimed once | Says nothing about two *processes* running the same test file concurrently, which collides exactly as badly and which happened during this pass |
+
+## What the third pass says about the second pass's own table
+
+The table above this one lists seven tests whose name implied more than they
+covered. Four of those rows are now closed by `test_hardening.py`,
+`test_csrf.py` and `test_invariants.py`. The remaining value of that table is
+its shape, and this pass reproduced it: **`test_org.py` passed throughout while
+the panel enforced none of what it tested.** It exercised `org.check` directly
+and proved the ladder holds — which was true, and which said nothing about
+whether anybody called it.
+
+That is the same failure as `test_lock.py`, one level up. A test that
+exercises a control directly proves the control works. It is silent on whether
+the control is *reachable from the paths that need it*, and silence reads as
+coverage. The answer in both cases was the same: stop testing the control and
+start enumerating its callers.

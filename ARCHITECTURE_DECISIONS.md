@@ -405,3 +405,157 @@ that scores candidates it can never obtain data for.
 That is a much better failure profile than the reverse, and it is why the
 findings in `GAPS_RISKS_AND_UNFINISHED.md` are mostly small, local changes
 rather than redesigns.
+
+---
+
+# Decisions taken while implementing the UI/UX redesign (2026-08-23)
+
+Same rule as every entry above: the decision, the alternative it rejected, and
+**the price it pays**. A decision record without a stated cost is marketing.
+
+---
+
+## ADR-U1 — Navigation follows jobs, and nothing is deleted to achieve it
+
+**Decision.** Six top-level sections named for what a person is trying to do —
+Home, Work, Agents, Resources, Proof, Admin — with every previously-primary
+view **moved** into one of them rather than removed.
+
+**Rejected.** Deleting the views the redesign supersedes. It is the cleaner
+diff and the more confident-looking product.
+
+**Why.** A screen that exists because somebody needed it once will be needed
+again, usually by the person least able to reconstruct it. Memory, Models,
+System and Guide all still render, all still route, and `test_frontend.py`
+asserts both — *and* that each is reachable from a control a person can click,
+because a view reachable only by typing an internal name is deleted in every
+sense that matters.
+
+**Price.** The router carries ten branches where six would do, and every
+moved view needed a `nested` flag so it does not print a second page title.
+Two ways to reach the same screen is a real cost in comprehension; it is
+smaller than the cost of losing one.
+
+---
+
+## ADR-U2 — The creation wizard maps intent to a lane, and names the lane once
+
+**Decision.** Five intent questions ("do you need this working immediately from
+files?") map invisibly onto the five creation lanes. The lane is named exactly
+once, in the review step, as a footnote.
+
+**Rejected.** (a) Removing the lanes and having one creation path. (b) Keeping
+the lane picker as the only entry.
+
+**Why.** The lanes are real: a trained expert and a quick specialist differ in
+what they may honestly claim, and collapsing them would mean claiming the
+higher bar for both. But nobody should have to learn that taxonomy to get
+started. `LANE_STEPS` declares which of the six steps each lane can honour, so
+a lane can never reach a step whose answer nothing consumes — the failure mode
+where a wizard collects an answer and discards it.
+
+**Price.** Two lanes (archetype, team) hand straight off to their existing
+dialogs rather than walking six steps, so the wizard is not uniform. Uniformity
+would have meant ceremony; §4's requirement is that nobody must know the
+taxonomy, not that every path has six steps.
+
+---
+
+## ADR-U3 — A model policy is a name for two numbers, derived rather than stored
+
+**Decision.** Cheapest / Balanced / Highest quality / Custom are names for
+`route_min_pass` and `route_prefer`, and the policy in force is **computed** by
+comparing the settings to the presets.
+
+**Rejected.** Storing the chosen policy name in settings.
+
+**Why.** The same argument as proof levels: a stored label and the settings it
+claims to describe drift apart, and then the label is a lie that looks
+authoritative. Deriving it means editing `route_min_pass` by hand shows up
+immediately as "Custom", which is the truth.
+
+**Price.** Deriving costs a comparison on every read, and a policy whose
+numbers coincidentally match a preset is reported as that preset even if the
+owner set them by hand. That is a small misreading; a stale stored label is a
+large one.
+
+---
+
+## ADR-U4 — `route_prefer` exists, because "cheapest that works" is a choice
+
+**Decision.** The router's tie-break among candidates that clear the bar is
+configurable: cost, or verified pass rate.
+
+**Rejected.** Keeping cost as the only tie-break, on the grounds that the bar
+already encodes quality.
+
+**Why.** It does not. "The cheapest model that clears 80%" and "the model with
+the best rate above 80%" are different answers to the same evidence, and which
+one is right depends on what being wrong costs — which the platform cannot
+know and the owner can.
+
+**Price.** One more setting, and a second sort path to keep correct. Both are
+covered by `test_modelrouter.py`'s existing profile fixtures.
+
+---
+
+## ADR-U5 — Training data carries no percentages
+
+**Decision.** `/api/experts/<s>/training` returns numerators and denominators.
+It computes no ratios, so the page physically cannot render "100% learned".
+
+**Rejected.** Returning a `coverage_pct` and asking the UI to caveat it.
+
+**Why.** §10 says never show a percentage without an explicit denominator. A
+style rule in a template is a rule somebody will violate in a hurry; refusing
+at the source is a rule that cannot be. And 42/42 with 3 unresolved conflicts
+is a sentence somebody can check, which a percentage never is.
+
+**Price.** The panel does arithmetic the API could have done once, and a future
+consumer that genuinely wants a ratio has to compute it — with the denominator
+in hand, which is the point.
+
+---
+
+## ADR-U6 — Every write route's permission is a declared table with a strict default
+
+**Decision.** `POST_PERMISSION` and `ACTION_PERMISSION` name the permission each
+route needs. A route with no entry falls through to `create_agent`, which needs
+builder or above.
+
+**Rejected.** (a) Checking permissions inside each handler. (b) Defaulting an
+unlisted route to allow.
+
+**Why.** Checks scattered through handlers make "which routes are gated?"
+unanswerable without reading all of them, which is how a route ends up ungated
+by omission — the exact shape of every defect this audit has found. And a
+permissive default means the failure mode of forgetting is *silence*, which is
+the one failure mode a security control must not have.
+
+**Price.** A route that genuinely should be public — `/api/workers/choose` is
+a read dressed as a POST — must be listed, or a viewer cannot call it. That is
+the correct direction to be wrong in.
+
+---
+
+## ADR-U7 — Members hold personal bearer tokens; the master token stays a master key
+
+**Decision.** `org.issue_token` mints a per-member token, stores only its
+SHA-256, returns the plaintext once, and compares in constant time. Whoever
+holds the token the panel was *started* with resolves to the owner.
+
+**Rejected.** (a) Passwords and sessions. (b) Trusting an actor named in the
+request body. (c) Pretending the master token is just another credential.
+
+**Why.** (a) is a real authentication system, which needs TLS, hashing
+parameters, session invalidation and rate limiting — none of which belongs in a
+stdlib-only local platform, and all of which would be done badly here. (b) is
+what the code did before, and an audit trail whose author is a request field
+records what the caller typed. (c) would be a lie: the master token already
+implies control of the process, so treating it as a limited credential would
+create a boundary that does not exist.
+
+**Price.** No expiry, no rotation reminder, no rate limit on token guessing —
+32 bytes of entropy is the whole defence. On a loopback HTTP server that is
+proportionate; behind anything public it is not, and `REFERENCE.md` §20 says so
+in those words.

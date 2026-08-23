@@ -462,3 +462,106 @@ flowchart TD
 One hypothesis in this set was mine and wrong: I flagged `ui.html:1305-07` as
 an unescaped interpolation and found the call site escapes it one level up
 (`${esc(when(x.when))}`). Recorded as a falsified hypothesis, not a finding.
+
+---
+
+## 11. The panel's request path, after the third pass
+
+Diagram 7 (Control plane) showed the panel's routing. What it did not show —
+because it did not exist — is **who is asking**. `org.py` claimed `check()` was
+"the single question every mutating path asks"; the panel asked it nowhere,
+because a shared token gave it no subject to check (`U10`).
+
+```mermaid
+flowchart TD
+    REQ["HTTP request"] --> PAGE{"path starts /api?"}
+    PAGE -->|no| SERVE["serve ui.html<br/>(public: it contains nothing)"]
+    PAGE -->|yes| CSRF{"mutating verb?"}
+
+    CSRF -->|"GET"| RESOLVE
+    CSRF -->|"POST/PUT/DELETE"| SO{"_same_origin<br/>Sec-Fetch-Site + Origin vs Host"}
+    SO -->|"cross-origin"| R403["403 CSRF refused<br/>(token or no token)"]
+    SO -->|"same-origin"| RESOLVE
+
+    RESOLVE["_resolve_actor(presented token)"] --> WHO{"matches a member's<br/>token_sha256?"}
+    WHO -->|yes| MEMBER["actor = that member<br/>(constant-time compare)"]
+    WHO -->|"no, but it is the master token"| OWNERT["actor = the owner<br/>— the master token already<br/>implies control of the process"]
+    WHO -->|"no org exists"| SOLO["actor = 'owner'<br/>org.check returns True for everything"]
+
+    MEMBER --> AUTHZ
+    OWNERT --> AUTHZ
+    SOLO --> AUTHZ
+
+    AUTHZ{"mutating?"} -->|no| HANDLER
+    AUTHZ -->|"POST"| TBL["_may_write:<br/>POST_PERMISSION[path]<br/>or ACTION_PERMISSION[action]<br/>or DEFAULT_WRITE_PERMISSION"]
+    AUTHZ -->|"PUT"| P1["_may('create_agent')"]
+    AUTHZ -->|"DELETE"| P2["_may('delete_agent')"]
+
+    TBL --> CHK
+    P1 --> CHK
+    P2 --> CHK
+    CHK["org.check(home, actor, permission)"] --> OK{"allowed?"}
+    OK -->|no| R403B["403 with the reason:<br/>actor, its role, the role required,<br/>and what to do about it"]
+    OK -->|yes| HANDLER["the handler"]
+
+    HANDLER --> AUD["org.audit(actor, action, object)<br/>— the TOKEN's owner,<br/>never one the body claimed"]
+
+    style R403 fill:#3A1B14,stroke:#D97A66
+    style R403B fill:#3A1B14,stroke:#D97A66
+    style SOLO fill:#14301F,stroke:#5FB877
+    style AUD fill:#123335,stroke:#5FB8BE
+```
+
+**What this diagram is honest about.** The green box is the one most
+installations are in, and it is unchanged: with no organization, every check
+returns True and a solo owner is never asked for permission. The `OWNERT` box
+is a deliberate hole with a name — the master token is a master key, and
+pretending otherwise would draw a boundary that does not exist.
+
+**What it still does not show, because it is not there.** No TLS. No session.
+No expiry, rotation or rate limit on a token. This is authorisation given an
+identity; it is not an authentication system, and `REFERENCE.md` §20 items 13
+and 14 say so in those words.
+
+---
+
+## 12. Where the third pass's defects lived
+
+Every one of them is the same shape as diagram 9's secondary-path map, in
+places that map did not reach.
+
+```mermaid
+flowchart LR
+    subgraph OK["the path the author was thinking about"]
+        A1["bootstrap.py<br/>seeds the home,<br/>then creates"] --> A2["fleet.create"]
+        B1["loop.course_status<br/>reads SCORE:"] --> B2["exam-results.md"]
+        C1["org.py CLI<br/>asks org.check"] --> C2["org.check"]
+        D1["MANUAL.md<br/>documents a command"] --> D2["the reader tries it"]
+    end
+
+    subgraph GONE["the path nobody checked"]
+        A3["fleet.py CLI"] -.->|"U1: crash"| A2
+        A4["quick.py"] -.->|"U1"| A2
+        A5["ui.py POST /api/experts"] -.->|"U1: 500"| A2
+        B3["selfmodel._exam<br/>reads a percent SIGN"] -.->|"U2: no score"| B2
+        C3["ui.py — 17 POST routes,<br/>a PUT and a DELETE"] -.->|"U10: never asked"| C2
+        D3["argparse"] -.->|"U7: invalid choice"| D2
+    end
+
+    style GONE fill:#3A1B14,stroke:#D97A66
+    style OK fill:#14301F,stroke:#5FB877
+```
+
+The fix in every case was the same move the Five Authorities made: put the work
+**at the gateway all callers already pass through**, and write a test that
+enumerates the callers rather than exercising one of them.
+
+| Defect | The gateway it moved to |
+|---|---|
+| U1 | `fleet.create` seeds the home itself |
+| U2 | one canonical format, and a test over every recorded spelling |
+| U3 | one `fileTreeHtml()` shared by both panes |
+| U4 | `capabilities_of()` used by both `requirements()` and `choose()` |
+| U7 | one `try/except Refused` for `acquire.py`'s whole CLI |
+| U9 | the scroll container moved **into** `taskTable()` |
+| U10 | `_authed` resolves an actor; `_may_write` reads a declared table |

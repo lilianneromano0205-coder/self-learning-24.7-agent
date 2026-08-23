@@ -1,6 +1,6 @@
 # Evidence — why we believe this works
 
-Generated 2026-08-23T00:37:21 from an actual suite run: **83/83 tests passed**, **341 observations** recorded.
+Generated 2026-08-23T13:49:48 from an actual suite run: **93/93 tests passed**, **422 observations** recorded.
 
 Each test below prints its own sentence describing what it proved; those sentences are quoted verbatim, not summarised. Every system also carries a **blind spot** — what these tests do not cover.
 
@@ -15,7 +15,12 @@ Each test below prints its own sentence describing what it proved; those sentenc
 | 3. Work systems | **proven** | 15/15 | 59 |
 | 4. Memory institution | **proven** | 13/13 | 49 |
 | 5. Improvement & governance | **proven** | 8/8 | 33 |
-| 6. Control plane & interop | **proven** | 18/18 | 98 |
+| 6. Control plane & interop | **proven** | 18/18 | 99 |
+| 7. The five authorities | **proven** | 1/1 | 12 |
+| 8. Proof, missions and long-horizon work | **proven** | 3/3 | 23 |
+| 9. Computers, capability and organization | **proven** | 4/4 | 29 |
+| 10. Training lab | **proven** | 1/1 | 6 |
+| 11. The interface itself | **proven** | 1/1 | 10 |
 
 ## 1. Harness & loop
 
@@ -96,9 +101,9 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_candidates.py` **[promote]** the winning attempt's bytes were put back and every attempt kept its own score on disk
 - `test_candidates.py` **[adaptive]** one attempt until something fails, then 3, then 5 — capped by the owner's setting and switchable off
 - `test_candidates.py` **[explain]** the winner is reported with the reason every loser lost
-- `test_retention.py` **[bounded]** 300 tasks done, hot queue holds 40 finished (60 KB); queued and blocked work untouched
+- `test_retention.py` **[bounded]** 300 tasks done, hot queue holds 40 finished (62 KB); queued and blocked work untouched
 - `test_retention.py` **[lossless]** all 302 tasks accounted for — 260 archived, every field intact and findable by id
-- `test_retention.py` **[flat]** persist cost 12 ms -> 16 ms after 400 more tasks (was 185 ms at 1500 before retention)
+- `test_retention.py` **[flat]** persist cost 11 ms -> 14 ms after 400 more tasks (was 185 ms at 1500 before retention)
 - `test_retention.py` **[context]** finished transcripts tidied into contexts/archive/, the verbatim never-lose tier left in place and still recallable
 - `test_retention.py` **[heartbeat]** the loop pulses with its current task; a stale pulse is what separates 'wedged' from 'idle'
 - `test_context.py` **[manifest]** the compiled window names every source it used and the files inside it; the transcript matches the manifest
@@ -329,9 +334,9 @@ Each test below prints its own sentence describing what it proved; those sentenc
 
 *panel, live events, cards, chief, doctor, preflight, backup, providers, MCP, A2A federation, traces*
 
-**Verdict: proven** — 18 of 18 declared tests ran and passed, producing 98 observations.
+**Verdict: proven** — 18 of 18 declared tests ran and passed, producing 99 observations.
 
-<details><summary>What the tests observed (98)</summary>
+<details><summary>What the tests observed (99)</summary>
 
 - `test_ui.py` **[up]** panel serving on 127.0.0.1, empty fleet listed
 - `test_ui.py` **[create]** one click -> expert with its own identity and memory
@@ -351,8 +356,8 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_csrf.py` **[gates]** a named gate becomes the command; a traversing parameter inside one is still refused
 - `test_csrf.py` **[catalogue]** GET /api/gates lists what a caller may ask for
 - `test_frontend.py` **[syntax]** the page's JavaScript parses under node --check
-- `test_frontend.py` **[page]** ui.html serves 7 sections, calls every endpoint incl. memory/retired/history, defines both themes
-- `test_frontend.py` **[serve]** page served from ui.html (168823 bytes)
+- `test_frontend.py` **[page]** the six job-shaped sections each state their purpose and route to a renderer; guide/memory/models/system were MOVED, not deleted, and each is still reachable from a clickable control; every endpoint the page names exists; both themes defined
+- `test_frontend.py` **[serve]** page served from ui.html (274949 bytes)
 - `test_frontend.py` **[fresh]** a newly created expert answers on all six read endpoints, no 500s
 - `test_frontend.py` **[live]** frontend edits appear on reload with no server restart
 - `test_panel_v2.py` **[identity]** the owner rewrote who this agent is; the previous version was kept and the new words were in the next window
@@ -412,6 +417,7 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_backup.py` **[opt-in]** --with-logs adds the audit trail and still excludes keys
 - `test_backup.py` **[integrity]** every file is checksummed, and a single substituted byte makes the archive report itself DAMAGED
 - `test_backup.py` **[restore]** round-tripped byte-for-byte, refused a non-empty destination, and refused to restore a damaged archive
+- `test_backup.py` **[portable]** the RESTORED expert was driven through a gated task in its new location and passed — deployment is a location choice, not a different expert format (manual §20)
 - `test_backup.py` **[traversal]** an entry pointing outside the destination was refused
 - `test_backup.py` **[freshness]** the age helpers the preflight depends on report a real number, and None when there is nothing to report
 - `test_preflight.py` **[blocker]** a fleet with no backup is NOT READY, and the finding carries the exact command that fixes it
@@ -435,3 +441,148 @@ Each test below prints its own sentence describing what it proved; those sentenc
 </details>
 
 **Blind spot.** the panel is driven through its HTTP API and its HTML is parsed, but no test renders it in a browser. Layout, contrast and touch targets are verified by eye, not by CI.
+
+## 7. The five authorities
+
+*one mandatory gateway per kind of power — execution, file, credential, model gateway, effect — plus the invariant tests that enumerate every caller of each*
+
+**Verdict: proven** — 1 of 1 declared tests ran and passed, producing 12 observations.
+
+<details><summary>What the tests observed (12)</summary>
+
+- `test_invariants.py` **[execution]** 70 modules scanned; 0 raw subprocess sites outside the authority (15 declared platform-internal, each with a stated reason)
+- `test_invariants.py` **[catalogue]** 5 execution operations: every model-authored one enforces policy+sandbox, every platform one refuses a shell string
+- `test_invariants.py` **[zones]** 15 paths + every declared control file/dir (6 files, 5 dirs) classified and enforced by zone
+- `test_invariants.py` **[traversal]** 12 escape spellings (posix, windows, UNC, mixed, nested) all refused or contained
+- `test_invariants.py` **[credentials]** all 4 sources (env, agent.env, inline, api_key_file) resolve, count as funded, are excluded from packaging, are redacted, and are unreadable by the agent
+- `test_invariants.py` **[metering]** all 9 call purposes reach the ledger, attribute per call, and count toward today's spend
+- `test_invariants.py` **[roles]** 9 roles: every one can finish/escalate, the Student holds neither read_file nor a shell, and no untrusted-material role holds run_command
+- `test_invariants.py` **[gates]** 5 catalogue entries build a command; a raw shell string never does
+- `test_invariants.py` **[birth]** 3 modules mint experts; the gateway seeds a never-bootstrapped home itself (library AND CLI, from any working directory), is idempotent, does not clobber owner edits, and refuses with a sentence when the home is genuinely impossible
+- `test_invariants.py` **[exams]** 4 recorded formats: the loop's completion check, the self-model, and the block injected into every context window all read the same score from the same file
+- `test_invariants.py` **[sandboxes]** 139 sandbox names across 93 test files, every one claimed by exactly one file — a shared temp directory is the failure that only shows up under load
+- `test_invariants.py` **[cli]** 61 documented subcommands across 45 modules all parse, and every module prints its own --help on a non-UTF-8 console
+
+</details>
+
+**Blind spot.** these tests enumerate every path in THIS tree. They cannot see a path added by a plugin, an MCP server or a future module that does not exist yet — which is why the execution audit is a source scan rather than a runtime check, and why it fails on a new raw subprocess call rather than warning.
+
+## 8. Proof, missions and long-horizon work
+
+*capability proof levels derived from hash-bound evidence; the mission contract that survives context resets, restarts and model swaps*
+
+**Verdict: proven** — 3 of 3 declared tests ran and passed, producing 23 observations.
+
+<details><summary>What the tests observed (23)</summary>
+
+- `test_proof.py` **[derived]** the ledger stores observations only — there is no level field for anyone to set by hand
+- `test_proof.py` **[ladder]** a level requires every level beneath it: live evidence alone stayed at IMPLEMENTED until the acceptance tests passed
+- `test_proof.py` **[regression]** editing the code dropped OFFLINE VERIFIED -> IMPLEMENTED automatically, and restoring it brought the level back — nobody touched a status
+- `test_proof.py` **[failure]** a failing run is recorded as failing — the ledger keeps both, so a regression is visible rather than overwritten
+- `test_proof.py` **[expiry]** live and stress evidence older than its window expired automatically and the badge fell back to OFFLINE VERIFIED — a green light cannot rot into a lie by sitting still
+- `test_proof.py` **[stability]** the code hash survives line-ending translation while still changing on real edits
+- `test_proof.py` **[registry]** 15 declared capabilities each state a user capability, invariants, code and tests; nothing with unwritten code claims a level above SPEC
+- `test_mission.py` **[persisted]** the mission contract is a file on disk, not a passage in a transcript that compaction can summarise away
+- `test_mission.py` **[model-swap]** the contract names no model or provider, so swapping one cannot change what the mission is
+- `test_mission.py` **[bound]** an action must name the criterion it serves and the evidence it will produce; unbound work and unrecognisable outcomes are both refused
+- `test_mission.py` **[monotonic]** met evidence cannot silently vanish: invalidating it needed a stated reason and the original record is still there
+- `test_mission.py` **[amendment]** the objective cannot be edited in place â€” the change carries a reason, an author, and both fingerprints, so drift is visible instead of silent
+- `test_mission.py` **[gaps]** 4 blocker dimensions classified and routed; only the authority gap escalated to the owner
+- `test_mission.py` **[every-role]** practitioner, student and consultant all receive the objective, the binding constraints and their criterion â€” the memory router cannot route the assignment away
+- `test_mission.py` **[closure]** a mission closes on met criteria, never on a decision to stop; and a mission with no criteria cannot be created
+- `test_metrics.py` **[sources]** 11 metrics read from 11 distinct ledgers, each naming its own â€” no metric keeps a second count of something another subsystem already knows
+- `test_metrics.py` **[samples]** 3 metric(s) below the 5-observation floor are printed with the warning attached, not as a bare percentage
+- `test_metrics.py` **[honesty]** 4 metric(s) this platform cannot compute are named with the reason, rather than dropped or approximated â€” including one that would have been flattering to invent
+- `test_metrics.py` **[reliability]** 2/5 gated tasks passed and 18/20 finish-claims were refused â€” both derived in one pass over one ledger, so neither can exceed 100% or contradict the other
+- `test_metrics.py` **[autonomy]** the figure names itself an upper bound, and it MOVES: appending one approval_required event took it from 5/5 to 4/5 â€” it reads the log, where a human being needed is actually recorded
+- `test_metrics.py` **[fidelity]** 1/1 recorded actions name the criterion they serve â€” the platform refuses to record one that does not, so this metric can only ever be 100% or reveal a bug
+- `test_metrics.py` **[multiplier]** 25 harness interventions across 10 levers are reported as COUNTS with what a bare model would have done instead; the multiplier itself is in the refused list, because the baseline half has never been run
+- `test_metrics.py` **[empty]** a fleet with no history reports 'no data' on every rate rather than 0%, which would read as a measured failure
+
+</details>
+
+**Blind spot.** no mission here has run longer than a test. The contract is proven to survive a simulated reset, not a week of real drift, and no capability has ever been observed above level 2 because that needs a real provider. Three of the manual's twelve metrics cannot be computed at all — supervision hours, 90-day retention, and anything that would need a real workload — and `metrics.py` names them rather than approximating them.
+
+## 9. Computers, capability and organization
+
+*where work runs and why that computer was chosen; how a capability is acquired without gaining authority; who may do what, and the trail that records it*
+
+**Verdict: proven** — 4 of 4 declared tests ran and passed, producing 29 observations.
+
+<details><summary>What the tests observed (29)</summary>
+
+- `test_workers.py` **[registry]** 4 computers registered with zone, capability and cost; scale-to-zero kinds start stopped, so one expert does not imply one always-on machine
+- `test_workers.py` **[isolation]** free work went to the disposable container, not to the equally-free, faster-starting organization machine — blast radius outranks speed
+- `test_workers.py` **[trusted]** the owner's own machine is never selected automatically; it becomes eligible only when explicitly allowed
+- `test_workers.py` **[matching]** requirements are read from the task text; an impossible requirement returns no computer AND the reason each one was ineligible, instead of falling back to whatever was nearest
+- `test_workers.py` **[implied]** every kind declares what it implies, a bare registration of each kind routes for what that kind is, implied capabilities are shown separately from declared ones, and implying does not paper over a capability that is genuinely absent
+- `test_workers.py` **[explain]** the choice reads as a sentence: 'Using Office Windows PC because excel + internal-network are required (no compute cost)'
+- `test_workers.py` **[policy]** a computer restricted to named experts is invisible to the others, and the refusal says it was policy rather than capability
+- `test_workers.py` **[cost]** an idle computer accrued nothing, an hour of GPU time accrued $2.50, and stopping it stopped the meter
+- `test_acquire.py` **[search-first]** a second request for a capability we already trust was refused and pointed at the existing tool â€” an unnecessary dependency is permanent
+- `test_acquire.py` **[malicious]** the package's own manifest was read before install: 2 risk signal(s) surfaced (pipes a download straight into a shell; reads credentials)
+- `test_acquire.py` **[typosquat]** names one character from a very common package were blocked; the genuine package passed
+- `test_acquire.py` **[pinning]** an unpinned dependency was refused: evidence recorded today would otherwise describe something that no longer exists
+- `test_acquire.py` **[permissions]** a tool that wants a credential declared it during inspection, before anyone decided whether to install it
+- `test_acquire.py` **[no-host]** with only a trusted computer available, acquisition FAILED rather than falling back to the host â€” including when the host was named explicitly
+- `test_acquire.py` **[mandatory-test]** a tool that installed cleanly could not be promoted: the capability test is required, needs evidence, and a failing one blocks trust
+- `test_acquire.py` **[ladder]** requested -> installed -> tested -> trusted, each rung recorded with its evidence, the exact version pinned, the owner granting the last rung, and removal available
+- `test_org.py` **[solo]** with no organization created, every capability is available — adding RBAC must not make a person ask themselves for permission
+- `test_org.py` **[ladder]** each role includes every role beneath it and nothing above: builder can run and approve, cannot manage secrets; only the owner can transfer ownership
+- `test_org.py` **[refusals]** a denial names the actor's role, the role required, and what to do next — a refusal nobody understands is one they route around
+- `test_org.py` **[owner]** the organization cannot be left ownerless: the owner's role cannot be downgraded and a second owner cannot be invited
+- `test_org.py` **[audit]** 7 mutations recorded, each naming the actor, the action, the object and the before/after — 'every mutation attributable' is a query, not an aspiration
+- `test_org.py` **[escalation]** an operator could not promote itself and a builder could not invite an admin — the permission needed to change permissions is itself gated
+- `test_rbac.py` **[solo]** with no organization, creating an agent and driving it still works with no token and no role — adding RBAC must not make the person who owns the machine ask themselves for permission
+- `test_rbac.py` **[tokens]** 4 personal tokens minted; none appears in org.json, none is served by the API, and each resolves to exactly one member
+- `test_rbac.py` **[viewer]** all 8 write routes refused with 403, each naming the actor, the permission required and the role that has it
+- `test_rbac.py` **[ladder]** an operator queued work and was refused agent creation, provider wiring and budget changes; a builder created an agent and was refused secrets, invitations and backups
+- `test_rbac.py` **[coverage]** 17 POST routes; 15 named in the table and 2 falling through to 'create_agent', which needs builder or above — a route added tomorrow is refused for a viewer, not waved through
+- `test_rbac.py` **[audit]** a request that claimed a different author was recorded against the token's real owner (owner@example.com) — the trail is attributable because the identity comes from the credential
+- `test_rbac.py` **[shared]** a fleet that belongs to an organization refuses an untokened request, generates a master token, and admits a member on their own token while still refusing what their role forbids
+
+</details>
+
+**Blind spot.** every worker is a RECORD. Nothing here has started a container, installed a package, or measured a real start-up time — the acquisition ladder is proven to refuse correctly, not to install correctly. And `test_rbac.py` proves AUTHORISATION given an identity; the identity itself is a bearer token over plain HTTP with no TLS, session or expiry.
+
+## 10. Training lab
+
+*sanitised trajectory export, a deterministic non-overlapping split, an immutable verifier, a promotion threshold and a mandatory rollback target*
+
+**Verdict: proven** — 1 of 1 declared tests ran and passed, producing 6 observations.
+
+<details><summary>What the tests observed (6)</summary>
+
+- `test_training.py` **[sanitised]** a credential inside a captured step was redacted before it ever reached the trajectory store
+- `test_training.py` **[split]** 12 train / 3 held-out, deterministic across re-exports and provably non-overlapping
+- `test_training.py` **[verifier]** a candidate evaluated with a different verifier was refused — comparing those numbers would measure the verifier, not the model
+- `test_training.py` **[gate]** a change below its declared threshold and a single-seed result were both refused; a +0.05 improvement over three seeds was promoted
+- `test_training.py` **[rollback]** the promotion recorded what it replaced and the rollback returned to it — a promotion without a way back is a one-way door
+- `test_training.py` **[boundary]** the export states plainly that this platform does not perform gradient updates, names what an external trainer must do, and refuses a corpus too small to mean anything
+
+</details>
+
+**Blind spot.** this module performs no gradient updates at all, and says so on every export. What is proven is the governance around a training run — nothing here has trained anything, and no reward-hacking suite exists.
+
+## 11. The interface itself
+
+*the UI/UX specification's own acceptance table: that each flow's information is reachable, that the migration moved views rather than deleting them, and that no proof level can be set by hand*
+
+**Verdict: proven** — 1 of 1 declared tests ran and passed, producing 10 observations.
+
+<details><summary>What the tests observed (10)</summary>
+
+- `test_ux.py` **[first-mission]** the command bar, four primary actions and a 7-step checklist that reads real state are all on Home; the briefing offers 1 next action(s) without opening Guide
+- `test_ux.py` **[create-expert]** 5 intent questions cover all 5 lanes and none of them names a lane; every lane declares which of the six steps it can honour
+- `test_ux.py` **[supervision]** one request answers objective, current action ('read the Acme MSA' -> C1), 2 open criteria, 1 blocker(s), and cost â€” and the blocker routes to a person rather than to a retry
+- `test_ux.py` **[proof]** 15 capabilities each carry level, badge, the reason, the covering tests and the code hash the evidence is bound to; the panel has no way to set a level, only to re-run the evidence
+- `test_ux.py` **[worker]** a computer card shows zone, what it can do (declared and implied), cost, scale-to-zero and who may use it; the choice reads 'Using Office Windows PC because excel + internal-network are required (no compute cost)' and names why each other computer was passed over
+- `test_ux.py` **[training]** ingested / covered / examined / still-open are four separate numbers: 0 source(s), 1/2 requirements evidenced, exam 88% (pass), 1 gap(s) still open â€” and no percentage is computed anywhere without its denominator
+- `test_ux.py` **[errors]** 9 failure classes, each naming which part failed (7 distinct owners incl. the verifier, the platform, the provider, the budget breaker and you), what happens next and what you can do; the raw trace sits under Advanced
+- `test_ux.py` **[advanced]** identity, prompts, roles, model wiring, raw files and traces are all still reachable behind one disclosure, and none of them appears in the six-item primary nav
+- `test_ux.py` **[mobile]** the sidebar becomes a bottom bar with 40px targets, grid items may shrink, and every one of the 37 tables sits in a scroll container
+- `test_ux.py` **[design]** no status is carried by colour alone, a hosted view never prints a second page title, and the panel shows the command that reproduces what it claims
+
+</details>
+
+**Blind spot.** this proves REACHABILITY, not usability. The spec asks for five people completing five flows at 90%; that has not happened and nothing in a repository can stand in for it. The mobile assertions read CSS source, not rendered layout — the two defects they cover were found in a real browser at 375 px, which no test here runs.

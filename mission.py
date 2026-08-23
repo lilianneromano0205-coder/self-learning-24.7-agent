@@ -349,7 +349,37 @@ def compile_state(root, mid):
     open_ = [c for c in rec["criteria"] if c["state"] in ("pending", "failed",
                                                           "invalidated")]
     live_blockers = [b for b in rec["blockers"] if not b["resolved"]]
+
+    # UI spec §6 — "Current action: what the agent is doing NOW and why it
+    # advances the mission". The chain was already recorded at justify() time;
+    # what was missing was surfacing the newest unfinished one, so a
+    # supervisor can answer "what is it doing and why" without reading a log.
+    live = [a for a in rec["actions"] if a.get("status") not in ("done", "abandoned")]
+    current = live[-1] if live else (rec["actions"][-1] if rec["actions"] else None)
+
+    # §6 "Current plan: every task linked to a criterion" — the plan IS the
+    # actions grouped under the criterion each one serves. Derived, so it can
+    # never disagree with what was actually bound.
+    plan = []
+    for c in rec["criteria"]:
+        steps = [a for a in rec["actions"] if a["criterion"] == c["id"]]
+        plan.append({"criterion": c["id"], "text": c["text"],
+                     "state": c["state"], "steps": steps})
+
+    # §6 "Cost / compute: spend vs cap" — charged per task through the model
+    # gateway, so the mission cannot keep a second, disagreeing count.
+    cost, tasks = 0.0, [a["task"] for a in rec["actions"] if a.get("task")]
+    if tasks:
+        try:
+            import modelgateway
+            for t in set(tasks):
+                for acc in modelgateway.attribution(root, t)["models"].values():
+                    cost += acc.get("cost_usd", 0.0)
+        except Exception:                        # a ledger that is not there
+            cost = 0.0                           # is zero spend, not an error
     return {
+        "current_action": current, "plan": plan,
+        "cost_usd": round(cost, 6), "tasks": sorted(set(tasks)),
         "id": mid, "objective": rec["objective"],
         "fingerprint": rec["fingerprint"],
         "criteria_total": len(rec["criteria"]),
@@ -462,6 +492,20 @@ def main():
     p.add_argument("--json", action="store_true")
     p = sub.add_parser("list"); p.add_argument("--root", default=".")
     p = sub.add_parser("gaps")
+    # Recording a met criterion and recording a blocker are the two things an
+    # operator most needs to do from a terminal, and both were library-only.
+    p = sub.add_parser("meet")
+    p.add_argument("id"); p.add_argument("criterion")
+    p.add_argument("--evidence", required=True,
+                   help="what exists now that shows this worked")
+    p.add_argument("--by", default="", help="what verified it")
+    p.add_argument("--task", default=None); p.add_argument("--root", default=".")
+    p = sub.add_parser("block")
+    p.add_argument("id"); p.add_argument("dimension", choices=sorted(GAPS))
+    p.add_argument("detail")
+    p.add_argument("--criterion", default=None); p.add_argument("--root", default=".")
+    p = sub.add_parser("close"); p.add_argument("id")
+    p.add_argument("--why", default=""); p.add_argument("--root", default=".")
     a = ap.parse_args()
     if a.cmd == "gaps":
         for k, v in GAPS.items():
@@ -477,6 +521,31 @@ def main():
     if a.cmd == "show":
         st = compile_state(root, a.id)
         print(json.dumps(st, indent=1) if a.json else render(st))
+        return
+    if a.cmd == "meet":
+        try:
+            meet(root, a.id, a.criterion, a.evidence, a.by, a.task)
+        except ValueError as e:
+            print(f"REFUSED: {e}")
+            raise SystemExit(1)
+        st = compile_state(root, a.id)
+        print(f"{a.criterion} met — {st['criteria_met']}/{st['criteria_total']}")
+        if st["complete"]:
+            print("  every criterion now has evidence; close it with: "
+                  f"python mission.py close {a.id}")
+        return
+    if a.cmd == "block":
+        blocked(root, a.id, a.dimension, a.detail, a.criterion)
+        g = GAPS[a.dimension]
+        print(f"blocked ({a.dimension}): {g['user_sees']} -> {g['routes_to']}")
+        return
+    if a.cmd == "close":
+        try:
+            rec = close(root, a.id, a.why)
+        except ValueError as e:
+            print(f"REFUSED: {e}")
+            raise SystemExit(1)
+        print(f"{rec['id']} closed: {rec['status']}")
         return
     for st in list_missions(root):
         print(f"{st['id']:<28} {st['status']:<10} "

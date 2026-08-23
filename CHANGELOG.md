@@ -1,5 +1,215 @@
 # Changelog
 
+## v7 — the interface stops being the architecture (2026-08-23)
+
+Implements the **UI/UX Product Redesign Specification v1** end to end, on top
+of the Five Authorities and the Proof System that the forensic audit's
+remediation added (see `REMEDIATION.md`). 90 → 93 acceptance tests, all
+passing.
+
+The spec's diagnosis was blunt and correct: the app exposed the implementation
+map instead of the user's job. Seven top-level areas and seven per-agent views
+forced an operator to understand *Teach / Board / Mind / Ask / Identity /
+Wiring*, memory internals, model names and system machinery before they could
+get any work done. Nothing in this release was deleted to fix that. Every view
+that existed still exists and still does the same thing; what changed is where
+it is filed and what it is called.
+
+**Navigation follows jobs (§2, §16).** `Home · Work · Agents · Resources ·
+Proof · Admin`, each with a stated purpose in `NAV_PURPOSE`. Memory became
+Resources → Knowledge; Models and System became Admin tabs; Guide became
+contextual help reachable from the palette. `tests/test_frontend.py` now
+asserts the migration itself: every retired top-level view must still be
+routed AND reachable from a control a person can click. A redesign that
+silently drops a screen loses whatever only that screen could do.
+
+**Home answers "what can I ask it to do?" first (§3).** A command bar, four
+primary actions, an Active Work card that shows each mission's objective,
+progress against its criteria, current action, cost and next blocker, a
+Recently Completed list with proof, and a Platform Health line that says
+"Ready", "1 blocker" or "2 risks" and links to Admin and Proof.
+
+**Creating an agent no longer requires knowing the taxonomy (§4).** Five
+intent questions map invisibly to the five lanes, then six steps — Job,
+Knowledge, Access, Quality, Cost, Review — ending in a plain-language summary
+of what the agent will be able to know, do, spend and change. The lane is
+named once, at the end, as a footnote. Lanes that have their own well-made
+dialog are handed straight to it: §4's point is that nobody must know the
+taxonomy, not that every path must have six steps.
+
+**"Mind" is gone (§5).** It split into **Knowledge**, **Skills**,
+**Performance** and **Advanced**. Performance is new: verified success rate,
+false successes, the case ledger, cost by purpose, which model actually works
+for *this* agent, tool error rates and which computers its work ran on.
+Advanced holds identity/prompts, model wiring and the raw file tree — all of
+which existed, none of which was reachable without knowing an internal view
+name.
+
+**The mission page is the centre of the product (§6).** Objective and
+fingerprint, the success-criteria checklist with its evidence, binding
+constraints, explicit non-goals, "Needs you" separated from "Blocked on", the
+bound-action count, and the contract exactly as the agent sees it under
+Advanced. `mission.compile_state` now also derives the current action, the
+plan (every action under the criterion it serves) and the cost — so one
+request answers every question §15 says a supervisor must answer in fifteen
+seconds.
+
+**Computers explain themselves (§7).** Resources → Computers shows zone,
+capability, cost, scale-to-zero, last use and who may access each machine, and
+the router answers *"Using Office Windows PC because excel + internal-network
+are required"* — with a disclosure naming why every other computer was passed
+over. A routing decision nobody can disagree with is one nobody can correct.
+
+**Proof is a place (§9).** Work Proof and Platform Proof. Fifteen capabilities,
+each with its level, the reason for it, the invariants it must hold, the code
+hash the evidence is bound to and the exact command that reproduces it. No
+endpoint accepts a level: the panel can re-run evidence and nothing else.
+
+**Training reads as certification (§10).** Sources → Coverage → Gaps →
+Exercises → Exams → Competence, per course. The API refuses to compute a
+percentage: it returns numerators and denominators, so the page physically
+cannot print "100% learned".
+
+**Models became a policy, not a name (§11).** *Cheapest*, *Balanced*,
+*Highest quality* or a custom bar — each a name for the two numbers the router
+already read. `route_prefer` is new and real: "the cheapest that clears the
+bar" and "the best that clears the bar" are different answers to the same
+evidence, and the owner is entitled to say which. Every model card carries its
+sample size, and a profile under five samples is shown as unrankable rather
+than ranked badly.
+
+**Failures say who failed (§12).** One `diagnose()` translates a task record
+into *which part failed* (the verifier, the platform, the provider, the budget
+breaker, the command, the agent, or you), *what happens next*, and *what you
+can do*. Nine classes, each complete. The raw error moved under an Advanced
+disclosure; the board shows state **and** reason.
+
+**Onboarding is seven steps that read reality (§13).** Progress comes from
+state, not from clicks — creating an agent from the terminal ticks the box
+just as well as doing it in the panel. Dismissible, resumable, and it collapses
+to one line when finished.
+
+`tests/test_ux.py` is the spec's own §15 acceptance table, executed: eight
+flows, each asserting that the information the flow needs is reachable rather
+than that the page looks tidy.
+
+### Two things the engineering manual asked for that did not exist
+
+**Roles that actually govern (manual §21).** See defect 6 below — this is the
+fix, and it is also a feature: members hold personal panel tokens, every write
+is checked against the role behind the credential, and a fleet that belongs to
+an organization auto-enables a token because without one there is nothing to
+check.
+
+**`metrics.py` (manual §29).** The twelve numbers that say whether any of this
+is working — verified success, false success, recovery, goal fidelity,
+autonomy, interruptions per mission, cost per verified task, repeat-failure,
+tool acquisition and calibration — each read from a ledger another subsystem
+already writes, each carrying its numerator and denominator, and each marked
+when the sample is too small to mean anything.
+
+The interesting half is what it refuses. Three of §29's metrics cannot be
+computed here, and the module names them with the reason rather than
+approximating: **supervision-hours** (the denominator is a person's time, which
+nothing here observes), **90-day retention** (the structure exists; the elapsed
+time does not), and a **safety-violation rate** (every refusal this platform
+records is a control *working*; counting refusals as violations would be the
+most flattering possible mistake). The autonomy figure names itself an upper
+bound for the same reason.
+
+It also reports the **harness contribution** the manual's §14 asks about — a
+count of every moment the fleet changed the outcome (a gate refusing a
+finish-claim, a retry carrying the failure back in, a gotcha filed, a crash
+resumed) with what a bare model would have done instead. Deliberately counts,
+never a ratio: §14's "100x" multiplier is *verified output per dollar versus
+the same raw model without the fleet*, that needs the same work run twice, the
+baseline half has never been run, and interventions-over-completions is a
+number that reads as a multiplier and is not one.
+
+Building it found **two defects in itself**, both of the kind this whole pass
+has been about — a number that looked right and measured something else:
+
+- verified success counted *tasks* and false success counted *events*, so a
+  retried task made three false-success records against one attempt and the two
+  rates could sum past 100%. Both are now derived in one pass over
+  `state.json`;
+- the autonomy ratio read the task record for a marker of having been blocked.
+  There is none — a task that stopped, was answered and then finished is
+  indistinguishable from one that never stopped — so the metric was silently
+  reporting the success rate under a name that promised something else. It now
+  reads the log, where `approval_required` and `task_unblocked` are written at
+  the moment a person was needed, and the test appends one and requires the
+  number to move. (`tests/test_metrics.py`)
+
+### Defects this pass found and fixed
+
+Building against the spec meant driving every path, and five real bugs fell
+out of that — none of which a green suite had caught.
+
+1. **A fleet home that was never bootstrapped crashed expert creation.**
+   `fleet.create` copies `prompts/` into each new expert, and only
+   `bootstrap.py` prepared that directory first. The CLI's `--home <fresh dir>`
+   died with a raw `FileNotFoundError`, and the panel's `POST /api/experts`
+   turned the same thing into a 500. Four callers, one of them correct — the
+   seeding moved into `fleet.create` itself, which is the single gateway all
+   four go through. A home that genuinely cannot be prepared now refuses with
+   a sentence instead of a stack trace.
+   `tests/test_invariants.py::check_expert_birth_paths` enumerates the callers.
+
+2. **An expert could pass an exam and not know it.** The loop's completion
+   check reads the canonical `SCORE: 95` line; `selfmodel._exam` looked only
+   for a percent *sign*, which that line does not carry. So a course could
+   pass at 95, the loop would agree it was complete, and the expert's own
+   self-model — the block injected into every context window, and the number
+   the panel prints — reported no score at all. Fixed, with an invariant test
+   that writes the file in every format the platform has produced and requires
+   every reader to return the same number.
+
+3. **Every folder in the file tree was drawn as a clickable file.** The API
+   sends `d` for "is a directory"; the panel read `e.dir`, which is always
+   undefined. Clicking a folder answered "approvals is a directory". The tree
+   now has one implementation, shared by Skills and Advanced, that accepts
+   either spelling.
+
+4. **A GPU worker could not be chosen for GPU work.** A machine registered
+   with `--kind gpu-worker` was refused unless somebody had also typed "gpu"
+   into its capability list — the registry already knew what it was. Every
+   kind now declares what it implies, implied capabilities are shown
+   separately from declared ones, and implying still cannot paper over a
+   capability that is genuinely absent.
+
+5. **The worker routing endpoint returned an object where the panel expected a
+   sentence**, so the reason rendered as `[object Object]`. It now returns the
+   sentence, the requirements, and what each rejected computer could not do.
+
+6. **`org.check` — "the single question every mutating path asks" — was asked
+   by nothing but `org.py` and its own test.** Not by `ui.py`, which is the
+   main mutating path with 17 POST routes, a PUT and a DELETE. The reason was
+   structural: the panel authenticated with one shared token, so it had no
+   subject to check. Creating an organization therefore did almost nothing —
+   roles were enforced on the command line, and the audit trail's author came
+   from a request field, so anyone with the panel token had every permission
+   and could attribute their actions to somebody else by typing their address.
+   Members now hold **personal bearer tokens** (stored as a SHA-256, returned
+   once, compared in constant time); `_authed` resolves the token to a member
+   before every request; `_may_write` looks the required permission up in a
+   **declared table** whose default is strict, so a route added tomorrow is
+   refused for a viewer rather than waved through; the audit records the
+   credential's owner; and an authorisation refusal is a 403 rather than a
+   500. A solo install is untouched. (`tests/test_rbac.py`)
+
+7. **`except KeyError -> 404 "unknown expert"` also caught a missing request
+   field**, so a POST that forgot `role` answered "unknown expert" about an
+   expert that plainly existed. `NoSuchExpert` is now its own type and a
+   missing field is a 400 that names the field.
+
+8. **The panel scrolled sideways on a phone.** A CSS grid item keeps
+   `min-width:auto` and refuses to shrink below its widest child, so the
+   Performance tab's table pushed the document 81 px sideways at 375 px — the
+   table's own scroll container could not help, because the *column* was what
+   would not narrow. Two tables also had no scroll container at all; the
+   wrapper moved into `taskTable()` so it is correct wherever it is dropped.
+
 ## v5 — the harness becomes an inspectable object (2026-08-21)
 
 Research-led pass over harness, loop, context, memory, sandbox, skills and

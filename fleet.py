@@ -37,9 +37,21 @@ def expert_dir(home, name):
 
 
 def create(home, name, identity):
+    """THE one place an expert is born, on every path.
+
+    Four callers reach this function — bootstrap.py, quick.py, and the panel's
+    two creation routes — and only bootstrap.py used to prepare the home
+    first. Pointing --home at a directory that had never been bootstrapped
+    therefore produced a raw FileNotFoundError from copytree, and the panel's
+    POST /api/experts turned it into a 500. The seeding belongs HERE, at the
+    single gateway, rather than in whichever caller happened to remember it:
+    a control that only guards the path its author was thinking about is the
+    defect this platform keeps finding in itself.
+    """
     dest = expert_dir(home, name)
     if os.path.exists(dest):
         sys.exit(f"ERROR: expert '{slugify(name)}' already exists at {dest}")
+    seed_home(home)
     os.makedirs(os.path.join(home, "experts"), exist_ok=True)
     try:
         return _create_inner(home, dest, name, identity)
@@ -48,6 +60,37 @@ def create(home, name, identity):
         # rolls back completely rather than leaving a mind without settings
         shutil.rmtree(dest, ignore_errors=True)
         raise
+
+
+def seed_home(home):
+    """A fresh directory is not a fleet yet — give it the charters and default
+    settings this install ships with, never overwriting what is already there.
+
+    Delegates to bootstrap.seed_home so there is ONE implementation of what a
+    fleet home contains; two copies would drift the day somebody adds a file.
+    Imported lazily because bootstrap imports fleet.
+    """
+    try:
+        os.makedirs(home, exist_ok=True)
+    except OSError as e:
+        sys.exit(f"ERROR: cannot use {home!r} as a fleet home: {e.strerror or e}. "
+                 f"Pick a directory that exists, or whose parent does.")
+    try:
+        import bootstrap
+    except ImportError:                      # pragma: no cover - defensive
+        return []
+    try:
+        copied = bootstrap.seed_home(home)
+    except OSError as e:
+        sys.exit(f"ERROR: cannot prepare {home!r} as a fleet home: "
+                 f"{e.strerror or e}. Check permissions and free space.")
+    missing = [n for n in ("prompts", "settings.toml")
+               if not os.path.exists(os.path.join(home, n))]
+    if missing:
+        sys.exit(f"ERROR: {home} is not a fleet home and cannot become one: "
+                 f"{', '.join(missing)} is missing here AND in the install at "
+                 f"{HOME}. Reinstall, or run: python bootstrap.py --home {home}")
+    return copied
 
 
 def _create_inner(home, dest, name, identity):

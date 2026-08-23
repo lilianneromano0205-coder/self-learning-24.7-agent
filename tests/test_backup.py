@@ -121,6 +121,47 @@ def main():
     print("[restore] round-tripped byte-for-byte, refused a non-empty "
           "destination, and refused to restore a damaged archive")
 
+    # --- 4b. and the restored expert actually WORKS
+    #
+    # Manual §20: "persistent expert state must be portable across modes;
+    # deployment is a location choice, not a different expert format." Equal
+    # bytes are necessary and not sufficient — a restore that produces
+    # identical files an agent cannot be driven from is not a restore, it is
+    # a copy. So the test drives one.
+    import loop
+    from common import run_drain
+    restored_root = os.path.join(dest, "experts", "archivist")
+    # the mock provider's script travels with the fleet home, not the expert,
+    # so a restored expert needs it beside it — exactly what a real restore
+    # needs its keys put back for, and the report says so
+    with open(os.path.join(restored_root, "s.json"), "w",
+              encoding="utf-8") as f:
+        json.dump([{"tool": "write_file",
+                    "args": {"path": "out/restored.md",
+                             "content": "written after a restore"}},
+                   {"tool": "finish_task",
+                    "args": {"summary": "the restored expert worked"}}], f)
+    agent = loop.Agent(restored_root)
+    tid = agent.add_task("tester", "prove the restored expert can work",
+                         done_check='python -c "import os,sys;'
+                                    'sys.exit(0 if os.path.exists('
+                                    "'out/restored.md') else 1)\"")
+    run_drain(restored_root, timeout=180)
+    with open(os.path.join(restored_root, "state.json"), encoding="utf-8") as f:
+        done = [t for t in json.load(f)["tasks"]
+                if t["id"] == tid and t["status"] == "done"]
+    assert done, (
+        "the restored expert could not complete a gated task — equal bytes "
+        "are not the same thing as a working expert, and §20 asks for the "
+        "second one")
+    # it also kept everything it knew
+    assert os.path.isfile(os.path.join(restored_root, "identity.md"))
+    assert os.path.isfile(os.path.join(restored_root, "courses", "history",
+                                       "notes.md"))
+    print("[portable] the RESTORED expert was driven through a gated task in "
+          "its new location and passed — deployment is a location choice, not "
+          "a different expert format (manual §20)")
+
     # --- 5. zip slip
     evil = os.path.join(home, "evil.zip")
     with zipfile.ZipFile(man["path"]) as src, zipfile.ZipFile(evil, "w") as dst:

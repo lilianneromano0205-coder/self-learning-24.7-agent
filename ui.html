@@ -202,6 +202,11 @@ pre.out{background:var(--code);border:1px solid var(--line);border-radius:8px;
   font-weight:600}
 /* teammate rail — the fleet as a roster of colleagues, always in view */
 .wswrap{display:grid;grid-template-columns:1fr 210px;gap:16px;align-items:start}
+/* a grid item defaults to min-width:auto, so it refuses to shrink below its
+   widest child. On a phone that pushed a wide table past the viewport and
+   the whole page scrolled sideways — the table's own .tablewrap could never
+   help, because the COLUMN was the thing that would not narrow. */
+.wswrap>*,.mindwrap>*{min-width:0}
 #teammates{position:sticky;top:12px;border:1px solid var(--line);border-radius:12px;
   background:var(--card);padding:8px}
 .rail-h{font-size:11px;letter-spacing:.08em;text-transform:uppercase;
@@ -287,12 +292,26 @@ pre.out{background:var(--code);border:1px solid var(--line);border-radius:8px;
 /* =================================================================
    STATE + PLUMBING
 ================================================================= */
+/* UI spec §2 — primary navigation follows JOBS, not architecture.
+   §16 migration: Memory -> Resources + Proof, Models -> Admin, System ->
+   Admin, Guide -> contextual help (no longer primary). Nothing was deleted:
+   every previous view is still reachable, just filed where a user would
+   look for it rather than where the code happens to live. */
 const NAV = [
-  ['home','Home'], ['guide','Guide'], ['agents','Agents'], ['work','Work'],
-  ['memory','Memory'], ['models','Models'], ['system','System'],
+  ['home','Home'], ['work','Work'], ['agents','Agents'],
+  ['resources','Resources'], ['proof','Proof'], ['admin','Admin'],
 ];
-const ICONS = {home:"🏠",guide:"📖",agents:"🤖",work:"🎯",memory:"🧠",
-               models:"🔌",system:"🩺"};
+const NAV_PURPOSE = {
+  home: "Start work and see what needs attention",
+  work: "Everything being done",
+  agents: "Create and manage intelligence",
+  resources: "What agents know and can use",
+  proof: "Evidence and quality",
+  admin: "Infrastructure and policy",
+};
+const ICONS = {home:"🏠",work:"🎯",agents:"🤖",resources:"📚",
+               proof:"✓",admin:"⚙",guide:"📖",memory:"🧠",models:"🔌",
+               system:"🩺"};
 const S = {view:"home", sel:null, sub:"ov", hist:false, sys:null, map:null,
            mindPath:null, timer:null, blockedN:0};
 
@@ -348,34 +367,42 @@ document.addEventListener("keydown", e=>{ if(e.key==="Escape"){ closeCmd(); clos
    carries the CLI that does the same thing, so the panel teaches the terminal
    rather than hiding it. */
 const COMMANDS = [
-  ["Create a trained expert", "agents", "dlgCreate()", "python fleet.py create \"Name\" --identity \"...\"", "create"],
-  ["Quick specialist (⚡ lane)", "agents", "dlgQuick()", "python quick.py spin \"Name\" --goal \"...\"", "create quick"],
-  ["Start from an archetype", "agents", "dlgArchetype()", "python templates.py", "create template"],
-  ["Learner — give it a topic", "agents", "dlgLearner()", "python ingest.py add-url <url>", "create learn"],
-  ["Team of specialists", "agents", "dlgLauncher()", "python team.py run \"goal\" --experts a,b,c", "create team"],
-  ["Queue a task", "board", "dlgTask()", "python loop.py add --role practitioner --goal \"...\"", "task work"],
-  ["Pursue a goal until a judge agrees", "work", "dlgLauncher()", "python goal.py pursue \"goal\" --expert <slug>", "goal"],
-  ["Run a workflow", "work", "dlgWorkflow()", "python workflows.py run spec.json --root <e>", "workflow pipeline"],
-  ["Arm a future intention", "work", "dlgIntention()", "python prospective.py", "schedule intention wake"],
-  ["Save a task as a routine", "work", "dlgRoutine()", "python routines.py save <task-id> --every-days 1", "routine repeat"],
-  ["Import a SKILL.md", "memory", "dlgSkillImport()", "python skills.py import ./folder --root <e>", "skill import"],
-  ["Spawn a charter variant", "models", "dlgVariant()", "python variants.py spawn ...", "variant charter"],
-  ["Add a provider", "models", "dlgProvider()", "python providers.py", "provider model key"],
-  ["Point a role at a model", "models", "dlgRole()", "python providers.py", "role routing"],
-  ["Publish to the federation", "system", "dlgPublish()", "python federation.py card", "federation a2a"],
-  ["Retire an expert", "agents", "dlgRetire()", "python fleet.py delete <name>", "retire delete"],
-  ["Go: Home", "nav", "go('home')", "", "home today"],
-  ["Go: Guide", "nav", "go('guide')", "", "guide help how"],
+  ["Create a specialist (asks what you need)", "agents", "dlgWizard()", "python fleet.py create \"Name\" --identity \"...\"", "create new expert agent"],
+  ["Quick specialist (⚡ lane)", "agents", "dlgQuick()", "python quick.py spin \"Name\" --goal \"...\"", "create quick throwaway"],
+  ["Start from an archetype", "agents", "dlgArchetype()", "python templates.py", "create template archetype"],
+  ["Learner — give it a topic", "agents", "dlgLearner()", "python ingest.py add-url <url>", "create learn study"],
+  ["Team of specialists", "agents", "dlgLauncher()", "python team.py run \"goal\" --experts a,b,c", "create team crew"],
+  ["Queue a task", "work", "dlgTask()", "python loop.py add --role practitioner --goal \"...\"", "task work queue"],
+  ["Pursue a goal until a judge agrees", "work", "dlgLauncher()", "python goal.py pursue \"goal\" --expert <slug>", "goal pursue judge"],
+  ["Run a workflow", "work", "dlgWorkflow()", "python workflows.py run spec.json --root <e>", "workflow pipeline stages"],
+  ["Arm a future intention", "work", "dlgIntention()", "python prospective.py", "schedule intention wake later"],
+  ["Save a task as a routine", "work", "dlgRoutine()", "python routines.py save <task-id> --every-days 1", "routine repeat recurring"],
+  ["Import a SKILL.md", "resources", "dlgSkillImport()", "python skills.py import ./folder --root <e>", "skill import procedure"],
+  ["Add a computer", "resources", "dlgComputer()", "python workers.py add \"Name\" --kind local-docker", "computer worker machine docker gpu"],
+  ["Which computer would this use?", "resources", "dlgChoose()", "python workers.py choose \"task\"", "computer routing placement why"],
+  ["Spawn a charter variant", "admin", "dlgVariant()", "python variants.py spawn ...", "variant charter experiment"],
+  ["Add a provider", "admin", "dlgProvider()", "python providers.py", "provider model key api"],
+  ["Point a role at a model", "admin", "dlgRole()", "python providers.py", "role routing model"],
+  ["Invite someone to this fleet", "admin", "dlgInvite()", "python org.py invite <email> --role operator", "org rbac people user role"],
+  ["Publish to the federation", "admin", "dlgPublish()", "python federation.py card", "federation a2a publish peer"],
+  ["Retire an expert", "agents", "dlgRetire()", "python fleet.py delete <name>", "retire delete archive"],
+  ["Go: Home", "nav", "go('home')", "", "home today start"],
+  ["Go: Work", "nav", "go('work')", "", "work goals teams missions"],
   ["Go: Agents", "nav", "go('agents')", "", "agents experts roster"],
-  ["Go: Work", "nav", "go('work')", "", "work goals teams"],
-  ["Go: Memory", "nav", "go('memory')", "", "memory notes skills"],
-  ["Go: Models", "nav", "go('models')", "", "models providers"],
-  ["Go: System", "nav", "go('system')", "", "system doctor health"],
-  ["Check readiness for production", "system", "runPreflight()", "python preflight.py", "preflight production ready"],
-  ["Back up the fleet", "system", "runBackup()", "python backup.py create --out ../fleet-backups", "backup restore"],
-  ["Why do we believe this works?", "system", "openEvidence()", "python evidence.py", "evidence proof tests"],
+  ["Go: Resources", "nav", "go('resources')", "", "resources memory knowledge skills tools computers"],
+  ["Go: Proof", "nav", "go('proof')", "", "proof evidence quality level verified"],
+  ["Go: Admin", "nav", "go('admin')", "", "admin models system health org budget backup"],
+  ["Go: Guide (how any of this works)", "nav", "go('guide')", "", "guide help how manual docs"],
+  ["Check readiness for production", "admin", "runPreflight()", "python preflight.py", "preflight production ready release gate"],
+  ["Back up the fleet", "admin", "runBackup()", "python backup.py create --out ../fleet-backups", "backup restore snapshot"],
+  ["Why do we believe this works?", "proof", "openEvidence()", "python evidence.py", "evidence proof tests believe"],
+  ["Re-run the offline evidence", "proof", "refreshProof()", "python proof.py --refresh", "proof refresh recompute level"],
+  ["Start a mission with success criteria", "work", "dlgMission()", "python mission.py new \"objective\" --criterion \"...\"", "mission objective criteria goal done"],
+  ["Is it working? — the metrics", "admin", "S.adminTab='metrics';go('admin')", "python metrics.py", "metrics numbers vsr false success cost autonomy calibration"],
+  ["Give someone a panel token", "admin", "dlgInvite()", "python org.py token <email> --as you@example.com", "token access rbac member login"],
+  ["How should it choose a model?", "admin", "openModelPolicy()", "python modelrouter.py", "policy cheapest balanced quality model routing"],
+  ["Plan what to study first", "resources", "S.resTab='knowledge';go('resources')", "python curriculum.py --root experts/<slug> --course <c> --plan", "curriculum study order lessons"],
 ];
-function go(view){ S.view=view; closeCmd(); render(); }
 async function runPreflight(){
   showDlg("Production preflight", `<p class="muted">auditing this installation…</p>`);
   const r = await api('/api/preflight', {method:"POST", body:{}});
@@ -523,7 +550,16 @@ function renderNav(){
     + (S.sel?`<button class="navbtn on" onclick="openAgent('${esc(S.sel)}')">
         <span class="ic">▸</span><span class="lbl mono">${esc(S.sel)}</span></button>`:"");
 }
-function go(view){ S.view=view; S.sel=null; render(); }
+function go(view){ S.view=view; S.sel=null; closeCmd(); render(); }
+/* The model policy lives on ONE agent's Advanced tab, because that is where
+   it takes effect. From the palette there may be no agent selected, so pick
+   the first one rather than opening a page about nobody. */
+function openModelPolicy(){
+  const slug = S.sel || (((S.sys&&S.sys.experts)||[])[0]||{}).name;
+  if (!slug){ toast("create an agent first"); go("agents"); return; }
+  S.advTab = "wiring";
+  openAgent(slug, "identity");
+}
 function openAgent(slug, sub){ S.view="agents"; S.sel=slug;
   if(sub) S.sub=sub; S.mindPath=null; render(); }
 async function render(){
@@ -534,9 +570,15 @@ async function render(){
   if (S.view==="guide")  renderGuide(m);
   if (S.view==="agents") await renderAgents(m);
   if (S.view==="work")   await renderWork(m);
+  if (S.view==="resources") await renderResources(m);
+  if (S.view==="proof")  await renderProof(m);
+  if (S.view==="admin")  await renderAdmin(m);
+  /* still reachable by name from the palette and from Admin, per §16 */
   if (S.view==="memory") await renderMemory(m);
   if (S.view==="models") await renderModels(m);
   if (S.view==="system") await renderSystem(m);
+  if (S.view==="guide")  renderGuide(m);
+  if (S.view==="mission") await renderMission(m);
 }
 async function refreshSys(){
   const d = await api('/api/system');
@@ -550,6 +592,122 @@ async function refreshSys(){
 /* =================================================================
    HOME — status at a glance + what needs you
 ================================================================= */
+/* =================================================================
+   ONBOARDING — UI spec §13, "first 10 minutes"
+
+   Seven steps, in the spec's order. Two properties make this an onboarding
+   rather than a slideshow:
+
+     * every step reports whether it is ALREADY DONE, read from real state —
+       so a person who created an agent by hand does not get told to create
+       one, and a person who closes the panel resumes where they actually are;
+     * step 7 ("only then expose advanced configuration") is not decoration.
+       Until the earlier steps are done, the checklist is what Home leads
+       with; afterwards it collapses to a single line.
+
+   Dismissible and resumable: the dismissal is a local preference, and the
+   PROGRESS is state, so dismissing hides the card without pretending the
+   work was done.
+================================================================= */
+const ONBOARD = [
+  {id: "goal",     title: "Say what you want Expert Fleet to do for you",
+   why: "Everything else is shaped by this one answer.",
+   act: "focus the command bar", run: "focusCmdBar()"},
+  {id: "provider", title: "Connect one model, or run the local demo",
+   why: "An agent with no model can still be built, but it cannot think.",
+   act: "check providers", run: "S.adminTab='models';go('admin')"},
+  {id: "path",     title: "Pick how you want to start",
+   why: "Do a task now · train a specialist · learn a topic · build a team.",
+   act: "choose", run: "dlgWizard()"},
+  {id: "worker",   title: "Give it a computer to work on",
+   why: "Local Docker if you have it — disposable, free, and the most "
+      + "isolated place an agent can install anything.",
+   act: "add a computer", run: "dlgComputer()"},
+  {id: "mission",  title: "Run one mission with visible success criteria",
+   why: "A mission you can hold it to is the whole point; a task without "
+      + "criteria can only be abandoned, never finished.",
+   act: "start a mission", run: "dlgMission()"},
+  {id: "proof",    title: "Look at the proof",
+   why: "See exactly what was checked, and what it cost.",
+   act: "open Proof", run: "S.proofTab='work';go('proof')"},
+  {id: "advanced", title: "Now the advanced settings are worth reading",
+   why: "Models, budgets, roles, prompts and raw traces — all still there, "
+      + "and none of them were in your way until now.",
+   act: "open Admin", run: "go('admin')"},
+];
+function focusCmdBar(){
+  go('home');
+  setTimeout(()=>{const e=document.getElementById("cmdBar"); if(e) e.focus();}, 400);
+}
+function onboardDone(){ return JSON.parse(localStorage.getItem("fleet_onboard")||"{}"); }
+function onboardMark(id){
+  const d = onboardDone(); d[id] = true;
+  localStorage.setItem("fleet_onboard", JSON.stringify(d));
+  render();
+}
+function onboardDismiss(){
+  localStorage.setItem("fleet_onboard_hidden", "1"); render();
+}
+function onboardReopen(){
+  localStorage.removeItem("fleet_onboard_hidden"); render();
+}
+/* Whether each step is done is READ FROM STATE wherever state can answer it.
+   A checklist that only remembers what you clicked congratulates people for
+   clicking, which is not the same as having a working fleet. */
+function onboardProgress(sys){
+  const marked = onboardDone();
+  const experts = (sys && sys.experts) || [];
+  const state = {
+    goal:     !!marked.goal,
+    provider: !!(sys && sys.ready) || !!marked.provider,
+    path:     experts.length > 0,
+    worker:   !!(S.workerCount > 0) || !!marked.worker,
+    mission:  !!(S.missionCount > 0),
+    proof:    !!marked.proof,
+    advanced: !!marked.advanced,
+  };
+  return ONBOARD.map(s => ({...s, done: !!state[s.id]}));
+}
+function onboardHtml(sys){
+  if (localStorage.getItem("fleet_onboard_hidden") === "1"){
+    return `<div class="muted" style="font-size:12px;margin:4px 0">
+      Setup checklist hidden —
+      <a href="javascript:onboardReopen()">show it again</a></div>`;
+  }
+  const steps = onboardProgress(sys);
+  const done = steps.filter(s=>s.done).length;
+  if (done === steps.length){
+    return `<div class="muted" style="font-size:12px;margin:4px 0">
+      Setup complete — all ${steps.length} first steps done.
+      <a href="javascript:onboardDismiss()">hide this</a></div>`;
+  }
+  return `
+  <div class="card" style="border-color:var(--acc)">
+    <h3>First 10 minutes — ${done} of ${steps.length} done
+      <span class="spacer"></span>
+      <button class="btn sm ghost" onclick="onboardDismiss()">hide</button></h3>
+    <div class="body">
+      <div class="bar" style="margin-bottom:8px"><i style="width:${
+        Math.round(100*done/steps.length)}%"></i></div>
+      ${steps.map((s,i)=>`
+        <div class="step" style="opacity:${s.done?".55":"1"}">
+          <div class="n">${s.done?"✓":i+1}</div>
+          <div style="flex:1">
+            <h4 style="margin:0">${esc(s.title)}</h4>
+            <p class="muted" style="margin:2px 0;font-size:12.5px">${esc(s.why)}</p>
+            ${s.done?"":`<div class="row" style="gap:6px">
+              <button class="btn sm pri" onclick="${s.run}">${esc(s.act)}</button>
+              <button class="btn sm ghost" onclick="onboardMark('${s.id}')">already did this</button>
+            </div>`}
+          </div>
+        </div>`).join("")}
+      <p class="muted" style="font-size:12px;margin-top:6px">Nothing here is
+      required. Every step is also reachable from the navigation, and the
+      checklist reads real state — creating an agent from the terminal ticks
+      the box just as well as doing it here.</p>
+    </div></div>`;
+}
+
 async function renderHome(m){
   const d = await refreshSys();
   if (!d){ m.innerHTML = `<div class="empty">panel unreachable</div>`; return; }
@@ -559,11 +717,19 @@ async function renderHome(m){
       <h2>Welcome to your fleet</h2>
       <p class="muted" style="max-width:60ch">Agents here are not chatbots: each one is a
       directory with its own identity, memory, and verified work. Three ways to begin —</p>
-      <div class="row" style="margin-top:14px">
-        <button class="btn pri" onclick="dlgLauncher()">＋ Create your first agent (5 ways)</button>
+      <label class="lb">What do you want Expert Fleet to do for you?</label>
+      <div class="row" style="gap:6px">
+        <input class="field" id="cmdBar" style="flex:1;min-width:220px;font-size:15px"
+          placeholder="e.g. keep our supplier contracts reviewed and flag anything that auto-renews"
+          onkeydown="if(event.key==='Enter')startFromBar()">
+        <button class="btn pri" onclick="dlgWizard()">Build something that does this</button>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button class="btn ghost" onclick="dlgLauncher()">I know which kind I want</button>
         <button class="btn ghost" onclick="go('guide')">📖 Read the 5-minute guide</button>
       </div>
     </div>
+    ${onboardHtml(d)}
     <div class="card"><h3>How it will flow</h3><div class="body">
       <div class="step"><div class="n">1</div><div><h4>Create an agent</h4>
         <p>Trained expert (studies courses deeply, exams included) or quick specialist
@@ -582,8 +748,14 @@ async function renderHome(m){
   m.innerHTML = `
   <div class="pagehead"><h1>Home</h1>
     <span class="sub">your whole ecosystem at a glance</span><span class="spacer"></span>
-    <button class="btn pri sm" onclick="dlgLauncher()">＋ New agent</button></div>
+    <button class="btn pri sm" onclick="dlgWizard()">＋ New specialist</button></div>
   <div id="readyBanner"></div>
+  <div id="onboardBox">${onboardHtml(d)}</div>
+  ${homeCommandBar()}
+  <div class="card"><h3>Active work<span class="spacer"></span>
+    <span class="muted" style="font-weight:400;font-size:11.5px">
+    objective · progress against its criteria · what it is doing · what blocks it</span></h3>
+    <div class="body" id="activeWork"><span class="muted">loading…</span></div></div>
   ${needs.length?`<div class="card" style="border-color:var(--bad)">
     <h3 style="color:var(--bad)">⚠ Needs you — agents waiting on your answer</h3>
     <div class="body">${needs.map(e=>`
@@ -597,6 +769,9 @@ async function renderHome(m){
     <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:11.5px">
     ranked from real fleet state — rules, never guesses</span></h3>
     <div class="body" id="today"><span class="muted">compiling…</span></div></div>
+  <div class="card"><h3>Recently completed<span class="spacer"></span>
+    <button class="btn sm ghost" onclick="S.proofTab='work';go('proof')">all work proof</button></h3>
+    <div class="body" id="recentDone"><span class="muted">loading…</span></div></div>
   <div class="card"><h3>⚡ Live pulse — the fleet, as it happens
     <span class="spacer"></span><span id="liveDot" class="pill dim">connecting</span>
     <span class="muted" style="font-weight:400;font-size:11.5px">
@@ -645,7 +820,7 @@ async function renderHome(m){
     <button class="btn sm" onclick="openCmd()">⌘K search every action</button>
     <button class="btn sm ghost" onclick="runPreflight()">ready for production?</button></h3>
     <div class="body" id="sysmap"><span class="muted">loading…</span></div></div>`;
-  loadPulse(); loadToday(); loadReadiness(); loadSystemsMap();
+  loadPulse(); loadToday(); loadReadiness(); loadSystemsMap(); loadActiveWork();
 }
 async function loadToday(){
   const el=document.getElementById("today"); if(!el) return;
@@ -668,19 +843,38 @@ async function loadReadiness(){
   const r = await api('/api/readiness');
   if (!r || r.error){ el.innerHTML = ""; return; }
   const block = (r.items||[]).filter(i=>i.blocking);
+  const risks = (r.items||[]).filter(i=>!i.blocking);
+  /* UI spec §3 — Platform Health is a SMALL, non-technical banner: "Ready",
+     "1 blocker", "2 risks", linking to Admin and Proof. §14 forbids colour
+     carrying the status alone, so the word is always there too, and the
+     detail stays available underneath rather than being thrown away. */
+  const verdict = block.length
+      ? `<span class="pill bad">${block.length} blocker${block.length===1?"":"s"}</span>`
+      : risks.length ? `<span class="pill warn">Ready · ${risks.length} risk${
+          risks.length===1?"":"s"}</span>`
+      : `<span class="pill ok">Ready</span>`;
+  const links = `<span class="spacer"></span>
+    <button class="btn sm ghost" onclick="S.adminTab='health';go('admin')">Admin</button>
+    <button class="btn sm ghost" onclick="go('proof')">Proof</button>`;
   if (r.ready && !block.length){
     el.innerHTML = `<div class="card" style="border-color:var(--ok)"><div class="body row">
-      <span class="pill ok">READY TO RUN</span>
+      ${verdict}
       <span class="muted" style="font-size:12.5px">keys present, prompts intact,
-      sandbox reachable — start a loop and it works</span></div></div>`;
+      sandbox reachable — start a loop and it works</span>${links}</div></div>`;
     return;
   }
   el.innerHTML = `<div class="card" style="border-color:var(--warn)">
-    <h3 style="color:var(--warn)">Before this can run</h3><div class="body">
+    <div class="body">
+    <div class="row" style="align-items:center">${verdict}
+      <span class="muted" style="font-size:12.5px">${
+        block.length?"the platform cannot run until these are answered"
+                    :"it runs, with these caveats"}</span>${links}</div>
     ${block.map((i,n)=>`<div style="font-size:12.5px;padding:3px 0">
       <b>${n+1}.</b> ${esc(i.what)} — <span class="muted">${esc(i.how)}</span></div>`).join("")}
-    ${(r.items||[]).filter(i=>!i.blocking).slice(0,4).map(i=>`
-      <div class="muted" style="font-size:12px;padding:2px 0">note: ${esc(i.what)}</div>`).join("")}
+    ${risks.length?`<details><summary class="muted" style="cursor:pointer;font-size:12px">
+      ${risks.length} thing${risks.length===1?"":"s"} worth knowing</summary>
+      ${risks.slice(0,8).map(i=>`<div class="muted" style="font-size:12px;padding:2px 0">
+        ${esc(i.what)}${i.how?` — ${esc(i.how)}`:""}</div>`).join("")}</details>`:""}
     </div></div>`;
 }
 async function loadPulse(){
@@ -702,6 +896,172 @@ async function runDoctor(btn){
     + `<pre class="out">${esc(r.out||r.error||"")}</pre>`;
   if(btn){btn.disabled=false;btn.textContent="run doctor";}
 }
+/* =================================================================
+   HOME, part 2 — UI spec §3
+
+   The command bar, the four primary actions, Active Work, and Recently
+   Completed. §3 asks the top of the page to answer "what can I ask it to do?"
+   before it answers anything else, so the bar comes first and everything
+   below it is status.
+================================================================= */
+function homeCommandBar(){
+  return `
+  <div class="card" style="border-color:var(--acc)"><div class="body">
+    <label class="lb">What do you want accomplished?</label>
+    <div class="row" style="gap:6px">
+      <input class="field" id="cmdBar" style="flex:1;min-width:220px;font-size:15px"
+        placeholder="e.g. review our supplier contracts and flag anything that renews automatically"
+        onkeydown="if(event.key==='Enter')startFromBar()">
+      <button class="btn pri" onclick="startFromBar()">Start</button>
+    </div>
+    <p class="muted" style="font-size:12px;margin:6px 0 0">Describe the outcome,
+    not the steps. The next screen asks how you will know it worked — a mission
+    with no way to tell is one that can only be abandoned, never finished.</p>
+    <div class="row" style="gap:6px;margin-top:10px;flex-wrap:wrap">
+      <button class="btn" onclick="dlgMission()">New mission</button>
+      <button class="btn" onclick="dlgWizard()">Create specialist</button>
+      <button class="btn" onclick="dlgTeamBuild()">Build team</button>
+      <button class="btn" onclick="dlgConnect()">Connect tool or computer</button>
+    </div>
+  </div></div>`;
+}
+function startFromBar(){
+  const e = document.getElementById("cmdBar");
+  const text = e ? e.value.trim() : "";
+  if (!text){ toast("say what you want accomplished"); return; }
+  dlgMission(text);
+}
+function dlgConnect(){
+  showDlg("Connect a tool or a computer", `
+    <p class="muted" style="font-size:12.5px">Two different things, and the
+    difference matters: a TOOL is a capability an agent can call; a COMPUTER is
+    a place work can run. Connecting a computer decides blast radius, so it is
+    worth knowing which one you are adding.</p>
+    <div class="row" style="gap:6px;flex-wrap:wrap">
+      <button class="btn pri" onclick="closeDlg();dlgComputer()">Add a computer</button>
+      <button class="btn" onclick="closeDlg();S.resTab='tools';go('resources')">See the tools agents have</button>
+      <button class="btn ghost" onclick="closeDlg();openAgent((((S.sys||{}).experts||[{}])[0]||{}).name||'','wiring')">Connect an MCP server to an agent</button>
+    </div>`);
+}
+function dlgTeamBuild(){
+  /* §3's "Build Team" is the launcher's team lane; the launcher already
+     explains the five ways, so this opens it rather than growing a sixth. */
+  dlgLauncher();
+}
+
+/* ---- §3 "New Mission": the one dialog that insists on success criteria --- */
+function dlgMission(prefill){
+  const experts = ((S.sys&&S.sys.experts)||[]).map(e=>e.name);
+  showDlg("New mission", `
+    <label class="lb">What should be true when this is done?</label>
+    <textarea class="field" id="msObj" style="min-height:56px"
+      placeholder="the objective, in one sentence">${esc(prefill||"")}</textarea>
+    <label class="lb">How will you know it worked? One per line — this is the
+      part that makes a mission finishable</label>
+    <textarea class="field" id="msCrit" style="min-height:72px"
+      placeholder="every claim carries a citation&#10;the report passes citecheck&#10;a reviewer signs off"></textarea>
+    <label class="lb">Binding constraints (optional, one per line)</label>
+    <textarea class="field" id="msCons" style="min-height:44px"
+      placeholder="no production data&#10;stay under $5"></textarea>
+    <label class="lb">Explicitly not in scope (optional, one per line)</label>
+    <textarea class="field" id="msNo" style="min-height:44px"
+      placeholder="rewriting the website"></textarea>
+    <label class="lb">Which agent owns it?</label>
+    <select class="field" id="msExp">
+      ${experts.map(e=>`<option>${esc(e)}</option>`).join("")
+        || `<option value="">create an agent first</option>`}
+    </select>
+    <p class="muted" style="font-size:12px">The objective cannot be edited later
+    to match whatever was achieved — amending it is recorded, fingerprinted and
+    visible on the mission page.</p>`,
+    [["Cancel","closeDlg()","ghost"],["Start the mission","doMission()","pri"]]);
+}
+async function doMission(){
+  const v=id=>{const e=document.getElementById(id);return e?e.value.trim():"";};
+  const lines=id=>v(id).split("\n").map(x=>x.trim()).filter(Boolean);
+  if(!v("msObj")){ toast("give it an objective"); return; }
+  if(!lines("msCrit").length){
+    toast("a mission needs at least one success criterion"); return; }
+  if(!v("msExp")){ toast("create an agent first"); return; }
+  const r = await api('/api/missions', {method:"POST", body:{
+    objective: v("msObj"), criteria: lines("msCrit"),
+    constraints: lines("msCons"), non_goals: lines("msNo"),
+    expert: v("msExp")}});
+  if (r && r.mission){
+    closeDlg();
+    toast(`mission started — ${r.criteria} criteria, contract ${r.fingerprint}`);
+    openMission(v("msExp"), r.mission);
+  } else {
+    toast((r&&r.error)||"could not start the mission");
+  }
+}
+
+/* ---- §3 Active Work: objective, owner, progress, action, cost, blocker --- */
+async function loadActiveWork(){
+  const el = document.getElementById("activeWork"); if (!el) return;
+  const d = await api('/api/missions');
+  const all = (d && d.missions) || [];
+  /* the onboarding checklist reads real state rather than clicks; these two
+     counts are the evidence for its "run a mission" and "add a computer"
+     steps, and they come from calls Home already makes */
+  const before = [S.missionCount, S.workerCount];
+  S.missionCount = all.length;
+  api('/api/workers').then(w=>{
+    S.workerCount = ((w&&w.workers)||[]).length;
+    if (before[0] !== S.missionCount || before[1] !== S.workerCount){
+      const box = document.getElementById("onboardBox");
+      if (box) box.innerHTML = onboardHtml(S.sys);
+    }
+  });
+  const open = all.filter(x=>!x.complete && x.status==="open");
+  const done = all.filter(x=>x.complete || x.status!=="open");
+  if (!open.length){
+    el.innerHTML = `<div class="empty">Nothing in flight.<br>
+      <span class="muted">Describe an outcome in the bar above and it becomes a
+      mission with success criteria you can hold it to.</span></div>`;
+  } else {
+    el.innerHTML = open.map(x=>{
+      const act = x.current_action;
+      const next = (x.needs_human||[])[0] || (x.blockers||[])[0];
+      const pct = x.criteria_total?Math.round(100*x.criteria_met/x.criteria_total):0;
+      return `
+      <div class="frow" style="display:block;cursor:pointer"
+           onclick="openMission('${esc(x.expert)}','${esc(x.id)}')">
+        <div class="row" style="justify-content:space-between;align-items:baseline">
+          <b>${esc(x.objective)}</b>
+          <span class="muted mono" style="font-size:11.5px">${esc(x.expert)}</span>
+        </div>
+        <div class="bar" style="margin:4px 0"><i style="width:${pct}%"></i></div>
+        <div style="font-size:12.5px">${x.criteria_met}/${x.criteria_total} criteria proven
+          ${x.cost_usd?` · ${usd(x.cost_usd)} so far`:""}</div>
+        ${act?`<div class="muted" style="font-size:12px">${
+          act.status==="done"?"last step":"now"}: ${esc(act.goal||"")}
+          <span class="mono">→ ${esc(act.criterion)}</span></div>`:""}
+        ${next?`<div style="font-size:12px"><span class="pill ${
+          next.needs_human?"bad":"warn"}">${esc(next.user_sees)}</span>
+          ${esc(next.detail)}</div>`:""}
+      </div>`;}).join("");
+  }
+  const rc = document.getElementById("recentDone");
+  if (!rc) return;
+  rc.innerHTML = done.length ? done.slice(-6).reverse().map(x=>`
+    <div class="frow" style="display:block;cursor:pointer"
+         onclick="openMission('${esc(x.expert)}','${esc(x.id)}')">
+      <div class="row" style="justify-content:space-between;align-items:baseline">
+        <b>${esc(x.objective)}</b>
+        <span class="pill ${x.complete?"ok":"dim"}">${
+          x.complete?"every criterion proven":esc(x.status)}</span>
+      </div>
+      <div class="muted" style="font-size:12px">${esc(x.expert)} ·
+        ${x.criteria_met}/${x.criteria_total} criteria${
+        x.cost_usd?` · ${usd(x.cost_usd)}`:""}</div>
+      ${(x.met||[]).slice(0,2).map(c=>`<div class="muted" style="font-size:12px">
+        ✓ ${esc(c.text)} — ${esc(c.evidence||"no evidence recorded")}</div>`).join("")}
+    </div>`).join("")
+    : `<div class="empty">Nothing finished yet. A mission appears here when
+       every one of its criteria has evidence.</div>`;
+}
+
 /* =================================================================
    GUIDE — how to use the ecosystem (lives IN the product)
 ================================================================= */
@@ -876,7 +1236,7 @@ async function renderAgents(m){
   <div class="pagehead"><h1>Agents</h1>
     <span class="sub">every mind you own — active and preserved</span>
     <span class="spacer"></span>
-    <button class="btn pri" onclick="dlgLauncher()">＋ New agent — 5 ways</button></div>
+    <button class="btn pri" onclick="dlgWizard()">＋ New specialist</button></div>
   ${d&&d.n_experts?`<div class="agrid">${d.experts.map(e=>`
     <div class="acard" onclick="openAgent('${esc(e.name)}')">
       <h4>${avatar(e.name)}<span class="mono">${esc(e.name)}</span>
@@ -942,6 +1302,287 @@ const LANES = [
   ["learner","📚","Learner — give it a topic","Creates the expert AND launches the study goal: gather → cited notes → memcheck → self-exam → re-study what it missed, until mastery.","dlgLearner()"],
   ["team","🤝","Team of specialists","Pick 2–4 existing agents and a lead; the lead splits the goal by who is trained for what; handoffs are files, constraints are hashed.","closeDlg();go('work')"],
 ];
+/* =================================================================
+   CREATE AGENT WIZARD — UI spec §4
+
+   "Ask intent questions, then map invisibly to a lane." The five lanes still
+   exist and still do exactly what they did; what changes is that a person no
+   longer has to know the taxonomy to pick one. The mapping is declared here
+   in one table so the answer to "why did it pick that?" is readable, and so
+   the wizard cannot drift away from the lanes it claims to cover.
+
+   Six steps: Job, Knowledge, Access, Quality, Cost, Review. Steps a given
+   lane cannot honour are skipped rather than shown and ignored, because a
+   question whose answer is discarded is worse than no question.
+================================================================= */
+const INTENT = [
+  {q: "Do you need this specialist working immediately from files or instructions?",
+   lane: "quick",     hint: "fastest — it starts from what you tell it"},
+  {q: "Do you want it formally trained and tested on your material?",
+   lane: "trained",   hint: "deepest — it studies, is examined, and cites"},
+  {q: "Do you want it to learn a subject on its own?",
+   lane: "learner",   hint: "it gathers its own sources and re-studies what it missed"},
+  {q: "Start from a proven job template?",
+   lane: "archetype", hint: "a crafted charter with its authority boundaries already set"},
+  {q: "Does the work need several specialists?",
+   lane: "team",      hint: "a lead splits the goal by who is trained for what"},
+];
+/* What each lane actually supports. The wizard reads this rather than
+   hard-coding step numbers, so adding a lane cannot silently produce a step
+   that collects an answer nothing consumes. */
+const LANE_STEPS = {
+  quick:     ["job", "knowledge", "access", "quality", "cost", "review"],
+  trained:   ["job", "knowledge", "access", "quality", "cost", "review"],
+  learner:   ["job", "knowledge", "access", "quality", "cost", "review"],
+  archetype: ["job", "review"],
+  team:      ["job", "review"],
+};
+const STEP_TITLE = {
+  job: "Job", knowledge: "Knowledge", access: "Access",
+  quality: "Quality", cost: "Cost", review: "Review",
+};
+const W = {lane:null, step:0, data:{}};
+
+function dlgWizard(){
+  W.lane = null; W.step = 0; W.data = {};
+  showDlg("New specialist", `
+    <p class="muted" style="font-size:12.5px">Answer whichever of these is true.
+    You do not need to know how the platform is organised — the answer decides
+    that, and the review step tells you exactly what was chosen and why.</p>
+    <div style="display:grid;gap:8px">
+      ${INTENT.map((x,i)=>`
+        <div class="acard" style="margin:0;cursor:pointer" onclick="wizPick(${i})">
+          <b style="font-size:13.5px">${esc(x.q)}</b>
+          <div class="muted" style="font-size:12px">${esc(x.hint)}</div>
+        </div>`).join("")}
+    </div>
+    <details style="margin-top:10px"><summary class="muted"
+      style="cursor:pointer;font-size:12px">I already know which kind I want</summary>
+      <div style="display:grid;gap:6px;margin-top:6px">${LANES.map(([k,ic,t,d,act])=>
+        `<button class="btn ghost sm" onclick="closeDlg();${act}">${ic} ${esc(t)}</button>`
+        ).join("")}</div></details>`,
+    [["Cancel","closeDlg()","ghost"]]);
+}
+function wizPick(i){
+  W.lane = INTENT[i].lane;
+  W.step = 0; W.data = {};
+  /* Two lanes have their own well-made dialogs that ask for exactly the right
+     things; sending a person through a six-step wizard to reach them would be
+     ceremony, not clarity. §4's point is that nobody must know the taxonomy —
+     not that every path must have six steps. */
+  if (W.lane === "archetype"){ closeDlg(); dlgArchetype(); return; }
+  if (W.lane === "team"){ closeDlg(); dlgLauncher(); return; }
+  wizStep();
+}
+function wizSteps(){ return LANE_STEPS[W.lane] || LANE_STEPS.quick; }
+function wizStep(){
+  const steps = wizSteps();
+  const key = steps[W.step];
+  const n = W.step + 1, total = steps.length;
+  const body = {
+    job: wizJob, knowledge: wizKnowledge, access: wizAccess,
+    quality: wizQuality, cost: wizCost, review: wizReview,
+  }[key]();
+  const back = W.step > 0 ? [["Back", "wizBack()", "ghost"]] : [["Cancel","closeDlg()","ghost"]];
+  const next = key === "review"
+      ? [["Create", "wizCreate()", "pri"]]
+      : [["Next", "wizNext()", "pri"]];
+  showDlg(`New specialist · step ${n} of ${total} — ${STEP_TITLE[key]}`, `
+    <div class="bar" style="margin-bottom:10px"><i style="width:${
+      Math.round(100*n/total)}%"></i></div>${body}`, back.concat(next));
+}
+function wizGrab(){
+  const v = id => {const e=document.getElementById(id); return e?e.value.trim():"";};
+  const on = id => {const e=document.getElementById(id); return !!(e&&e.checked);};
+  const key = wizSteps()[W.step];
+  if (key === "job"){
+    W.data.name = v("wzName"); W.data.identity = v("wzId");
+    W.data.examples = v("wzEx");
+  } else if (key === "knowledge"){
+    W.data.topic = v("wzTopic"); W.data.sources = v("wzSrc");
+  } else if (key === "access"){
+    W.data.kind = v("wzKind"); W.data.network = on("wzNet");
+    W.data.computer = v("wzComp");
+  } else if (key === "quality"){
+    W.data.criteria = v("wzCrit"); W.data.done = v("wzDone");
+    W.data.approve = on("wzAppr");
+  } else if (key === "cost"){
+    W.data.policy = v("wzPol"); W.data.budget = v("wzBudget");
+  }
+}
+function wizNext(){
+  wizGrab();
+  if (wizSteps()[W.step] === "job" && !W.data.name){
+    toast("give it a name"); return;
+  }
+  W.step = Math.min(W.step + 1, wizSteps().length - 1);
+  wizStep();
+}
+function wizBack(){ wizGrab(); W.step = Math.max(0, W.step - 1); wizStep(); }
+
+function wizJob(){
+  return `
+    <label class="lb">What should this specialist be called?</label>
+    <input class="field" id="wzName" placeholder="e.g. Contract Reviewer"
+      value="${esc(W.data.name||"")}">
+    <label class="lb">What is its job? One or two sentences.</label>
+    <textarea class="field" id="wzId"
+      placeholder="e.g. read our supplier contracts and flag renewal and liability terms"
+      >${esc(W.data.identity||"")}</textarea>
+    <label class="lb">An example of work you would give it (optional)</label>
+    <textarea class="field" id="wzEx"
+      placeholder="e.g. summarise the Acme MSA and list every automatic renewal"
+      >${esc(W.data.examples||"")}</textarea>`;
+}
+function wizKnowledge(){
+  if (W.lane === "learner") return `
+    <label class="lb">What subject should it learn?</label>
+    <input class="field" id="wzTopic" placeholder="e.g. 12-lead ECG interpretation"
+      value="${esc(W.data.topic||"")}">
+    <label class="lb">Sources to start from (optional, one URL per line)</label>
+    <textarea class="field" id="wzSrc" placeholder="https://…">${esc(W.data.sources||"")}</textarea>
+    <p class="muted" style="font-size:12px">It gathers material, writes cited
+    notes, checks them, sits a closed-book exam and re-studies exactly what it
+    missed — repeating until the exam clears the bar.</p>`;
+  return `
+    <label class="lb">What should it work from?</label>
+    <textarea class="field" id="wzSrc"
+      placeholder="paste links, one per line — or leave blank and drop files in later"
+      >${esc(W.data.sources||"")}</textarea>
+    <input class="field" id="wzTopic" type="hidden" value="${esc(W.data.topic||"")}">
+    <p class="muted" style="font-size:12.5px">${W.lane==="trained"
+      ? "A trained expert studies whole courses into cited notes and then sits an exam on them. You can add material any time from its Knowledge tab."
+      : "A quick specialist starts from a briefing rather than a syllabus. Anything you drop in its Knowledge tab becomes part of that briefing."}</p>`;
+}
+function wizAccess(){
+  return `
+    <label class="lb">What kind of work is this?</label>
+    <select class="field" id="wzKind">
+      ${[["auto","let the platform decide from the work"],
+         ["advisor","answers and reviews — reads, never runs commands"],
+         ["maker","writes documents, drafts, designs"],
+         ["operator","builds and runs code — every job auto-reviewed"]]
+        .map(([k,l])=>`<option value="${k}"${W.data.kind===k?" selected":""}>${esc(l)}</option>`).join("")}
+    </select>
+    <label class="lb">Where should its work run?</label>
+    <select class="field" id="wzComp">
+      <option value="">choose automatically per task (recommended)</option>
+    </select>
+    <label class="lb" style="display:flex;gap:8px;align-items:center">
+      <input type="checkbox" id="wzNet"${W.data.network?" checked":""}>
+      it may reach the internet</label>
+    <p class="muted" style="font-size:12px">It reads and writes only inside its
+    own folder whatever you pick here; the platform's own files stay read-only
+    to it, and credentials are unreadable at any path spelling. These are
+    enforced by the file and execution authorities, not by instructions.</p>`;
+}
+function wizQuality(){
+  return `
+    <label class="lb">How will you know its work is right? One per line.</label>
+    <textarea class="field" id="wzCrit"
+      placeholder="every claim cites a source&#10;no contract is edited&#10;a human reviews before sending"
+      >${esc(W.data.criteria||"")}</textarea>
+    <label class="lb">A command that must pass before it may call a job done (optional)</label>
+    <input class="field" id="wzDone" placeholder="e.g. python check.py"
+      value="${esc(W.data.done||"")}">
+    <label class="lb" style="display:flex;gap:8px;align-items:center">
+      <input type="checkbox" id="wzAppr"${W.data.approve!==false?" checked":""}>
+      ask me before anything irreversible</label>
+    <p class="muted" style="font-size:12px">Without a check, "done" is whatever
+    the model decides it is. This is the single biggest difference between an
+    agent you can trust and one you have to re-read.</p>`;
+}
+function wizCost(){
+  return `
+    <label class="lb">How should it choose a model?</label>
+    <select class="field" id="wzPol">
+      ${[["cheapest","Cheapest — least expensive that still passes half its gates"],
+         ["balanced","Balanced — cheapest that clears a high bar (recommended)"],
+         ["quality","Highest quality — best verified pass rate, cost second"]]
+        .map(([k,l])=>`<option value="${k}"${(W.data.policy||"balanced")===k?" selected":""}>${esc(l)}</option>`).join("")}
+    </select>
+    <label class="lb">Hard limit per day (USD)</label>
+    <input class="field" id="wzBudget" placeholder="e.g. 2.00"
+      value="${esc(W.data.budget||"")}">
+    <p class="muted" style="font-size:12px">The limit is a breaker, not a
+    warning: at the ceiling the agent stops and says so rather than continuing
+    more cheaply.</p>`;
+}
+function wizReview(){
+  const d = W.data;
+  const laneName = {quick:"Quick specialist", trained:"Trained expert",
+                    learner:"Learner"}[W.lane] || W.lane;
+  const line = (k, v) => v ? `<div style="font-size:12.5px;padding:2px 0">
+    <b>${esc(k)}:</b> ${esc(v)}</div>` : "";
+  return `
+    <p class="muted" style="font-size:12.5px">In plain language, this is what
+    the specialist will be able to know, do, spend and change.</p>
+    <div class="card"><div class="body">
+      ${line("Name", d.name)}
+      ${line("Job", d.identity)}
+      ${line("Learns", W.lane==="learner" ? (d.topic||"—")
+             : (d.sources ? d.sources.split("\n").filter(Boolean).length + " source(s) you gave it"
+                          : "whatever you put in its Knowledge tab"))}
+      ${line("Can do", {advisor:"read and answer — no shell, no commands",
+                        maker:"write documents and drafts",
+                        operator:"build and run code, auto-reviewed by a second model",
+                        auto:"decided from the work it is given",
+                        "":"decided from the work it is given"}[d.kind||""] )}
+      ${line("Can reach", d.network ? "the internet, plus its own folder"
+                                    : "its own folder only")}
+      ${line("Runs on", d.computer || "whichever computer suits each task")}
+      ${line("Done means", d.done || (d.criteria ? "the criteria you listed"
+                                                 : "you have not defined it yet"))}
+      ${line("Asks you first", d.approve!==false ? "before anything irreversible"
+                                                 : "no — it proceeds on its own")}
+      ${line("Model policy", {cheapest:"Cheapest", balanced:"Balanced",
+                              quality:"Highest quality"}[d.policy||"balanced"])}
+      ${line("Spend limit", d.budget ? "$"+d.budget+" per day"
+                                     : "the fleet default")}
+    </div></div>
+    <p class="muted" style="font-size:12px">Built as a <b>${esc(laneName)}</b> —
+    the platform's name for this shape. You never had to know that, and you can
+    change any of the above afterwards from its own page.</p>
+    ${!d.criteria&&!d.done?`<p class="pill warn">No definition of done yet — you
+      can add one later, but until then nobody can tell you whether its work
+      is right.</p>`:""}`;
+}
+async function wizCreate(){
+  const d = W.data;
+  let r;
+  if (W.lane === "learner"){
+    r = await api('/api/learner', {method:"POST", body:{
+      name: d.name, topic: d.topic || d.identity,
+      sources: (d.sources||"").split("\n").map(x=>x.trim()).filter(Boolean)}});
+  } else if (W.lane === "quick"){
+    r = await api('/api/quick', {method:"POST", body:{
+      name: d.name, specialty: d.identity, kind: d.kind || "auto",
+      system: "", goal: d.examples || undefined}});
+  } else {
+    r = await api('/api/experts', {method:"POST", body:{
+      name: d.name, identity: d.identity}});
+  }
+  if (!r || r.error){ toast((r&&r.error)||"could not create it"); return; }
+  const slug = r.created;
+  /* Everything the later steps collected is applied AFTER creation, each
+     through the endpoint that owns it — the wizard does not get its own
+     private way to write settings. */
+  if (d.policy){
+    await api('/api/experts/'+slug+'/policy',
+              {method:"POST", body:{policy: d.policy}});
+  }
+  if (d.criteria && d.criteria.trim()){
+    await api('/api/missions', {method:"POST", body:{
+      objective: d.identity || ("work as " + d.name),
+      criteria: d.criteria.split("\n").map(x=>x.trim()).filter(Boolean),
+      expert: slug}});
+  }
+  closeDlg();
+  toast(`${d.name} is ready`);
+  S.map = null;
+  openAgent(slug, W.lane === "trained" ? "teach" : "ov");
+}
+
 function dlgLauncher(){
   showDlg("＋ New agent — five ways to make one", `
     <div style="display:grid;gap:9px">${LANES.map(([k,ic,t,d,act])=>`
@@ -1075,9 +1716,22 @@ async function toggleRun(slug, running){
 /* =================================================================
    WORKSPACE — one agent, six panels
 ================================================================= */
-const SUBTABS = [["ov","Overview"],["teach","Teach"],["board","Board"],
-                 ["mind","Mind"],["ask","Ask"],["identity","Identity"],
-                 ["wiring","Wiring"]];
+/* UI spec §5 — tabs named for what the user is looking FOR.
+   "Mind" is evocative but operationally ambiguous, so it is split into
+   Knowledge / Skills / Performance / Advanced. Every old view is still
+   here; only the labels and the grouping changed. */
+const SUBTABS = [["ov","Overview"],["board","Work"],["teach","Knowledge"],
+                 ["mind","Skills"],["perf","Performance"],["ask","Access"],
+                 ["identity","Advanced"]];
+const SUBTAB_HELP = {
+  ov: "Job, status, competence, recent work and warnings",
+  board: "Missions, tasks and routines this agent owns",
+  teach: "Sources, courses, standards, coverage and exams",
+  mind: "Procedures it knows, with trust and win/loss record",
+  perf: "Verified success, false success, failures and cost",
+  ask: "Tools, computers and permissions it may use",
+  identity: "Identity, prompts, roles, model wiring, raw files",
+};
 async function renderWorkspace(m){
   const d = await api('/api/experts/'+S.sel);
   if (d.error){ m.innerHTML=`<div class="empty">${esc(d.error)}</div>`; return; }
@@ -1107,7 +1761,8 @@ async function renderWorkspace(m){
   if (S.sub==="teach") renderTeach(b, d);
   if (S.sub==="board") await renderBoard(b);
   if (S.sub==="mind")  await renderMind(b);
-  if (S.sub==="ask")   renderAsk(b, d);
+  if (S.sub==="perf")  await renderPerf(b);
+  if (S.sub==="ask")   await renderAccess(b, d);
   if (S.sub==="identity") await renderIdentity(b, d);
   if (S.sub==="wiring")await renderWiring(b);
   renderRail();
@@ -1132,6 +1787,46 @@ function renderRail(){
   }).join("");
 }
 async function renderIdentity(b, d){
+  /* UI spec §5 — "Advanced: identity, prompts, roles, model wiring, raw
+     files/traces". Wiring and the file tree already existed; what was missing
+     was a way to REACH them that did not involve knowing an internal view
+     name. Progressive disclosure (§14) means putting them behind one more
+     click, not behind no click at all. */
+  const adv = S.advTab || "identity";
+  b.innerHTML = `
+    <div class="subtabs">${[["identity","Identity & prompts"],
+                            ["wiring","Models & compute"],
+                            ["files","Raw files"]].map(([k,l])=>
+      `<button class="${adv===k?"on":""}" onclick="S.advTab='${k}';render()">${l}</button>`
+      ).join("")}</div>
+    <div id="advBody"></div>`;
+  const host = document.getElementById("advBody");
+  if (adv === "wiring") return renderWiring(host);
+  if (adv === "files")  return renderFiles(host);
+  return renderIdentityPane(host, d);
+}
+async function renderFiles(b){
+  const tree = await api('/api/experts/'+S.sel+'/tree');
+  const items = Array.isArray(tree)?tree:[];
+  const have = new Set(items.map(e=>e.p.split("/")[0]));
+  b.innerHTML = `
+    <p class="muted" style="max-width:80ch">Everything this agent has on disk.
+    Nothing here is generated for the panel — these are the files the loop
+    actually reads and writes, which is why they are the last word whenever a
+    summary and a file disagree.</p>
+    <div class="row" style="margin-bottom:10px">${SHORTCUTS
+      .filter(([pfx])=>have.has(pfx.split("/")[0]))
+      .map(([pfx,l])=>`<button class="btn sm ghost" onclick="jumpTree('${pfx}')">${l}</button>`).join("")}
+    </div>
+    <div class="mindwrap">
+      ${fileTreeHtml(items, "nothing on disk yet")}
+      <div id="viewer"><div class="empty">pick a file — notes carry [src:]
+        citations, transcripts are complete conversations, and nothing here is
+        ever silently deleted</div></div>
+    </div>`;
+  if (S.mindPath) openFile(S.mindPath);
+}
+async function renderIdentityPane(b, d){
   b.innerHTML = `<div class="card"><h3>Identity — the words this agent wakes up with
     <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:12px">
       identity.md, injected into every context</span></h3>
@@ -1241,7 +1936,7 @@ function renderOv(b, d){
   </div>
   <div class="card"><h3>Recent work<span class="spacer"></span>
     <button class="btn ghost sm" onclick="S.sub='board';render()">full board →</button></h3>
-    <div class="body tablewrap">${taskTable((d.recent_tasks||[]).slice(0,8))}</div></div>
+    <div class="body">${taskTable((d.recent_tasks||[]).slice(0,8))}</div></div>
   <div class="grid2">
   <div class="card"><h3>Recent consultations</h3><div class="body">
     ${(d.consults&&d.consults.length)?d.consults.map(c=>`
@@ -1428,6 +2123,10 @@ async function runTool(tool){
 /* ---------- Teach ---------- */
 function renderTeach(b, d){
   b.innerHTML = `
+  <div class="card"><h3>Certification record
+    <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:11.5px">
+    UI spec §10 — sources, coverage, gaps, exercises, exams, competence</span></h3>
+    <div class="body" id="trainBody"><span class="muted">loading…</span></div></div>
   <div class="grid2">
   <div class="card"><h3>Teach by link</h3><div class="body">
     <label class="lb">URL — video, playlist, article, docs page…</label>
@@ -1459,6 +2158,7 @@ function renderTeach(b, d){
     <p class="muted" style="font-size:12.5px">Ten curated role charters (researcher,
     frontend, analyst…). Applying one rewrites this agent's identity &amp; mission.</p>
   </div></div>`;
+  loadTraining();
   api('/api/templates').then(t=>{
     const sel=document.getElementById("tTpl");
     if (sel && Array.isArray(t)) sel.innerHTML =
@@ -1466,6 +2166,130 @@ function renderTeach(b, d){
       t.map(x=>`<option value="${esc(x.slug)}">${esc(x.name)} — ${esc(x.kind)}: ${esc((x.specialty||"").slice(0,60))}</option>`).join("");
   });
 }
+/* ---------- Training — UI spec §10 -------------------------------------
+   "Training should look like certification, not a spinner:
+    Sources -> Coverage -> Gaps -> Exercises -> Exams -> Competence."
+
+   The last line of §10 is the one that shapes this code: never show
+   "100% learned" unless the denominator is explicit. So this function prints
+   no percentages of its own — it prints the numerator and the denominator the
+   API gave it, and the only percentage on the page is an exam score, which is
+   a score somebody actually recorded rather than a ratio invented here.
+--------------------------------------------------------------------- */
+async function loadTraining(){
+  const el = document.getElementById("trainBody"); if (!el) return;
+  const d = await api('/api/experts/'+S.sel+'/training');
+  if (!d || d.error){ el.innerHTML = `<span class="muted">${
+    esc((d&&d.error)||"unavailable")}</span>`; return; }
+  if (!d.courses.length){
+    el.innerHTML = `<div class="empty">Nothing studied yet.<br>
+      <span class="muted">Add material above — a link, a file, or a topic to
+      learn — and this becomes a certification record.</span></div>`;
+    return;
+  }
+  const STAGES = ["Sources","Coverage","Gaps","Exercises","Exams","Competence"];
+  el.innerHTML = `
+    <div class="row" style="gap:4px;flex-wrap:wrap;margin-bottom:8px">
+      ${STAGES.map((s,i)=>`<span class="pill dim">${i+1}. ${s}</span>`).join("")}
+    </div>
+    <p class="muted" style="font-size:12px;max-width:82ch">${esc(d.rule)}</p>
+    ${d.courses.map(c=>{
+      const cov = c.coverage, ex = c.exercises, e = c.exam;
+      const tiers = Object.entries(c.sources.by_tier||{}).sort();
+      return `
+      <div class="card"><h3>${esc(c.course)}
+        <span class="spacer"></span>
+        ${e.sat?`<span class="pill ${e.verdict==="pass"?"ok":"bad"}">exam ${
+          e.score!=null?e.score+"%":esc(e.verdict||"sat")}</span>`
+          :`<span class="pill dim">not examined yet</span>`}</h3>
+      <div class="body">
+        <div class="tablewrap"><table><tbody>
+          <tr><td><b>1. Sources</b></td><td>
+            ${c.sources.total} source${c.sources.total===1?"":"s"}
+            ${tiers.map(([t,n])=>`<span class="pill ${
+              t==="tier1"?"ok":t==="tier4"?"bad":"dim"}">${n} × ${esc(t)}</span>`).join(" ")}
+            ${c.sources.contested?`<span class="pill bad">${c.sources.contested
+              } contested point${c.sources.contested===1?"":"s"} unresolved</span>`
+              :`<span class="muted">no unresolved conflict</span>`}</td></tr>
+          <tr><td><b>2. Coverage</b></td><td>
+            <b>${cov.with_evidence}/${cov.required}</b> requirement${
+              cov.required===1?"":"s"} have evidence
+            ${cov.missing.length?`<div class="muted" style="font-size:12px">still open:
+              <span class="mono">${esc(cov.missing.join(", "))}</span></div>`:""}</td></tr>
+          <tr><td><b>3. Gaps</b></td><td>
+            ${c.gaps.length?`<span class="pill warn">${c.gaps.length} open</span>
+              ${c.gaps.slice(0,4).map(g=>`<div class="muted" style="font-size:12px">
+                ${esc(g)}</div>`).join("")}`
+              :`<span class="muted">none recorded — a gap here becomes its own
+                 study task on the next idle tick</span>`}</td></tr>
+          <tr><td><b>4. Exercises</b></td><td>
+            <b>${ex.studied}/${ex.total}</b> lesson${ex.total===1?"":"s"} written up
+            <span class="muted">· ${c.atoms} verified atom${c.atoms===1?"":"s"}</span></td></tr>
+          <tr><td><b>5. Exam</b></td><td>
+            ${e.sat?`${e.score!=null?`<b>${e.score}%</b>`:`<span class="muted">no score recorded</span>`}
+              <span class="pill ${e.verdict==="pass"?"ok":"bad"}">${esc(e.verdict||"")}</span>
+              ${e.closed_book?`<span class="pill ok">closed book</span>`
+                :`<span class="pill warn">not held out</span>`}
+              <span class="muted">· ${e.sittings} sitting${e.sittings===1?"":"s"}${
+                e.when?" · last "+esc(e.when):""}</span>
+              <div class="muted" style="font-size:12px">${esc(e.next)}</div>`
+             :`<span class="muted">not sat yet</span>`}</td></tr>
+        </tbody></table></div>
+        <div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">
+          <button class="btn sm ghost" onclick="knowDlg('${esc(c.course)}')">sources &amp; conflicts</button>
+          <button class="btn sm ghost" onclick="planCourse('${esc(c.course)}')">study plan</button>
+          <button class="btn sm ghost" onclick="runTool('verify')">re-run the mechanical checks</button>
+        </div>
+      </div></div>`;}).join("")}
+    ${Object.keys(d.competence||{}).length?`
+      <div class="card"><h3>6. Competence — what it has actually proven</h3><div class="body">
+        ${Object.entries(d.competence).map(([k,c])=>`
+          <div style="font-size:12.5px;padding:2px 0"><b>${esc(k)}</b>:
+            ${c.successes}/${c.verified_attempts} gated task${
+              c.verified_attempts===1?"":"s"} passed
+            <span class="pill ${c.confidence==="high"?"ok":
+              c.confidence==="medium"?"warn":"dim"}">${esc(c.confidence)} confidence</span>
+            <span class="muted">claim: ${esc(c.claim)}</span></div>`).join("")}
+        <p class="muted" style="font-size:12px">A record of 1-for-1 is not
+        mastery, and this says so rather than printing 100%.</p>
+      </div></div>`:""}`;
+}
+async function planCourse(course){
+  showDlg("Study plan · "+esc(course), `<p class="muted">working out what to
+    study first…</p>`);
+  const r = await api('/api/curriculum', {method:"POST",
+    body:{expert: S.sel, course}});
+  if (!r || r.error){
+    showDlg("Study plan · "+esc(course),
+      `<div class="empty">${esc((r&&r.error)||"unavailable")}</div>`);
+    return;
+  }
+  const rows = r.lessons || r.plan || [];
+  showDlg("Study plan · "+esc(course), `
+    <p class="muted" style="font-size:12.5px">Order is decided by source
+    authority first, then by which lessons other lessons depend on. A lesson
+    that repeats ground already covered is marked skim rather than studied
+    twice.</p>
+    ${rows.length?`<div class="tablewrap"><table><thead><tr><th>#</th>
+      <th>Lesson</th><th>Depth</th><th>Why</th></tr></thead><tbody>
+      ${rows.map((l,i)=>`<tr><td class="num mono">${esc(l.nn||String(i+1))}</td>
+        <td>${esc((l.title||l.lesson||l.nn||"").slice(0,90))}</td>
+        <td><span class="pill ${l.depth==="study"?"ok":
+          l.depth==="skim"?"dim":"warn"}">${esc(l.depth||"study")}</span></td>
+        <td class="muted" style="font-size:12px">${esc(l.why||l.reason||"")}</td>
+      </tr>`).join("")}</tbody></table></div>`
+    : `<pre class="out">${esc(JSON.stringify(r, null, 1).slice(0,3000))}</pre>`}`,
+    [["Close","closeDlg()","ghost"],
+     ["Queue this plan",`applyCourse('${esc(course)}')`,"pri"]]);
+}
+async function applyCourse(course){
+  const r = await api('/api/curriculum', {method:"POST",
+    body:{expert: S.sel, course, apply: true}});
+  closeDlg();
+  toast(r && r.queued!=null ? `${r.queued} study task(s) queued`
+                            : ((r&&r.error)||"failed"));
+}
+
 async function teachUrl(){
   const url=document.getElementById("tUrl").value.trim();
   const course=document.getElementById("tCourse").value.trim();
@@ -1501,20 +2325,181 @@ async function useTpl(){
   render();
 }
 /* ---------- Board ---------- */
+/* §14 — a status without its reason is a status nobody can act on. One line
+   here rather than a sentence repeated at every call site. */
+function statusReason(t){
+  const d = diagnose(t);
+  if (!d || !d.who) return "";
+  return `<div class="muted" style="font-size:11.5px">${esc(d.headline)}</div>`;
+}
 function taskTable(tasks){
   if (!tasks||!tasks.length) return `<div class="empty">no tasks</div>`;
-  return `<table><thead><tr><th>status</th><th>role</th><th>goal</th>
+  /* its own scroll container: a helper that can be dropped anywhere must not
+     depend on every call site remembering to wrap it */
+  return `<div class="tablewrap"><table><thead><tr><th>status</th><th>role</th><th>goal</th>
     <th>steps</th><th>cost</th><th>when</th></tr></thead><tbody>
     ${tasks.map(t=>`<tr class="click" onclick='taskDlg(${esc(JSON.stringify(t))})'>
       <td><span class="pill ${esc(t.status)}">${esc(t.status)}</span>
-        ${t.archived?`<span class="pill dim">archived</span>`:""}</td>
+        ${t.archived?`<span class="pill dim">archived</span>`:""}
+        ${statusReason(t)}</td>
       <td class="mono">${esc(t.role)}</td>
       <td>${esc((t.goal||"").slice(0,86))}</td>
       <td class="num">${t.steps!=null?t.steps:""}</td>
       <td class="num">${usd(t.cost)}</td>
       <td class="muted">${ago(t.created)}</td></tr>`).join("")}
-  </tbody></table>`;
+  </tbody></table></div>`;
 }
+/* =================================================================
+   FAILURE UX — UI spec §12
+
+   The spec's table is a list of sentences the platform must be able to say
+   instead of the ones it currently says:
+
+     "Agent failed"       -> "Verifier rejected criterion 3: expected file X;
+                             agent is retrying with a different plan."
+     "Tool error"         -> name the tool, its failure rate, the last error,
+                             and what the platform will do next.
+     "Needs input"        -> the exact decision, the choices, the consequence
+                             of each, and whether the default is safe.
+     "Running" forever    -> current action, reason, elapsed, cost, next
+                             checkpoint, and controls to stop it.
+     raw trace as the UI  -> human-readable state first, trace under Advanced.
+
+   `diagnose()` is where that translation lives, in ONE place, because the
+   same task record is rendered on the board, in the dialog and on the home
+   page — three copies of this reasoning would be three chances to disagree
+   about what went wrong.
+================================================================= */
+function diagnose(t){
+  const err = String(t.error || "");
+  const sum = String(t.summary || "");
+  const both = (err + "\n" + sum);
+  const gate = t.done_check ? `\`${t.done_check}\`` : "the definition of done";
+
+  /* WHO failed is the first question §12 asks, because the answer decides
+     what the person should do. Ordered most specific first. */
+  if (/done_check never passed/i.test(both)){
+    const n = (both.match(/after (\d+) attempts?/i) || [])[1];
+    return {
+      who: "the verifier", severity: "bad",
+      headline: `The check refused the work${n?` after ${n} attempt${n==="1"?"":"s"}`:""}`,
+      detail: `${gate} did not pass, so the agent was not allowed to call this `
+            + `done. That is the gate working: the alternative is accepting a `
+            + `claim nobody checked.`,
+      next: t.status === "failed"
+          ? "Retries are exhausted. Look at what the check actually wants — "
+          + "either the work is genuinely not finished, or the check is asking "
+          + "for the wrong thing."
+          : "The agent is retrying with what the check told it.",
+      you: "Open the trace to see the last attempt, or edit the check if it is "
+         + "asking for something the task was never meant to produce.",
+    };
+  }
+  if (/^internal error|Traceback \(most recent/im.test(both)){
+    const line = (both.match(/^([A-Za-z_.]*Error): (.+)$/m) || []);
+    return {
+      who: "the platform", severity: "bad",
+      headline: "The platform itself failed, not the agent",
+      detail: line[0] ? line[0].slice(0, 200)
+                      : "an unexpected exception inside the loop",
+      next: "This is filed as an infrastructure failure and will be retried; "
+          + "if it recurs it appears under Performance -> keeps happening.",
+      you: "Nothing the agent can do differently will fix this one.",
+    };
+  }
+  if (/no key|api key|401|unauthor/i.test(both)){
+    return {
+      who: "the model provider", severity: "bad",
+      headline: "The model provider refused the call",
+      detail: "usually a missing or rejected API key",
+      next: "The agent will fall back to another provider if one is configured.",
+      you: "Add or fix the key under Admin -> Models & cost. Keys are never "
+         + "shown back to you, only reported present or absent.",
+    };
+  }
+  if (/rate.?limit|429|too many requests/i.test(both)){
+    return {
+      who: "the model provider", severity: "warn",
+      headline: "Rate-limited by the provider",
+      detail: "the provider asked us to slow down",
+      next: "Backing off and retrying; a fallback provider is used if one is set.",
+      you: "Nothing, unless this is constant — then raise the limit or add a "
+         + "second provider.",
+    };
+  }
+  if (/budget|daily cap|max_task_usd|spend/i.test(both)){
+    return {
+      who: "the budget breaker", severity: "warn",
+      headline: "It stopped because it hit a spend limit",
+      detail: "the ceiling is a breaker, not a warning — it stops rather than "
+            + "quietly continuing",
+      next: "Nothing further will run for this task until the limit changes.",
+      you: "Raise the limit under Admin -> Models & cost if the work is worth it.",
+    };
+  }
+  if (/timed out|timeout/i.test(both)){
+    return {
+      who: "the command it ran", severity: "warn",
+      headline: "A command it ran never finished",
+      detail: both.slice(0, 200),
+      next: "The step is abandoned and retried; the sandbox is left clean.",
+      you: "If this is a slow-but-correct command, raise its timeout.",
+    };
+  }
+  if (t.status === "blocked"){
+    return {
+      who: "you", severity: "warn",
+      headline: "It is waiting for a decision only you can make",
+      detail: t.question || sum || "a question it cannot answer for itself",
+      next: "Nothing happens until you answer — deliberately. This is the "
+          + "class of problem that trying harder cannot solve.",
+      you: "Answer it on the agent's Overview tab.",
+    };
+  }
+  if (t.status === "running"){
+    return {
+      who: null, severity: "run",
+      headline: "Working",
+      detail: t.goal ? String(t.goal).slice(0, 160) : "",
+      next: t.done_check ? `It may not call this done until ${gate} passes.`
+                         : "No definition of done was set, so it will stop when "
+                         + "it believes it is finished.",
+      you: "Nothing — unless it has been longer than you expected, in which "
+         + "case stop the loop from the agent's header.",
+    };
+  }
+  if (t.status === "failed"){
+    return {
+      who: "the agent", severity: "bad",
+      headline: "It could not complete the task",
+      detail: err.slice(0, 220) || sum.slice(0, 220) || "no reason recorded",
+      next: "Filed as a failure; a recurring one becomes a gotcha the whole "
+          + "fleet reads before trying again.",
+      you: "Read the goal — a task that cannot be finished is often one that "
+         + "was never possible as written.",
+    };
+  }
+  return null;
+}
+function diagnosisHtml(t){
+  const d = diagnose(t);
+  if (!d) return "";
+  return `
+    <div class="card" style="border-color:var(--${
+      d.severity==="bad"?"bad":d.severity==="warn"?"warn":"line"})">
+      <div class="body">
+        <div class="row" style="align-items:baseline;gap:8px">
+          <span class="pill ${d.severity==="run"?"running":d.severity}">${
+            d.who ? esc(d.who)+" · " : ""}${esc(d.headline)}</span>
+        </div>
+        ${d.detail?`<div style="font-size:12.5px;margin-top:4px">${esc(d.detail)}</div>`:""}
+        <div class="muted" style="font-size:12.5px;margin-top:4px">
+          <b>What happens next:</b> ${esc(d.next)}</div>
+        <div class="muted" style="font-size:12.5px">
+          <b>What you can do:</b> ${esc(d.you)}</div>
+      </div></div>`;
+}
+
 function taskDlg(t){
   if (typeof t === "string") t = JSON.parse(t);
   showDlg("Task · "+esc(t.id||""), `
@@ -1537,11 +2522,14 @@ function taskDlg(t){
         ?`the gate refused ${t.done_rejects} wrong attempt${t.done_rejects>1?"s":""} ${t.status==="done"?"before accepting this work":"so far"}`
         :"finish is only accepted when this command exits 0"}</span></div>`
       :``}
+    ${diagnosisHtml(t)}
     <label class="lb">Goal</label><pre class="out">${esc(t.goal||"")}</pre>
     ${(t.cards||[]).length?`<label class="lb">Cards this agent returned</label>
       ${(t.cards||[]).map(renderCard).join("")}`:""}
     ${t.summary?`<label class="lb">Summary</label><pre class="out">${esc(t.summary)}</pre>`:""}
-    ${t.error?`<label class="lb">Error</label><pre class="out" style="color:var(--bad)">${esc(t.error)}</pre>`:""}
+    ${t.error?`<details><summary class="muted" style="cursor:pointer;font-size:12px">
+      Advanced — the raw error exactly as it was recorded</summary>
+      <pre class="out" style="color:var(--bad)">${esc(t.error)}</pre></details>`:""}
     <p><button class="btn sm" onclick="ctxDlg('${esc(t.id)}')">context window</button>
     <button class="btn sm" onclick="traceDlg('${esc(t.id)}')">trace</button>
     ${t.status==="done"?`<button class="btn sm" onclick="dlgRoutine('${esc(t.id)}')">save as routine</button>`:""}
@@ -1733,7 +2721,7 @@ async function renderBoard(b){
       <input type="checkbox" ${S.hist?"checked":""}
         onchange="S.hist=this.checked;render()"> include archived history</label>
     <button class="btn sm pri" onclick="dlgTask()">＋ task</button></h3>
-  <div class="body tablewrap">${taskTable(list)}</div></div>
+  <div class="body">${taskTable(list)}</div></div>
   <p class="muted" style="font-size:12.5px">Every task ever run is kept: the hot queue
   stays small for speed, and the <b>history</b> toggle reads the permanent archive —
   goals, errors, costs, summaries, transcripts included.</p>`;
@@ -1789,6 +2777,23 @@ const SHORTCUTS = [["courses","📚 notes"],["skills","🧩 skills"],
   ["contexts","💬 transcripts"],["contexts/archive","🗄 archived turns"],
   ["workspace","✏ drafts"],["out","📦 deliverables"],["logs","📜 logs"],
   ["briefing","⚡ briefing"],["inbox","📥 inbox"]];
+/* One file tree, two homes: the Skills tab and §5's Advanced -> Raw files.
+   Two copies of this markup would drift the first time a class changed, and
+   the second copy is exactly the one nobody would remember to fix. */
+function fileTreeHtml(items, emptyMsg){
+  const pad = p => "&nbsp;".repeat(2*(p.split("/").length-1));
+  /* The API sends `d` for "is a directory"; this read `e.dir`, which is
+     always undefined, so every folder was drawn as a clickable file and
+     clicking one answered "approvals is a directory". Accept both spellings
+     rather than only the one that happens to be current. */
+  const isDir = e => e.d === true || e.dir === true;
+  const size  = e => e.s ? ` <span class="muted" style="font-size:11px">${
+    e.s < 1024 ? e.s + " B" : Math.round(e.s/1024) + " KB"}</span>` : "";
+  return `<div id="tree">${items.length ? items.map(e => isDir(e)
+    ? `<div class="t d" data-p="${esc(e.p)}">${pad(e.p)}▸ ${esc(e.p.split("/").pop())}/</div>`
+    : `<div class="t" data-p="${esc(e.p)}" onclick="openFile('${esc(e.p)}')">${pad(e.p)}${esc(e.p.split("/").pop())}${size(e)}</div>`
+  ).join("") : `<span class="muted">${esc(emptyMsg||"nothing here yet")}</span>`}</div>`;
+}
 async function renderMind(b){
   const tree = await api('/api/experts/'+S.sel+'/tree');
   const items = Array.isArray(tree)?tree:[];
@@ -1815,10 +2820,7 @@ async function renderMind(b){
       .map(([p,l])=>`<button class="btn sm ghost" onclick="jumpTree('${p}')">${l}</button>`).join("")}
     </div>
     <div class="mindwrap">
-      <div id="tree">${items.length?items.map(e=> e.dir
-        ? `<div class="t d" data-p="${esc(e.p)}">${"&nbsp;".repeat(2*(e.p.split("/").length-1))}▸ ${esc(e.p.split("/").pop())}/</div>`
-        : `<div class="t" data-p="${esc(e.p)}" onclick="openFile('${esc(e.p)}')">${"&nbsp;".repeat(2*(e.p.split("/").length-1))}${esc(e.p.split("/").pop())}</div>`
-      ).join(""):`<span class="muted">empty mind — teach it something</span>`}</div>
+      ${fileTreeHtml(items, "empty mind — teach it something")}
       <div id="viewer"><div class="empty">pick a file — notes carry [src:] citations;
         transcripts are complete conversations; nothing here is ever silently deleted</div></div>
     </div>
@@ -1905,8 +2907,12 @@ function jumpTree(prefix){
 }
 async function openFile(rel){
   S.mindPath = rel;
-  if (S.sub!=="mind"){ S.sub="mind"; await render(); return; }
-  const v=document.getElementById("viewer");
+  /* Skills and Advanced -> Raw files both host a #viewer. Jumping to Skills
+     when one is already on screen would throw the reader out of the tab they
+     chose, so the guard asks whether a viewer EXISTS rather than which tab
+     the code was written for. */
+  let v = document.getElementById("viewer");
+  if (!v){ S.sub = "mind"; await render(); v = document.getElementById("viewer"); }
   if(!v) return;
   v.innerHTML=`<span class="muted">loading ${esc(rel)}…</span>`;
   const r = await api('/api/experts/'+S.sel+'/file?path='+encodeURIComponent(rel));
@@ -1951,11 +2957,262 @@ async function doConsult(){
     ${esc(q.slice(0,90))} — the answer appears here and in Overview when the citation
     gate passes.`;
 }
+/* ---------- Performance — UI spec §5, §11 -----------------------------
+   "Verified success, false-success, failures/cases, cost, model/worker
+   profile." Every figure is read from a ledger another subsystem already
+   writes, and every rate carries the sample size it was measured over — a
+   pass rate without an n is a number that can only mislead.
+--------------------------------------------------------------------- */
+async function renderPerf(b){
+  b.innerHTML = `<p class="muted">reading the ledgers…</p>`;
+  const d = await api('/api/experts/'+S.sel+'/performance');
+  if (!d || d.error){ b.innerHTML = `<div class="empty">${
+    esc((d&&d.error)||"unavailable")}</div>`; return; }
+  const comp = (d.competence||{})[S.sel] || {};
+  const f = d.failures || {};
+  const cs = d.cases || {};
+  const sp = (d.spend||{}).total || {};
+  const pct = x => Math.round(100*(+x||0)) + "%";
+
+  b.innerHTML = `
+  <p class="muted" style="max-width:80ch">${esc(d.honesty)}</p>
+
+  <div class="card"><h3>Verified success</h3><div class="body">
+    ${Object.keys(comp).length ? `<div class="tablewrap"><table>
+      <thead><tr><th>Doing what</th><th>Verified</th><th>Attempts</th>
+        <th>How sure we are</th></tr></thead><tbody>
+      ${Object.entries(comp).map(([domain,c])=>`<tr>
+        <td>${esc(domain)}</td>
+        <td><span class="pill ${c.score>=0.8?"ok":c.score>=0.5?"warn":"bad"}">${
+          pct(c.score)}</span>
+          <span class="muted">${c.successes}/${c.verified_attempts} passed a gate</span></td>
+        <td class="num">${c.attempts}</td>
+        <td><span class="pill ${c.confidence==="high"?"ok":c.confidence==="medium"?"warn":"dim"}">${
+          esc(c.confidence)} confidence</span>
+          <span class="muted" style="font-size:12px">claim: ${esc(c.claim)}</span></td>
+      </tr>`).join("")}</tbody></table></div>
+      <p class="muted" style="font-size:12px">"Verified" means a gate command
+      exited zero, never that the agent said it was finished.</p>`
+    : `<div class="empty">Nothing verified yet — this agent has not completed a
+        gated task.</div>`}
+  </div></div>
+
+  <div class="card"><h3>False success — it said done and it was not</h3><div class="body">
+    <div class="row" style="gap:6px;flex-wrap:wrap">
+      <span class="kchip"><b>${(f.by_category||{}).false_success||0}</b>false successes</span>
+      <span class="kchip"><b>${f.total||0}</b>failures recorded</span>
+      <span class="kchip"><b>${cs.total||0}</b>cases opened</span>
+      <span class="kchip"><b>${cs.recurred||0}</b>came back after a fix</span>
+      <span class="kchip"><b>${pct(cs.solve_rate)}</b>of cases actually solved</span>
+    </div>
+    ${Object.keys(f.by_category||{}).length?`
+      <label class="lb">By kind</label>
+      <div class="row" style="gap:4px;flex-wrap:wrap">${
+        Object.entries(f.by_category).sort((a,c)=>c[1]-a[1]).map(([k,n])=>
+          `<span class="pill ${k==="false_success"?"bad":"dim"}">${n} × ${esc(k)}</span>`).join("")}</div>`:""}
+    ${(f.most_recurrent||[]).length?`
+      <label class="lb">Keeps happening</label>
+      ${f.most_recurrent.slice(0,4).map(r=>`<div style="font-size:12.5px;padding:2px 0">
+        <span class="pill warn">${r.times||r.count||r.seen||r.n||1}×</span>
+        <span class="mono">${esc(r.failure_id||"")}</span>
+        <span class="muted">${esc((r.signature||"").slice(0,120))}</span></div>`).join("")}
+      <p class="muted" style="font-size:12px">A failure that recurs after a fix
+      is the one worth your attention; the rest the platform handles itself.</p>`:""}
+  </div></div>
+
+  <div class="card"><h3>Cost</h3><div class="body">
+    <div class="row" style="gap:6px;flex-wrap:wrap">
+      <span class="kchip"><b>${usd(sp.cost_usd)}</b>all time</span>
+      <span class="kchip"><b>${usd((d.spend||{}).spend_today_usd)}</b>today</span>
+      <span class="kchip"><b>${sp.calls||0}</b>model calls</span>
+      <span class="kchip"><b>${(sp.tokens_in||0)+(sp.tokens_out||0)}</b>tokens</span>
+      ${sp.failures?`<span class="kchip" style="color:var(--bad)"><b>${sp.failures}</b>call failures</span>`:""}
+    </div>
+    ${Object.keys((d.spend||{}).by_purpose||{}).length?`
+      <label class="lb">What the money went on</label>
+      <div class="tablewrap"><table><thead><tr><th>Purpose</th><th>Calls</th>
+        <th>Cost</th></tr></thead><tbody>
+      ${Object.entries(d.spend.by_purpose).sort((a,c)=>c[1].cost_usd-a[1].cost_usd)
+        .map(([k,v])=>`<tr><td>${esc(k)}</td><td class="num">${v.calls}</td>
+          <td class="num">${usd(v.cost_usd)}</td></tr>`).join("")}
+      </tbody></table></div>
+      <p class="muted" style="font-size:12px">Every call is metered against the
+      reason it was made, so "why is this expensive?" has an answer.</p>`:""}
+  </div></div>
+
+  <div class="card"><h3>Which model actually works for this agent</h3><div class="body">
+    ${Object.keys(d.models||{}).length?`<div class="tablewrap"><table>
+      <thead><tr><th>Model</th><th>Verified pass rate</th><th>Sample</th>
+        <th>Avg cost</th><th>Replay agreement</th></tr></thead><tbody>
+      ${Object.entries(d.models).sort((a,c)=>c[1].verified_pass_rate-a[1].verified_pass_rate)
+        .map(([k,p])=>`<tr>
+        <td class="mono" style="font-size:12px">${esc(k)}</td>
+        <td>${p.too_few?`<span class="pill dim">too few to rank</span>`
+             :`<span class="pill ${p.verified_pass_rate>=0.8?"ok":
+                 p.verified_pass_rate>=0.5?"warn":"bad"}">${pct(p.verified_pass_rate)}</span>`}</td>
+        <td class="num">${p.verified_n||p.n||0}</td>
+        <td class="num">${usd(p.avg_cost_usd)}</td>
+        <td>${p.replay_agreement==null?`<span class="muted">not replayed</span>`
+             :pct(p.replay_agreement)}</td>
+      </tr>`).join("")}</tbody></table></div>
+      <p class="muted" style="font-size:12px">Ranked by VERIFIED pass rate — a
+      model that finishes fast and fails the gate is not a fast model. Anything
+      under ${d.min_sample} samples is shown as unrankable rather than ranked
+      badly.</p>`
+    : `<div class="empty">No model profile yet — this agent has not finished
+        enough gated work for a rate to mean anything.</div>`}
+  </div></div>
+
+  <div class="card"><h3>Tools it actually used</h3><div class="body">
+    ${(d.tools||[]).length?`<div class="tablewrap"><table>
+      <thead><tr><th>Tool</th><th>Calls</th><th>Errors</th><th>Error rate</th></tr></thead>
+      <tbody>${d.tools.map(t=>`<tr><td class="mono">${esc(t.tool)}</td>
+        <td class="num">${t.calls}</td><td class="num">${t.errors}</td>
+        <td><span class="pill ${t.error_rate>0.5?"bad":t.error_rate>0.2?"warn":"ok"}">${
+          pct(t.error_rate)}</span></td></tr>`).join("")}
+      </tbody></table></div>`
+    : `<div class="empty">No tool calls recorded yet.</div>`}
+  </div></div>
+
+  ${(d.computers||[]).length?`<div class="card"><h3>Where its work ran</h3><div class="body">
+    ${d.computers.map(w=>`<div style="font-size:12.5px">${esc(w.name)}
+      <span class="pill dim">${esc(w.zone)} zone</span>
+      <span class="muted">${Math.round(w.used_seconds/60)} min · ${usd(w.spend_usd)}</span>
+      </div>`).join("")}
+  </div></div>`:""}`;
+}
+
+/* ---------- Access — UI spec §5: what it may reach, and who says so ---- */
+async function renderAccess(b, d){
+  b.innerHTML = `
+  <div class="card"><h3>What ${esc(S.sel)} is allowed to reach</h3>
+    <div class="body" id="accBody"><span class="muted">checking…</span></div></div>
+  <div class="card" id="apCard" style="display:none;border-color:var(--warn)">
+    <h3>Waiting on your approval</h3>
+    <div class="body" id="apBody"><span class="muted">checking…</span></div></div>
+  <div id="askPane"></div>`;
+  renderAsk(document.getElementById("askPane"), d);
+  loadAccess();
+  loadApprovals();
+}
+async function loadAccess(){
+  const el = document.getElementById("accBody"); if (!el) return;
+  const [tb, st, wk] = await Promise.all([
+    api('/api/toolbox'), api('/api/experts/'+S.sel+'/settings'), api('/api/workers')]);
+  const caps = (tb&&tb.capabilities)||{};
+  const ready = Object.entries(caps).filter(([,c])=>c.ready);
+  const miss  = Object.entries(caps).filter(([,c])=>!c.ready);
+  const mine  = ((wk&&wk.workers)||[]).filter(w=>!w.experts.length||w.experts.includes(S.sel));
+  el.innerHTML = `
+    <label class="lb">Tools it can call</label>
+    <div class="row" style="flex-wrap:wrap;gap:4px">${ready.map(([n,c])=>
+      `<span class="pill ok" title="${esc(c.how||"")}">${esc(n)}</span>`).join("")
+      || `<span class="muted">none available</span>`}</div>
+    ${miss.length?`<label class="lb">Not available — it will say so rather than pretend</label>
+      <div class="row" style="flex-wrap:wrap;gap:4px">${miss.map(([n])=>
+        `<span class="pill dim">${esc(n)}</span>`).join("")}</div>`:""}
+
+    <label class="lb">Computers it may use</label>
+    ${mine.length?mine.map(w=>`<div style="font-size:12.5px">${esc(w.name)}
+      <span class="pill ${w.zone==="trusted"?"warn":"dim"}">${esc(w.zone)} zone</span>
+      <span class="muted">${esc((w.capabilities||[]).join(", ")||"general work")}</span>
+      ${w.experts.length?`<span class="pill">restricted to it</span>`:""}</div>`).join("")
+      : `<div class="muted">none registered — work runs in this expert's own
+         sandbox directory</div>`}
+
+    <label class="lb">Files and network</label>
+    <div style="font-size:12.5px">Reads and writes only inside its own folder;
+      the platform's own files are read-only to it and secrets are unreadable
+      at any path spelling. Network access is
+      ${(st&&st.agent&&st.agent.allow_network)?`<span class="pill warn">on</span>`
+        :`<span class="pill ok">off unless a task asks for it</span>`}.</div>
+    <p class="muted" style="font-size:12px">These are enforced by the File and
+    Execution authorities, not by asking the model nicely — the same refusal
+    happens whatever the prompt says.</p>`;
+}
+
 /* ---------- Wiring (models & settings) ---------- */
+/* ---------- Model policy — UI spec §11 ---------------------------------
+   "Normal user chooses policy: Cheapest, Balanced, Highest Quality, or
+   Custom." The names come from the router itself, so the panel cannot offer
+   a policy the engine does not implement — the failure mode where a UI grows
+   a fourth option nobody wired up.
+--------------------------------------------------------------------- */
+async function loadPolicy(){
+  const el = document.getElementById("polBody"); if (!el) return;
+  const d = await api('/api/experts/'+S.sel+'/policy');
+  if (!d || d.error){ el.innerHTML = `<span class="muted">${
+    esc((d&&d.error)||"unavailable")}</span>`; return; }
+  const cur = d.current || {};
+  const opts = Object.entries(d.presets || {});
+  el.innerHTML = `
+    <p class="muted" style="font-size:12.5px">You are choosing what "good" means
+    for this agent, not a model name. The router then picks from the models it
+    has measured on this agent's own gated work.</p>
+    <div class="agrid">
+      ${opts.map(([k,p])=>`
+        <div class="acard" style="${cur.policy===k?"border-color:var(--acc)":""}">
+          <div class="row" style="justify-content:space-between;align-items:center">
+            <b>${esc(p.label)}</b>
+            ${cur.policy===k?`<span class="pill ok">in use</span>`:""}
+          </div>
+          <div style="font-size:12.5px;margin-top:4px">${esc(p.means)}</div>
+          <div class="muted" style="font-size:12px;margin-top:4px">
+            costs you: ${esc(p.costs_you)}</div>
+          <div class="muted" style="font-size:12px">bar: ${
+            Math.round(p.min_pass*100)}% verified · tie-break: ${esc(p.prefer)}</div>
+          ${cur.policy===k?"":`<button class="btn sm" style="margin-top:6px"
+            onclick="setPolicy('${k}')">use this</button>`}
+        </div>`).join("")}
+      <div class="acard" style="${["custom","manual"].includes(cur.policy)?"border-color:var(--acc)":""}">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <b>Custom</b>
+          ${cur.policy==="custom"?`<span class="pill ok">in use</span>`:""}
+          ${cur.policy==="manual"?`<span class="pill warn">pinned</span>`:""}
+        </div>
+        <div style="font-size:12.5px;margin-top:4px">Set the bar yourself, or
+          pin every role to exactly the model you chose.</div>
+        <div class="row" style="gap:4px;margin-top:6px;flex-wrap:wrap">
+          <input class="field" id="polBar" placeholder="bar, e.g. 0.75"
+            style="max-width:120px" value="${cur.min_pass!=null?cur.min_pass:""}">
+          <select class="field" id="polPref" style="max-width:150px">
+            <option value="cost"${cur.prefer==="cost"?" selected":""}>cheapest that clears it</option>
+            <option value="quality"${cur.prefer==="quality"?" selected":""}>best that clears it</option>
+          </select>
+          <button class="btn sm" onclick="setPolicy('custom')">apply</button>
+          <button class="btn sm ghost" onclick="setPolicy('manual')">pin models instead</button>
+        </div>
+      </div>
+    </div>
+    <p class="muted" style="font-size:12px;margin-top:8px">
+      Currently: <b>${esc(cur.label||cur.policy)}</b> — ${esc(cur.means||"")}.
+      ${cur.roles_on_auto}/${cur.roles_total} role(s) route automatically.
+      The measured evidence behind each model is on this agent's
+      <a href="javascript:openAgent(S.sel,'perf')">Performance</a> tab.</p>`;
+}
+async function setPolicy(name){
+  const v = id => {const e=document.getElementById(id); return e?e.value.trim():"";};
+  const body = {policy: name};
+  if (name === "custom"){
+    const bar = parseFloat(v("polBar"));
+    if (isNaN(bar)){ toast("give the bar as a pass rate, e.g. 0.75"); return; }
+    body.min_pass = bar; body.prefer = v("polPref");
+  }
+  const r = await api('/api/experts/'+S.sel+'/policy', {method:"POST", body});
+  if (r && r.applied){
+    toast(`${r.now.label||r.applied} — ${r.roles} role(s) updated`);
+    loadPolicy();
+  } else toast((r&&r.error)||"could not apply that policy");
+}
+
 async function renderWiring(b){
   const st = await api('/api/experts/'+S.sel+'/settings');
   const provs = st.providers||{}; const roles = st.roles||{};
   b.innerHTML = `
+  <div class="card" style="border-color:var(--acc)"><h3>How should it choose a model?
+    <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:11.5px">
+    UI spec §11 — a policy, not a model name</span></h3>
+    <div class="body" id="polBody"><span class="muted">loading…</span></div></div>
   <div class="grid2">
   <div class="card"><h3>Providers — where its models come from
     <span class="spacer"></span>
@@ -2000,6 +3257,7 @@ async function renderWiring(b){
     <div id="catOut" style="margin-top:10px"></div>
   </div></div>`;
   loadVariants();
+  loadPolicy();
 }
 async function loadVariants(){
   const el=document.getElementById("varBody"); if(!el) return;
@@ -2295,15 +3553,15 @@ async function startTeam(){
 /* =================================================================
    MEMORY — the institution: map, search, failures, competence, commons
 ================================================================= */
-async function renderMemory(m){
+async function renderMemory(m, nested){
   const [map, commons] = await Promise.all(
     [api('/api/memory?view=map'), api('/api/commons')]);
   S.map = map;
   const rows = (map&&map.active)?[...map.active,...map.retired]:[];
   m.innerHTML = `
-  <div class="pagehead"><h1>Memory</h1>
-    <span class="sub">what the whole fleet knows, has done, got right, and got wrong —
-      living and retired alike</span></div>
+  ${nested?`<div class="sub" style="margin-bottom:8px">what the whole fleet knows, has done, got right, and got wrong — living and retired alike</div>`
+            :`<div class="pagehead"><h1>Memory</h1>
+    <span class="sub">what the whole fleet knows, has done, got right, and got wrong — living and retired alike</span></div>`}
   <div class="card"><h3>🔍 Search every mind</h3><div class="body">
     <div class="row">
       <input class="field" id="memQ" placeholder="e.g. pricing page · backoff · stale data…"
@@ -2396,12 +3654,13 @@ async function memSearch(){
 /* =================================================================
    MODELS & TOOLS (fleet level)
 ================================================================= */
-async function renderModels(m){
+async function renderModels(m, nested){
   const sys = await refreshSys();
   const experts=((sys&&sys.experts)||[]).map(e=>e.name);
   m.innerHTML = `
-  <div class="pagehead"><h1>Models &amp; Tools</h1>
-    <span class="sub">plug any model from any platform · give agents any tool</span></div>
+  ${nested?`<div class="sub" style="margin-bottom:8px">plug any model from any platform · give agents any tool</div>`
+            :`<div class="pagehead"><h1>Models &amp; Tools</h1>
+    <span class="sub">plug any model from any platform · give agents any tool</span></div>`}
   <div class="card"><h3>Model wiring per agent</h3><div class="body">
     <div class="row"><select class="field" id="mwExp" style="max-width:260px">
       ${experts.map(e=>`<option>${esc(e)}</option>`).join("")||"<option value=''>no agents yet</option>"}</select>
@@ -2460,11 +3719,12 @@ async function loadToolbox(){
 /* =================================================================
    SYSTEM — health, pulses, spend, remote
 ================================================================= */
-async function renderSystem(m){
+async function renderSystem(m, nested){
   const d = await refreshSys();
   m.innerHTML = `
-  <div class="pagehead"><h1>System</h1>
-    <span class="sub">health, heartbeats, budgets, and keeping it alive 24/7</span></div>
+  ${nested?`<div class="sub" style="margin-bottom:8px">health, heartbeats, budgets, and keeping it alive 24/7</div>`
+            :`<div class="pagehead"><h1>System</h1>
+    <span class="sub">health, heartbeats, budgets, and keeping it alive 24/7</span></div>`}
   <div class="card"><h3>🩺 Doctor — one verdict for the whole platform
     <span class="spacer"></span><button class="btn sm pri" onclick="runDoctor(this)">run doctor</button></h3>
     <div class="body" id="sysDoc"><span class="muted">Checks runtime, anatomy, every
@@ -2515,13 +3775,14 @@ async function renderSystem(m){
       saved from a finished task, gate included</span></h3>
     <div class="body" id="routineBody"><span class="muted">loading…</span></div></div>
   <div class="card"><h3>⚙ Facts</h3><div class="body">
-    <table>
-      <tr><td class="muted">fleet home</td><td class="mono" style="font-size:12px">${esc(d?d.root:"")}</td></tr>
+    <div class="tablewrap"><table>
+      <tr><td class="muted">fleet home</td><td class="mono"
+        style="font-size:12px;word-break:break-all">${esc(d?d.root:"")}</td></tr>
       <tr><td class="muted">python</td><td class="mono">${esc(d?d.python:"")}</td></tr>
       <tr><td class="muted">spend today</td><td class="num">${usd(d?d.spend_today_usd:0)}</td></tr>
       <tr><td class="muted">tasks total</td><td class="num">${d?Object.values(d.totals).reduce((a,b)=>a+b,0):0}
         <span class="muted">(done ${d?d.totals.done:0} · failed ${d?d.totals.failed:0})</span></td></tr>
-    </table>
+    </table></div>
     <p class="muted" style="font-size:12px;margin-top:8px">Finished work is archived, not
     deleted — the hot queue stays fast forever and each Board's <b>history</b> toggle
     reads everything back.</p>
@@ -2592,7 +3853,7 @@ async function loadHarness(){
       <div>protected charters: ${((m.policies||{}).protected_charters||[]).map(x=>`<span class="pill dim">${esc(x)}</span>`).join(" ")}</div>
       <div>MCP servers: ${Object.keys((m.policies||{}).mcp_servers||{}).map(x=>`<span class="pill acc">${esc(x)}</span>`).join(" ")||"<span class='muted'>none</span>"}</div>`)}
     ${sec(`Memory tiers (${(m.memory_tiers||[]).length})`, (m.memory_tiers||[]).map(t=>`<div><b>${esc(t.tier)}</b> <span class="mono muted" style="font-size:11.5px">${esc(t.where)}</span></div>`).join(""))}
-    ${sec("Budgets", `<table>${Object.entries(m.budgets||{}).map(([k,v])=>`<tr><td class="mono">${esc(k)}</td><td class="num">${esc(String(v))}</td></tr>`).join("")}</table>`)}
+    ${sec("Budgets", `<div class="tablewrap"><table>${Object.entries(m.budgets||{}).map(([k,v])=>`<tr><td class="mono">${esc(k)}</td><td class="num">${esc(String(v))}</td></tr>`).join("")}</table></div>`)}
     ${sec(`Loop events (${(m.loop_events||[]).length})`, `<div class="mono" style="font-size:11.5px">${esc((m.loop_events||[]).join(" · "))}</div>`)}
     ${sec("Versions", `<div class="mono" style="font-size:11.5px">${Object.entries((m.versions||{}).code||{}).map(([f,h])=>`${esc(f)} ${esc(h)}`).join(" · ")}</div>`)}`;
 }
@@ -2631,6 +3892,725 @@ async function doPublish(){
     endpoint:document.getElementById("pubEp").value.trim()}});
   closeDlg(); toast(r.published?`card published exposing ${r.published.length} expert(s)`:(r.error||"failed"));
   loadFederation();
+}
+/* =================================================================
+   PROOF CENTER — UI spec §9
+
+   Two questions, two tabs. "Did this task actually get done?" is about a
+   mission and its evidence. "Is this capability actually finished?" is about
+   the platform and its proof level. Neither tab has a control that SETS a
+   level, because a status somebody can click green is a status nobody can
+   trust: the level is derived from evidence recorded against the current
+   code, and it falls on its own when the code changes or the evidence ages.
+================================================================= */
+const PROOF_COLOUR = {gray:"dim", yellow:"warn", blue:"queued", teal:"running",
+                      green:"ok", darkgreen:"ok"};
+
+async function renderProof(m){
+  const tab = S.proofTab || "platform";
+  m.innerHTML = `
+    <div class="pagehead"><h1>Proof</h1>
+      <span class="sub">${esc(NAV_PURPOSE.proof)}</span></div>
+    <div class="subtabs">
+      <button class="${tab==="work"?"on":""}"
+        onclick="S.proofTab='work';render()">Work proof</button>
+      <button class="${tab==="platform"?"on":""}"
+        onclick="S.proofTab='platform';render()">Platform proof</button></div>
+    <div id="proofBody"><p class="muted">loading…</p></div>`;
+  const b = document.getElementById("proofBody");
+  if (tab === "work") return renderWorkProof(b);
+  return renderPlatformProof(b);
+}
+
+async function renderPlatformProof(b){
+  const d = await api('/api/proof');
+  if (!d || d.error || !d.features){
+    b.innerHTML = `<div class="empty">${esc((d&&d.error)||"no proof data")}</div>`;
+    return;
+  }
+  const rows = Object.entries(d.features)
+    .sort((x,y)=> y[1].level - x[1].level || x[0].localeCompare(y[0]));
+  b.innerHTML = `
+    <p class="muted" style="max-width:80ch">Every level below is COMPUTED, not
+    declared. Change a file a capability covers and its badge drops until the
+    tests are run again; live evidence expires with age. Nobody — including
+    the agents — can mark something proven.</p>
+    <div class="row" style="gap:6px;margin:10px 0;flex-wrap:wrap">
+      ${Object.entries(d.counts).map(([k,n])=>
+        `<span class="kchip"><b>${n}</b>${esc(k)}</span>`).join("")}
+      <button class="btn sm ghost" onclick="refreshProof(this)">re-run the offline evidence</button>
+    </div>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Level</th><th>Capability</th>
+        <th>What the user can actually do</th><th>Why this level</th></tr></thead>
+      <tbody>
+      ${rows.map(([name,r])=>`
+        <tr class="click" onclick="proofDetail('${esc(name)}')">
+          <td><span class="pill ${PROOF_COLOUR[r.colour]||"dim"}">${r.level} · ${esc(r.badge)}</span>
+              ${(r.expired&&r.expired.length)?` <span class="pill bad">evidence expired</span>`:""}</td>
+          <td class="mono" style="font-size:12px">${esc(name)}</td>
+          <td style="font-size:12.5px">${esc(r.capability)}</td>
+          <td class="muted" style="font-size:12px">${esc(r.why)}</td>
+        </tr>`).join("")}
+      </tbody></table></div>
+    <p class="muted" style="font-size:12px;margin-top:8px">
+      0 SPEC · 1 IMPLEMENTED · 2 OFFLINE VERIFIED · 3 LIVE VERIFIED ·
+      4 STRESS VERIFIED · 5 PRODUCTION PROVEN. Click any row for the evidence,
+      the invariants it must hold, and the command that reproduces it.</p>`;
+}
+
+async function proofDetail(name){
+  showDlg(`Proof · ${esc(name)}`, `<p class="muted">reading the evidence…</p>`);
+  const r = await api('/api/proof/'+encodeURIComponent(name));
+  if (!r || r.error){
+    showDlg(`Proof · ${esc(name)}`,
+      `<div class="empty">${esc((r&&r.error)||"unavailable")}</div>`);
+    return;
+  }
+  const cmds = (r.tests||[]).map(t=>"python tests/"+t).join("\n")
+               || "no test covers this yet";
+  showDlg(`Proof · ${esc(name)}`, `
+    <p><span class="pill ${PROOF_COLOUR[r.colour]||"dim"}">Level ${r.level} — ${esc(r.badge)}</span>
+       <span class="muted">${esc(r.meaning)}</span></p>
+    <label class="lb">What the user can do</label>
+    <div style="font-size:13px">${esc(r.capability)}</div>
+    <label class="lb">Why we believe this works</label>
+    <div style="font-size:13px">${esc(r.why)}</div>
+    ${r.next?`<label class="lb">To raise the level</label>
+      <div style="font-size:13px">${esc(r.next)}</div>`:""}
+    <label class="lb">Invariants that must hold</label>
+    <ul style="font-size:12.5px;margin:4px 0 0 18px">
+      ${(r.invariants||[]).map(i=>`<li>${esc(i)}</li>`).join("")}</ul>
+    <label class="lb">Reproduce it yourself</label>
+    <pre class="out">${esc(cmds)}</pre>
+    <p class="muted" style="font-size:12px">Evidence is bound to code hash
+      <span class="mono">${esc(r.code_hash)}</span> over
+      <span class="mono">${esc((r.code||[]).join(", "))}</span>.
+      ${r.observations} observation(s) on record. Edit any of those files and
+      this badge drops automatically — that is the point.</p>
+    ${(r.expired&&r.expired.length)?`<p class="pill bad">expired: ${
+      r.expired.map(e=>esc(e.kind+" — "+e.why)).join("; ")}</p>`:""}`,
+    [["Close","closeDlg()","ghost"],
+     ["Re-run offline evidence",`refreshOne('${esc(name)}')`,"pri"]]);
+}
+
+async function refreshOne(name){
+  showDlg(`Proof · ${esc(name)}`, `<p class="muted">running the covering tests…</p>`);
+  const r = await api('/api/proof/refresh', {method:"POST", body:{feature:name}});
+  closeDlg();
+  toast(r && r.refreshed ? "evidence re-recorded" : (r.error||"failed"));
+  render();
+}
+async function refreshProof(btn){
+  if (btn) btn.textContent = "running the suite…";
+  const r = await api('/api/proof/refresh', {method:"POST", body:{}});
+  toast(r && r.refreshed ? "evidence re-recorded for every capability"
+                         : ((r&&r.error)||"failed"));
+  render();
+}
+
+async function renderWorkProof(b){
+  const d = await api('/api/missions');
+  const ms = (d && d.missions) || [];
+  if (!ms.length){
+    b.innerHTML = `<div class="empty">No missions yet.<br>
+      <span class="muted">A mission carries success criteria, so its proof is
+      simply the evidence behind each one. Start one from Work.</span></div>`;
+    return;
+  }
+  b.innerHTML = `
+    <p class="muted">A mission closes when every criterion has evidence — not
+    when anyone decides it is done.</p>` +
+    ms.map(x=>`
+    <div class="card"><div class="body">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <b>${esc(x.objective)}</b>
+        <span class="pill ${x.complete?"ok":(x.blockers&&x.blockers.length)?"bad":"queued"}">
+          ${x.criteria_met}/${x.criteria_total} proven</span>
+      </div>
+      <div class="muted mono" style="font-size:11.5px">${esc(x.expert||"")} · ${esc(x.id)}</div>
+      ${(x.met||[]).map(c=>`<div style="font-size:12.5px;padding:2px 0">
+        <span class="pill ok">met</span> ${esc(c.text)}
+        ${c.evidence?`<span class="muted">— ${esc(c.evidence)}</span>`:
+          `<span class="pill bad">no evidence recorded</span>`}</div>`).join("")}
+      ${(x.open||[]).map(c=>`<div style="font-size:12.5px;padding:2px 0" class="muted">
+        <span class="pill ${c.state==="pending"?"queued":"bad"}">${esc(c.state)}</span>
+        ${esc(c.text)}</div>`).join("")}
+      <div class="row" style="margin-top:6px">
+        <button class="btn sm ghost"
+          onclick="openMission('${esc(x.expert)}','${esc(x.id)}')">open mission</button>
+      </div>
+    </div></div>`).join("");
+}
+
+/* =================================================================
+   RESOURCES — UI spec §8
+
+   "What agents know and can use", in the order a person asks about them:
+   the computers work runs on, the tools that are actually working, what has
+   been learned, and the procedures that were proven. Nothing here was
+   invented for this screen — every panel reads a store that already existed;
+   §16 says Memory moved here rather than being replaced.
+================================================================= */
+async function renderResources(m){
+  const tab = S.resTab || "computers";
+  const TABS = [["computers","Computers"],["tools","Tools"],
+                ["knowledge","Knowledge"],["skills","Skills"]];
+  m.innerHTML = `
+    <div class="pagehead"><h1>Resources</h1>
+      <span class="sub">${esc(NAV_PURPOSE.resources)}</span></div>
+    <div class="subtabs">${TABS.map(([k,l])=>
+      `<button class="${tab===k?"on":""}" onclick="S.resTab='${k}';render()">${l}</button>`
+      ).join("")}</div>
+    <div id="resBody"><p class="muted">loading…</p></div>`;
+  const b = document.getElementById("resBody");
+  if (tab==="computers") return renderComputers(b);
+  if (tab==="tools")     return renderToolsTab(b);
+  if (tab==="knowledge") return renderMemory(b, true);
+  return renderSkillsTab(b);
+}
+
+async function renderComputers(b){
+  const d = await api('/api/workers');
+  const ws = (d && d.workers) || [];
+  const kinds = (d && d.kinds) || {};
+  b.innerHTML = `
+    <p class="muted" style="max-width:80ch">Where work runs. The expert is
+    permanent; its computer is not — a computer that scales to zero costs
+    nothing while it is stopped, and a mission picks one automatically and
+    tells you why in a sentence.</p>
+    <div class="row" style="gap:6px;margin:8px 0;flex-wrap:wrap">
+      <button class="btn pri" onclick="dlgComputer()">Add a computer</button>
+      <button class="btn ghost" onclick="dlgChoose()">Which computer would this use?</button>
+      <span class="kchip"><b>${d.online||0}</b>online</span>
+      <span class="kchip"><b>${usd(d.spend_usd||0)}</b>spent</span>
+    </div>
+    <div class="agrid">
+      ${ws.length ? ws.map(w=>`
+        <div class="acard">
+          <div class="row" style="justify-content:space-between;align-items:center">
+            <b>${esc(w.name)}</b>
+            <span class="pill ${w.state==="online"?"ok":
+              w.state==="unreachable"?"bad":"dim"}">${esc(w.state)}</span>
+          </div>
+          <div class="muted" style="font-size:12px">${esc(kinds[w.kind]||w.kind)}</div>
+          <div class="row" style="gap:4px;margin-top:6px;flex-wrap:wrap">
+            <span class="pill ${w.zone==="trusted"?"warn":"dim"}">${esc(w.zone)} zone</span>
+            <span class="pill dim">${w.cost_per_hour?("$"+w.cost_per_hour+"/h"):"free"}</span>
+            ${w.scales_to_zero?`<span class="pill ok">scales to zero</span>`:""}
+            ${w.starts_in_s?`<span class="pill dim">${w.starts_in_s}s to start</span>`:""}
+          </div>
+          <div style="font-size:12px;margin-top:6px">can:
+            ${(w.declared||w.capabilities||[]).length
+              ?esc((w.declared||w.capabilities).join(", ")):"<span class='muted'>general work</span>"}
+            ${(w.implied&&w.implied.length)?`<span class="muted"
+              title="implied by its kind — you never have to type these">+ ${
+              esc(w.implied.join(", "))}</span>`:""}</div>
+          <div class="muted" style="font-size:12px">${w.experts.length
+            ? "only for: "+esc(w.experts.join(", "))
+            : "available to every agent"}</div>
+          <div class="muted" style="font-size:12px">used ${
+            w.used_seconds?Math.round(w.used_seconds/60)+" min":"never"} ·
+            ${usd(w.spend_usd)}</div>
+          <div class="row" style="gap:4px;margin-top:6px;flex-wrap:wrap">
+            ${["online","paused","stopped"].filter(st=>st!==w.state).map(st=>
+              `<button class="btn sm ghost"
+                 onclick="setWorkerState('${esc(w.id)}','${st}')">${st}</button>`).join("")}
+          </div>
+        </div>`).join("")
+      : `<div class="empty">No computers registered.<br>
+          <span class="muted">Local Docker is the usual first one: disposable,
+          free, and the most isolated place an agent can install anything.</span>
+          </div>`}
+    </div>
+    ${d.zones?`<p class="muted" style="font-size:12px;margin-top:10px">
+      Zones, least to most trusted: ${Object.entries(d.zones)
+        .sort((x,y)=>x[1].rank-y[1].rank)
+        .map(([z,v])=>esc(z)+" ("+esc(v.means)+")").join(" · ")}.
+      Work is placed cheapest first, then most isolated, then fastest —
+      isolation outranks speed on purpose.</p>`:""}`;
+}
+
+function dlgComputer(){
+  showDlg("Add a computer", `
+    <p class="muted" style="font-size:12.5px">What kind of computer is this, and
+    what can it actually do? The capabilities you list are the words a task's
+    requirements are matched against — "excel", "browser", "internal-network".</p>
+    <label class="lb">Name</label>
+    <input class="field" id="wName" placeholder="e.g. Office Windows PC">
+    <label class="lb">Kind</label>
+    <select class="field" id="wKind">
+      <option value="local-docker">Local Docker — disposable, free, on this machine</option>
+      <option value="cloud-container">Cloud container — short CPU work</option>
+      <option value="cloud-vm">Cloud computer — browser, desktop, stronger isolation</option>
+      <option value="gpu-worker">GPU worker — training and heavy inference</option>
+      <option value="fleet-worker">Organization computer — internal network, your apps</option>
+      <option value="local-host">This computer — trusted, never chosen automatically</option>
+    </select>
+    <label class="lb">What it can do (comma separated)</label>
+    <input class="field" id="wCan" placeholder="excel, internal-network, browser">
+    <label class="lb">Only for these experts (optional, comma separated)</label>
+    <input class="field" id="wFor" placeholder="leave blank for every agent">`,
+    [["Cancel","closeDlg()","ghost"],["Add","doComputer()","pri"]]);
+}
+async function doComputer(){
+  const v=id=>{const e=document.getElementById(id);return e?e.value.trim():"";};
+  if(!v("wName")){ toast("give it a name"); return; }
+  const split=s=>s.split(",").map(x=>x.trim()).filter(Boolean);
+  const r = await api('/api/workers', {method:"POST", body:{
+    name: v("wName"), kind: v("wKind"),
+    capabilities: split(v("wCan")), experts: split(v("wFor"))}});
+  closeDlg();
+  toast(r && r.worker ? `added — ${r.worker} (${r.zone} zone, ${r.state})`
+                      : ((r&&r.error)||"failed"));
+  render();
+}
+async function setWorkerState(id, state){
+  const r = await api('/api/workers/'+encodeURIComponent(id)+'/state',
+                      {method:"POST", body:{state}});
+  if (r && r.error) toast(r.error);
+  render();
+}
+function dlgChoose(){
+  showDlg("Which computer would this use?", `
+    <p class="muted" style="font-size:12.5px">Describe the work. The answer is a
+    sentence, not a machine name — you should be able to disagree with the
+    reason, which is impossible if all you are shown is a hostname.</p>
+    <label class="lb">The task</label>
+    <textarea class="field" id="chTask"
+      placeholder="e.g. open the quarterly spreadsheet on the internal share and chart it"></textarea>
+    <div id="chOut"></div>`,
+    [["Close","closeDlg()","ghost"],["Ask","doChoose()","pri"]]);
+}
+async function doChoose(){
+  const e = document.getElementById("chTask");
+  const r = await api('/api/workers/choose',
+                      {method:"POST", body:{task: e?e.value:""}});
+  const out = document.getElementById("chOut");
+  if (!out) return;
+  out.innerHTML = (r && r.why)
+    ? `<div class="card"><div class="body">
+        <b>${esc(r.why)}</b>
+        ${r.worker?`<div class="muted mono" style="font-size:12px">${
+          esc(r.worker.id)} · ${esc(r.worker.zone)} zone</div>`:""}
+        <div class="muted" style="font-size:12px;margin-top:4px">required: ${
+          (r.needed&&r.needed.length)?esc(r.needed.join(", "))
+            :"nothing in particular — so the cheapest, most isolated computer wins"}</div>
+        ${(r.considered&&r.considered.length>1)?`<details><summary class="muted"
+          style="cursor:pointer;font-size:12px">why not the others?</summary>
+          ${r.considered.filter(c=>c.id!==(r.worker&&r.worker.id)).map(c=>
+            `<div style="font-size:12px">${esc(c.name)} —
+             ${c.eligible?`<span class="muted">also eligible${
+               c.cost_per_hour?", but costs $"+c.cost_per_hour+"/h":
+               ", but less isolated"}</span>`
+             :`<span class="muted">${esc(c.why_not)}</span>`}</div>`).join("")}
+          </details>`:""}
+      </div></div>`
+    : `<div class="empty">${esc((r&&(r.error||(r.why&&r.why.why)))
+        ||"no computer matches that yet")}</div>`;
+}
+
+async function renderToolsTab(b){
+  const r = await api('/api/toolbox');
+  if (!r || r.error){ b.innerHTML = `<div class="empty">${
+    esc((r&&r.error)||"unavailable")}</div>`; return; }
+  const caps = r.capabilities || {};
+  const ready = Object.entries(caps).filter(([,c])=>c.ready);
+  const miss  = Object.entries(caps).filter(([,c])=>!c.ready);
+  const flags = o => Object.entries(o||{}).map(([n,ok])=>
+    `<span class="pill ${ok?"ok":"dim"}">${esc(n)}</span>`).join(" ");
+  b.innerHTML = `
+    <p class="muted" style="max-width:80ch">What agents can actually do right
+    now. A missing capability is shown as missing — an agent that cannot read a
+    PDF says so instead of inventing its contents.</p>
+    <div class="card"><div class="body">
+      <label class="lb">Working (${ready.length})</label>
+      <div class="row" style="flex-wrap:wrap;gap:4px">${ready.map(([n,c])=>
+        `<span class="pill ok" title="${esc(c.how||"")}">${esc(n)}</span>`).join("")}</div>
+      ${miss.length?`<label class="lb">Missing — agents will ask rather than pretend</label>
+        <div class="row" style="flex-wrap:wrap;gap:4px">${miss.map(([n,c])=>
+          `<span class="pill dim" title="${esc(c.how||"")}">${esc(n)}</span>`).join("")}</div>`:""}
+    </div></div>
+    <div class="card"><div class="body">
+      <label class="lb">Programs on this machine</label>
+      <div class="row" style="flex-wrap:wrap;gap:4px">${flags(r.binaries)}</div>
+      <label class="lb">Python packages</label>
+      <div class="row" style="flex-wrap:wrap;gap:4px">${flags(r.modules)}</div>
+      <label class="lb">Provider keys present</label>
+      <div class="row" style="flex-wrap:wrap;gap:4px">${flags(r.keys)}</div>
+      <p class="muted" style="font-size:12px">A key is shown as present or
+      absent and never printed — the panel has no way to reveal one.</p>
+    </div></div>
+    ${(r.custom&&r.custom.length)?`<div class="card"><div class="body">
+      <label class="lb">Connected servers (MCP)</label>
+      ${r.custom.map(c=>`<div style="font-size:12.5px">${esc(
+        typeof c==="string"?c:JSON.stringify(c))}</div>`).join("")}
+    </div></div>`:""}`;
+}
+
+async function renderSkillsTab(b){
+  const d = await refreshSys();
+  const experts = (d && d.experts) || [];
+  if (!experts.length){ b.innerHTML = `<div class="empty">No agents yet.</div>`; return; }
+  b.innerHTML = `
+    <p class="muted" style="max-width:80ch">Procedures the fleet has proven it
+    can perform. A skill is trusted because the owner recorded that decision —
+    never because the file that arrived claims to be trusted.</p>
+    <div class="agrid">${experts.map(e=>`
+      <div class="acard">
+        <div class="row" style="align-items:center;gap:8px">
+          ${avatar(e.name, 28)}<b>${esc(e.name)}</b>
+        </div>
+        <div class="muted" style="font-size:12px">${esc((e.identity||"").slice(0,110))}</div>
+        <div class="row" style="gap:4px;margin-top:6px">
+          <button class="btn sm ghost" onclick="openAgent('${esc(e.name)}','mind')">skills</button>
+          <button class="btn sm ghost" onclick="openAgent('${esc(e.name)}','teach')">knowledge</button>
+        </div>
+      </div>`).join("")}</div>`;
+}
+
+/* =================================================================
+   ADMIN — UI spec §2 and §16
+
+   Infrastructure and policy: the things an owner changes rarely and an agent
+   never. §16's migration lands Models and System here intact — the code was
+   not rewritten, it was filed where somebody would look for it.
+================================================================= */
+async function renderAdmin(m){
+  const tab = S.adminTab || "health";
+  const TABS = [["health","Health"],["metrics","Is it working?"],
+                ["models","Models & cost"],["people","People"],["audit","Audit"],
+                ["training","Training lab"],["backup","Backup & release"]];
+  m.innerHTML = `
+    <div class="pagehead"><h1>Admin</h1>
+      <span class="sub">${esc(NAV_PURPOSE.admin)}</span></div>
+    <div class="subtabs">${TABS.map(([k,l])=>
+      `<button class="${tab===k?"on":""}" onclick="S.adminTab='${k}';render()">${l}</button>`
+      ).join("")}</div>
+    <div id="admBody"><p class="muted">loading…</p></div>`;
+  const b = document.getElementById("admBody");
+  if (tab==="health")   return renderSystem(b, true);
+  if (tab==="metrics")  return renderMetrics(b);
+  if (tab==="models")   return renderModels(b, true);
+  if (tab==="people")   return renderPeople(b);
+  if (tab==="audit")    return renderAudit(b);
+  if (tab==="training") return renderTrainingLab(b);
+  return renderRelease(b);
+}
+
+/* ---------- Metrics — manual §29 --------------------------------------
+   The interesting half of this panel is the bottom: the metrics the platform
+   cannot honestly compute, named with the reason. A dashboard where every
+   tile has a number is one where you cannot tell measurement from decoration.
+------------------------------------------------------------------ */
+async function renderMetrics(b){
+  const d = await api('/api/metrics');
+  if (!d || d.error){ b.innerHTML = `<div class="empty">${
+    esc((d&&d.error)||"unavailable")}</div>`; return; }
+  const show = m => {
+    /* the narrative row is checked FIRST: its value is null on purpose, and
+       falling into the null branch would label a deliberate refusal to
+       compute as missing data */
+    if (m.unit === "narrative") return "—";
+    if (m.value === null || m.value === undefined) return m.note ? "not yet" : "no data";
+    if (typeof m.value === "boolean") return m.value ? "holds" : "does not hold";
+    if (m.unit === "USD") return usd(m.value);
+    if (m.unit === "count") return String(m.value);
+    return Math.round(m.value * 1000) / 10 + "%";
+  };
+  b.innerHTML = `
+    <p class="muted" style="max-width:80ch">${esc(d.caveat)}</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Metric</th><th>Now</th><th>Over</th><th>What it means</th></tr></thead>
+      <tbody>${d.metrics.map(m=>`<tr>
+        <td>${esc(m.metric)}</td>
+        <td><span class="pill ${m.enough?"":"dim"}">${esc(show(m))}</span></td>
+        <td class="muted mono" style="font-size:12px">${m.numerator}/${m.denominator}${
+          m.enough?"":" <span class='pill dim'>too few</span>"}</td>
+        <td style="font-size:12.5px">${esc(m.means||"")}
+          ${m.note?`<div class="muted" style="font-size:12px">${esc(m.note)}</div>`:""}
+          ${m.also?`<div class="muted" style="font-size:12px">${esc(m.also)}</div>`:""}
+          ${(m.levers||[]).filter(l=>l.count).length?`<details><summary
+            class="muted" style="cursor:pointer;font-size:12px">what the fleet
+            actually did</summary>${m.levers.filter(l=>l.count).map(l=>`
+            <div style="font-size:12px;padding:2px 0"><b>${l.count}</b> ${esc(l.lever)}
+              <div class="muted">instead: ${esc(l.instead)}</div></div>`).join("")}
+            </details>`:""}
+          ${m.not_the_multiplier?`<div class="muted" style="font-size:12px;
+            border-left:3px solid var(--warn);padding-left:7px;margin-top:4px">${
+            esc(m.not_the_multiplier)}</div>`:""}
+          <div class="muted" style="font-size:11.5px">from ${esc(m.source||"—")}</div></td>
+      </tr>`).join("")}</tbody></table></div>
+    <div class="card" style="border-color:var(--warn);margin-top:12px"><div class="body">
+      <label class="lb">Not measured here, and why</label>
+      ${d.not_measurable.map(r=>`<div style="font-size:12.5px;padding:3px 0">
+        <b>${esc(r.metric)}</b>
+        <div class="muted">${esc(r.why)}</div></div>`).join("")}
+      <p class="muted" style="font-size:12px">Naming these is the point. A tile
+      with a number in it looks like a measurement whether or not anything was
+      measured, and the three above would be the easiest ones to fake.</p>
+    </div></div>
+    <p class="muted mono" style="font-size:12px;margin-top:8px">python metrics.py --json</p>`;
+}
+async function renderPeople(b){
+  const d = await api('/api/org');
+  if (!d || d.error){ b.innerHTML = `<div class="empty">${
+    esc((d&&d.error)||"unavailable")}</div>`; return; }
+  if (!d.organization){
+    b.innerHTML = `
+      <div class="empty">This is a solo install.<br>
+        <span class="muted">${esc(d.note||"")}</span></div>
+      <div class="card"><div class="body">
+        <label class="lb">Share this fleet with other people</label>
+        <p class="muted" style="font-size:12.5px">Creating an organization turns
+        on roles and an attributable audit trail. Until then nothing asks you
+        for permission, which is the correct behaviour for one person on one
+        machine.</p>
+        <label class="lb">Organization name</label>
+        <input class="field" id="orgName" placeholder="e.g. Acme Research">
+        <label class="lb">Your email (the owner)</label>
+        <input class="field" id="orgOwner" placeholder="you@example.com">
+        <button class="btn pri" onclick="doOrg()">Create the organization</button>
+      </div></div>`;
+    return;
+  }
+  b.innerHTML = `
+    <div class="pagehead"><h2 style="margin:0">${esc(d.organization)}</h2>
+      <span class="sub">roles and an attributable trail</span>
+      <span class="spacer"></span>
+      <button class="btn sm" onclick="dlgInvite()">Invite someone</button></div>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Person</th><th>Role</th><th>Can</th><th>Panel access</th>
+        <th>Added</th></tr></thead>
+      <tbody>${d.users.map(u=>`<tr>
+        <td>${esc(u.email)}${u.active?"":` <span class="pill dim">inactive</span>`}</td>
+        <td><span class="pill ${u.role==="owner"?"ok":"dim"}">${esc(u.role)}</span></td>
+        <td class="muted" style="font-size:12px">${esc(
+          Object.entries(d.permissions||{})
+            .filter(([,need])=>d.roles.indexOf(u.role)>=d.roles.indexOf(need))
+            .map(([p])=>p).join(", "))}</td>
+        <td>${u.has_token
+          ? `<span class="pill ok">has one</span>
+             <button class="btn sm ghost" onclick="revokeToken('${esc(u.email)}')">revoke</button>`
+          : `<button class="btn sm" onclick="issueToken('${esc(u.email)}')">give one</button>`}</td>
+        <td class="muted" style="font-size:12px">${esc(u.added||"")}</td>
+      </tr>`).join("")}</tbody></table></div>
+    <p class="muted" style="font-size:12px">Roles are a ladder — each one
+    includes every role beneath it: ${esc(d.roles.join(" → "))}.
+    ${d.audit_entries} action(s) recorded in the audit trail.</p>
+    <p class="muted" style="font-size:12px">A member needs their own access
+    token to use this panel: without one, whoever holds the panel's master
+    token is treated as the owner. A token is shown once, never stored — only
+    its hash is kept — and every write is checked against the role it belongs
+    to, so the audit trail names the credential rather than whatever the
+    request claimed.</p>`;
+}
+async function doOrg(){
+  const v=id=>{const e=document.getElementById(id);return e?e.value.trim():"";};
+  if(!v("orgName")||!v("orgOwner")){ toast("name and owner email"); return; }
+  const r = await api('/api/org', {method:"POST",
+    body:{name:v("orgName"), owner:v("orgOwner")}});
+  toast(r && r.organization ? "organization created" : ((r&&r.error)||"failed"));
+  render();
+}
+function dlgInvite(){
+  showDlg("Invite someone", `
+    <label class="lb">Email</label>
+    <input class="field" id="ivMail" placeholder="colleague@example.com">
+    <label class="lb">Role</label>
+    <select class="field" id="ivRole">
+      <option value="viewer">viewer — read everything, change nothing</option>
+      <option value="reviewer">reviewer — flag problems</option>
+      <option value="approver">approver — answer guarded actions</option>
+      <option value="operator" selected>operator — start and drive work</option>
+      <option value="builder">builder — create agents, connect tools</option>
+      <option value="admin">admin — secrets, budgets, people</option>
+    </select>
+    <label class="lb">Your email (the actor doing the inviting)</label>
+    <input class="field" id="ivAs" placeholder="you@example.com">`,
+    [["Cancel","closeDlg()","ghost"],["Invite","doInvite()","pri"]]);
+}
+async function doInvite(){
+  const v=id=>{const e=document.getElementById(id);return e?e.value.trim():"";};
+  const r = await api('/api/org/users', {method:"POST",
+    body:{email:v("ivMail"), role:v("ivRole"), actor:v("ivAs")}});
+  closeDlg();
+  toast(r && r.added ? `${r.added} added as ${r.role}` : ((r&&r.error)||"failed"));
+  render();
+}
+
+async function issueToken(email){
+  const r = await api('/api/org/token', {method:"POST", body:{email}});
+  if (!r || r.error){ toast((r&&r.error)||"failed"); return; }
+  /* shown once, deliberately: the panel has no way to show it again, because
+     it was never stored — only its hash was. */
+  showDlg("Access token for "+esc(email), `
+    <p class="muted" style="font-size:12.5px">${esc(r.note)}</p>
+    <pre class="out" style="user-select:all;font-size:13px">${esc(r.token)}</pre>
+    <p class="muted" style="font-size:12px">They send it as
+    <span class="mono">Authorization: Bearer &lt;token&gt;</span>, or paste it
+    when this panel asks for one. Every write they make is checked against
+    their role, and the audit trail records them by name.</p>`);
+  render();
+}
+async function revokeToken(email){
+  const r = await api('/api/org/revoke', {method:"POST", body:{email}});
+  toast(r && r.revoked ? `${email} can no longer use the panel`
+                       : ((r&&r.error)||"there was no token to revoke"));
+  render();
+}
+async function renderAudit(b){
+  const d = await api('/api/audit?limit=200');
+  const rows = ((d && d.trail) || []).slice().reverse();
+  b.innerHTML = rows.length ? `
+    <p class="muted">Every mutation, attributable. Append-only: a trail you can
+    edit is a story, not a record.</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th>When</th><th>Who</th><th>Did what</th><th>To</th></tr></thead>
+      <tbody>${rows.map(r=>`<tr>
+        <td class="muted mono" style="font-size:11.5px">${esc(r.at)}</td>
+        <td style="font-size:12.5px">${esc(r.actor)}</td>
+        <td class="mono" style="font-size:12px">${esc(r.action)}</td>
+        <td style="font-size:12.5px">${esc(r.object_kind)}:${esc(r.object)}
+          ${r.detail?`<span class="muted">— ${esc(r.detail)}</span>`:""}</td>
+      </tr>`).join("")}</tbody></table></div>`
+    : `<div class="empty">No audited actions yet.<br>
+        <span class="muted">The audit records organization mutations; it fills
+        up once this fleet is shared with somebody.</span></div>`;
+}
+
+async function renderTrainingLab(b){
+  const d = await api('/api/training');
+  if (!d || d.error){ b.innerHTML = `<div class="empty">${
+    esc((d&&d.error)||"unavailable")}</div>`; return; }
+  b.innerHTML = `
+    <div class="row" style="gap:6px;flex-wrap:wrap">
+      <span class="kchip"><b>${d.trajectories}</b>trajectories captured</span>
+      <span class="kchip"><b>${d.verified}</b>verified by a gate</span>
+      <span class="kchip"><b>${d.candidates}</b>candidate checkpoints</span>
+    </div>
+    <div class="card"><div class="body">
+      <label class="lb">Promoted checkpoint</label>
+      <div style="font-size:13px">${esc((d.promoted&&d.promoted.checkpoint)||"none")}
+        ${d.promoted&&d.promoted.rollback_to?`<span class="muted">— rolls back to
+          ${esc(d.promoted.rollback_to)}</span>`:""}</div>
+    </div></div>
+    <div class="card" style="border-color:var(--warn)"><div class="body">
+      <label class="lb">Where this stops, and why</label>
+      <p style="font-size:12.5px;margin:4px 0">${esc(d.boundary)}</p>
+      <p class="muted" style="font-size:12px">Saying so is the feature. A
+      platform that claimed to fine-tune while doing nothing of the kind would
+      earn a proof level it has not been anywhere near.</p>
+    </div></div>`;
+}
+
+async function renderRelease(b){
+  b.innerHTML = `
+    <div class="card"><div class="body">
+      <label class="lb">Backup</label>
+      <p class="muted" style="font-size:12.5px">A backup carries the shape of
+      the configuration and never the keys, so restoring it on another machine
+      asks for credentials rather than silently inheriting them.</p>
+      <button class="btn" onclick="runBackup()">Back up the fleet</button>
+    </div></div>
+    <div class="card"><div class="body">
+      <label class="lb">Release gate</label>
+      <p class="muted" style="font-size:12.5px">Preflight is the honest verdict
+      on whether this installation is ready to be relied on — it names blockers
+      rather than scoring them away.</p>
+      <div class="row" style="gap:6px;flex-wrap:wrap">
+        <button class="btn" onclick="runPreflight()">Check readiness</button>
+        <button class="btn ghost" onclick="openEvidence()">Why do we believe this works?</button>
+        <button class="btn ghost" onclick="go('proof')">Proof levels</button>
+      </div>
+    </div></div>
+    <div class="card"><div class="body">
+      <label class="lb">Federation</label>
+      <div id="fedBody"><span class="muted">loading…</span></div>
+    </div></div>`;
+  loadFederation();
+}
+
+/* =================================================================
+   MISSION — UI spec §6, the centre of the product
+
+   Not a log. The objective the agent is bound to, the criteria that decide
+   when it is finished, what is blocking it and — where a blocker cannot be
+   solved by trying harder — what it needs from you.
+================================================================= */
+function openMission(expert, id){
+  S.view="mission"; S.sel=null; S.missionExpert=expert; S.missionId=id;
+  closeDlg(); render();
+}
+async function renderMission(m){
+  if (!S.missionExpert || !S.missionId){ go('work'); return; }
+  const d = await api('/api/experts/'+encodeURIComponent(S.missionExpert)
+                      +'/missions/'+encodeURIComponent(S.missionId));
+  if (!d || d.error){
+    m.innerHTML = `<div class="empty">${esc((d&&d.error)||"mission not found")}</div>`;
+    return;
+  }
+  const pct = d.criteria_total ? Math.round(100*d.criteria_met/d.criteria_total) : 0;
+  m.innerHTML = `
+    <button class="btn sm ghost" onclick="go('work')">← Work</button>
+    <div class="pagehead"><h1>${esc(d.objective)}</h1>
+      <span class="sub mono">${esc(S.missionExpert)} · ${esc(d.id)} ·
+        contract ${esc(d.fingerprint)}${d.amendments?` · amended ${d.amendments}×`:""}</span>
+      <span class="spacer"></span>
+      <span class="pill ${d.complete?"ok":d.blockers.length?"bad":"queued"}">${
+        d.criteria_met}/${d.criteria_total} met</span></div>
+    <div class="bar ${d.complete?"ok":""}"><i style="width:${pct}%"></i></div>
+
+    <div class="card"><div class="body">
+      <label class="lb">Success criteria</label>
+      <p class="muted" style="font-size:12px;margin:2px 0 6px">This mission closes
+      when every one of these has evidence — the objective cannot be edited to
+      match what was achieved, and evidence is never removed.</p>
+      ${d.met.map(c=>`<div style="font-size:13px;padding:3px 0">
+        <span class="pill ok">met</span> <span class="mono">${esc(c.id)}</span> ${esc(c.text)}
+        ${c.evidence?`<div class="muted" style="font-size:12px;margin-left:14px">${
+          esc(c.evidence)}</div>`:`<span class="pill bad">no evidence</span>`}</div>`).join("")}
+      ${d.open.map(c=>`<div style="font-size:13px;padding:3px 0">
+        <span class="pill ${c.state==="pending"?"queued":"bad"}">${esc(c.state)}</span>
+        <span class="mono">${esc(c.id)}</span> ${esc(c.text)}</div>`).join("")}
+      ${!d.criteria_total?`<div class="muted">no criteria — a mission without them
+        cannot be finished, only abandoned</div>`:""}
+    </div></div>
+
+    ${d.constraints.length?`<div class="card"><div class="body">
+      <label class="lb">Binding constraints</label>
+      ${d.constraints.map(c=>`<div style="font-size:12.5px">• ${esc(c)}</div>`).join("")}
+    </div></div>`:""}
+    ${d.non_goals.length?`<div class="card"><div class="body">
+      <label class="lb">Explicitly not in scope</label>
+      ${d.non_goals.map(c=>`<div style="font-size:12.5px">• ${esc(c)}</div>`).join("")}
+    </div></div>`:""}
+
+    ${d.needs_human.length?`<div class="card" style="border-color:var(--bad)"><div class="body">
+      <label class="lb">Needs you</label>
+      <p class="muted" style="font-size:12px;margin:2px 0 6px">These cannot be
+      solved by the agent trying harder.</p>
+      ${d.needs_human.map(x=>`<div style="font-size:12.5px;padding:2px 0">
+        <span class="pill bad">${esc(x.user_sees)}</span> ${esc(x.detail)}</div>`).join("")}
+    </div></div>`:""}
+
+    ${d.blockers.filter(x=>!x.needs_human).length?`
+      <div class="card" style="border-color:var(--warn)"><div class="body">
+      <label class="lb">Blocked on</label>
+      ${d.blockers.filter(x=>!x.needs_human).map(x=>`<div style="font-size:12.5px;padding:2px 0">
+        <span class="pill warn">${esc(x.user_sees)}</span> ${esc(x.detail)}
+        <span class="muted">→ ${esc(x.routes_to)}</span></div>`).join("")}
+    </div></div>`:""}
+
+    <div class="row" style="gap:6px;margin:8px 0;flex-wrap:wrap">
+      <span class="kchip"><b>${d.actions}</b>bound actions</span>
+      <span class="kchip"><b>${d.amendments}</b>amendments</span>
+      <span class="kchip">${esc(d.status)}</span>
+    </div>
+
+    <details><summary class="muted" style="cursor:pointer">Advanced — the contract
+      exactly as the agent sees it, recompiled every iteration</summary>
+      <pre class="out">${esc(d.contract||"")}</pre></details>`;
 }
 /* =================================================================
    BOOT + auto-refresh

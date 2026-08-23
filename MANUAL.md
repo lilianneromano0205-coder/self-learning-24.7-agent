@@ -61,34 +61,114 @@ Six systems, each with its own module set:
 | 5 | **Improvement & governance** — variants with predictions, approvals, replay, benchmark | `variants.py` `approvals.py` `replay.py` `benchmark.py` |
 | 6 | **Control plane & interop** — panel, chief, doctor, providers, toolbox, MCP, A2A, traces, cards | `ui.py` `ui.html` `chief.py` `doctor.py` `providers.py` `toolbox.py` `mcp.py` `federation.py` `trace.py` `uicards.py` `modelrouter.py` |
 
+Underneath all six sit the **five authorities** — one mandatory gateway per
+kind of power, so a control cannot defend only the path its author happened to
+be thinking about:
+
+| Authority | Module | Every caller must pass it to… |
+|---|---|---|
+| Execution | `execution.py` (+ `policy.py`, `sandbox.py`) | run a process |
+| File | `fileauth.py` | read or write a path |
+| Credential | `credentials.py` | resolve a secret |
+| Model gateway | `modelgateway.py` | make a provider call |
+| Effect | `effects.py` | do something with an outside consequence |
+
+…plus the systems that decide whether any of it can be believed: `proof.py`
+(capability levels 0–5, derived from evidence bound to a code hash),
+`mission.py` (the objective held outside the transcript), `workers.py` (where
+work runs), `acquire.py` (how a capability is gained), `org.py` (who may do
+what) and `training.py` (what may be promoted).
+
 ---
 
 ## 3. The panel
 
 `python ui.py` (or let `bootstrap.py` start it) → http://127.0.0.1:7777
 
-Seven sections: **Home · Guide · Agents · Work · Memory · Models · System**.
+Six sections, named for **jobs, not architecture** — the interface no longer
+asks you to learn the implementation map before getting work done:
 
-- **Home** — readiness banner, what needs you, *Today* (ranked from real
-  state), then the **live pulse**: a server-sent event stream, not polling.
-  Events appear the moment an agent writes them.
-- **Agents** — five creation lanes and the roster. Opening one gives the
-  workspace: *Overview · Teach · Board · Mind · Ask · Identity · Wiring*,
-  with a **teammate rail** to switch between colleagues without losing place.
-  - **Board** — every task. Each row opens a dialog with its **stop
-    condition**, resumable checkpoint progress, the **context window** it was
-    given, its **trace**, any **cards** it returned, and *save as routine*.
-  - **Identity** — edit `identity.md` (previous versions kept) and the
-    fleet-wide **owner pins** injected first into every agent's context.
-- **Work** — goals (with the plan and its CHECK commands visible), teams
-  (readable as **threads**: brief → plan → each deliverable → synthesis) and
-  workflows drawn as **pipelines** with their gates.
-- **Memory** — the fleet map, failures by category, competence, retired
-  agents, and every compiled **context window**.
-- **Models** — providers, live catalogue, per-model measured profiles,
-  charter **variants with predictions**.
-- **System** — doctor, harness manifest, pulses, **tool error rates**,
-  **routines**, federation, remote access.
+| Section | Purpose |
+|---|---|
+| **Home** | start work and see what needs attention |
+| **Work** | everything being done |
+| **Agents** | create and manage intelligence |
+| **Resources** | what agents know and can use |
+| **Proof** | evidence and quality |
+| **Admin** | infrastructure and policy |
+
+Nothing was removed to get there. Memory became *Resources → Knowledge*,
+Models and System became *Admin* tabs, and Guide became contextual help
+reachable from the ⌘K palette. `tests/test_frontend.py` asserts that each
+one is still routed **and** still reachable from something a person can click.
+
+- **Home** — a command bar (*"What do you want accomplished?"*) and four
+  primary actions: **New mission · Create specialist · Build team · Connect
+  tool or computer**. Below it: **active work** (objective, progress against
+  its criteria, current action, cost, next blocker), **needs you**, **recently
+  completed** with its proof, a one-line platform-health verdict, *Today*
+  ranked from real state, and the **live pulse** — a server-sent event stream,
+  not polling.
+  A **first-10-minutes checklist** sits on top until it is done; its seven
+  steps read real state, so creating an agent from the terminal ticks the box
+  just as well.
+- **Agents** — the roster, and a creation wizard that asks **what you need**
+  rather than which of the five lanes you want. Five intent questions map
+  invisibly to the lanes, then six steps (Job · Knowledge · Access · Quality ·
+  Cost · Review) end in a plain-language summary of what the agent will be able
+  to know, do, spend and change.
+  Opening one gives *Overview · Work · Knowledge · Skills · Performance ·
+  Access · Advanced*, with a **teammate rail**.
+  - **Work** — every task, with its **stop condition**, resumable checkpoint
+    progress, the **context window** it was given, its **trace**, any **cards**
+    it returned, and *save as routine*. A failed row says which part failed —
+    the verifier, the platform, the provider, the budget, the command, the
+    agent, or you — and what happens next.
+  - **Knowledge** — the **certification record**: sources by authority,
+    requirements covered over requirements required, open gaps, lessons written
+    up, the exam score and whether it was closed-book. No percentage is ever
+    printed without its denominator.
+  - **Performance** — verified success, false success, the case ledger, cost by
+    purpose, which model actually works for *this* agent (with the sample size),
+    tool error rates, and which computers its work ran on.
+  - **Advanced** — *Identity & prompts* (edit `identity.md`, previous versions
+    kept, plus the fleet-wide **owner pins**), *Models & compute*, and the
+    **raw file tree**.
+- **Work** — missions, goals (with the plan and its CHECK commands visible),
+  teams readable as **threads** (brief → plan → each deliverable → synthesis),
+  and workflows drawn as **pipelines** with their gates.
+  A **mission page** is the centre of the product: the objective and its
+  contract fingerprint, the success-criteria checklist with the evidence behind
+  each met one, binding constraints, explicit non-goals, *Needs you* separated
+  from *Blocked on*, and the contract exactly as the agent sees it under
+  Advanced.
+- **Resources** — **Computers** (zone, capability, cost, scale-to-zero, who may
+  use each), **Tools**, **Knowledge** (the fleet map, failures, competence,
+  retired agents) and **Skills**.
+- **Proof** — *Work proof* (every mission's criteria and their evidence) and
+  *Platform proof* (fifteen capabilities, each with its level 0–5, the reason,
+  the invariants, the code hash the evidence is bound to, and the exact command
+  that reproduces it). **No endpoint can set a level.**
+- **Admin** — *Health* (doctor, harness manifest, pulses, tool error rates,
+  routines, federation, remote access), *Models & cost* (the policy chooser:
+  Cheapest · Balanced · Highest quality · Custom, plus providers, catalogue and
+  charter variants), *People* (roles and the audit trail), *Audit*, *Training
+  lab* and *Backup & release*.
+
+**Several people?** `python org.py create "Acme" --owner you@example.com`
+turns on roles and an attributable audit trail. Each member gets a personal
+panel token (`python org.py token <email> --as you@…`, or *give one* in
+Admin → People); every write is then checked against the role that token
+belongs to, and the trail records the credential rather than whatever the
+request claimed. A fleet that belongs to an organization **auto-enables a
+panel token** — without one there is nothing to check, so everybody would
+resolve to the owner and the roles would govern nothing. With no organization created, nothing asks you for
+permission — which is the right behaviour for one person on one machine.
+(`tests/test_rbac.py`)
+
+**⌘K / Ctrl-K** opens the command palette: every action in one searchable
+list, each showing the equivalent CLI command, so the panel teaches the
+terminal instead of hiding it.
 
 On a phone the same panel becomes a bottom-nav app: single column, full-screen
 dialogs, 40 px targets.
@@ -133,6 +213,17 @@ dialogs, 40 px targets.
 | `python demo.py` | the whole platform, keyless, in one run |
 | `python preflight.py` | is this installation fit to run unattended? (§17) |
 | `python backup.py create\|verify\|restore\|list` | the memory is the asset — back it up and prove the restore |
+| `python proof.py [--refresh] [--feature F]` | every capability's proof level, why it holds, and the command that reproduces it; `--refresh` re-runs the covering tests and re-records the evidence |
+| `python mission.py new\|show\|meet\|block` | the objective, its success criteria and the evidence behind each |
+| `python workers.py add\|list\|choose` | the computers work can run on, and which one a task would use, with the reason |
+| `python org.py create\|invite\|who\|can\|audit\|token\|revoke\|roles` | several people sharing one fleet: roles, personal panel tokens, and an attributable trail |
+| `python acquire.py search\|inspect\|install\|test\|promote` | gaining a capability without gaining uncontrolled authority |
+| `python training.py status\|export\|register\|promote\|rollback` | training data and promotion governance (it does **not** update weights; trajectories are captured by the loop, not by hand) |
+| `python execution.py --audit` | every process-execution site in the tree, and whether it goes through the authority |
+| `python modelrouter.py policy <name>` | Cheapest · Balanced · Highest quality · Custom |
+| `python curriculum.py --root <e> --course <c> [--plan\|--apply]` | what to study first, and why |
+| `python evidence.py` | why we believe each system works, and what remains unproven |
+| `python metrics.py [--expert <slug>] [--json]` | the twelve numbers that say whether any of this is working — and the three it refuses to invent |
 
 ---
 

@@ -332,6 +332,12 @@ def main():
     p = sub.add_parser("promote"); p.add_argument("checkpoint")
     p.add_argument("--baseline", type=float, required=True)
     p.add_argument("--root", default=".")
+    p = sub.add_parser("rollback")
+    p.add_argument("--why", required=True,
+                   help="a rollback with no stated reason teaches nobody "
+                        "anything the next time this decision comes up")
+    p.add_argument("--by", default="owner")
+    p.add_argument("--root", default=".")
     a = ap.parse_args()
     root = os.path.abspath(a.root)
     if a.cmd == "status":
@@ -351,6 +357,17 @@ def main():
         c = register(root, a.run, a.checkpoint, a.eval_score, a.verifier_hash,
                      seeds=a.seeds)
         print(f"registered {c['checkpoint']} @ {c['eval_score']:.3f}")
+        return
+    if a.cmd == "rollback":
+        try:
+            back = rollback(root, a.by, a.why)
+        except (Refused, ValueError) as e:
+            print(f"REFUSED: {e}")
+            raise SystemExit(1)
+        print(f"rolled back to {back['checkpoint']} "
+              f"(from {back['rolled_back_from']})")
+        print("  a promotion without a way back is a one-way door; this is "
+              "the way back")
         return
     p = promote(root, a.checkpoint, a.baseline)
     print(f"promoted {p['checkpoint']} (rollback target: "

@@ -6,8 +6,12 @@ residual risk remains. Findings are numbered as in
 `GAPS_RISKS_AND_UNFINISHED.md`.
 
 **Verification for everything below:** `python tests/run_all.py` → **ALL TESTS
-PASSED**, twice consecutively (83 tests, 341 evidence observations);
-`python harness.py --check` → exit 0; `python preflight.py` → 0 blockers.
+PASSED**, twice consecutively (93 tests); `python harness.py --check` → exit 0;
+`python preflight.py` → 0 blockers.
+
+This document now covers **three passes**: two read-only forensic audits, and
+a third set of defects (`U1`–`U8`, at the end) found by *building a
+specification against the running system* rather than reading it.
 
 ---
 
@@ -141,9 +145,94 @@ These are **not fixed**, and the reasons differ:
 catalogue), `tests/test_hardening.py` (8 audit findings kept closed),
 `tests/test_csrf.py` (live cross-origin attack), `.gitignore`.
 
+**New in the third pass:** `tests/test_ux.py` (the UI spec's own §15
+acceptance table, executed), plus four checks added to
+`tests/test_invariants.py`: expert-birth paths, exam-reader agreement,
+sandbox-name uniqueness, and documented-CLI existence.
+
+**Changed in the third pass:** `ui.html` (the whole redesign), `ui.py`
+(`performance()`, `training_view()`, the policy and mission routes, the
+flattened worker choice), `fleet.py` (seeding at the gateway), `selfmodel.py`
+(the exam score), `workers.py` (kind-implied capabilities),
+`modelrouter.py` (named policies and the quality tie-break), `mission.py`
+(current action, plan, cost, and the meet/block/close CLI), `acquire.py`
+(the console guard, four subcommands, one refusal path), `training.py`
+(the rollback CLI), `MANUAL.md`, `REFERENCE.md`, `CHANGELOG.md`,
+`GAPS_RISKS_AND_UNFINISHED.md`, and 3 test files.
+
 **Changed:** `ui.py`, `loop.py`, `verify.py`, `goal.py`, `locks.py`,
 `ingest.py`, `skills.py`, `backup.py`, `package.py`, `providers.py`,
 `chief.py`, `effects.py`, `mcp.py`, `modelrouter.py`, `sources.py`,
 `memory.py`, `replay.py`, `federation.py`, `commons.py`, `approvals.py`,
 `prospective.py`, `checkpoint.py`, `routines.py`, `demo.py`, `evidence.py`,
 `settings.toml`, and 14 test files.
+
+---
+
+## Third pass — U1…U11, found while building the UI/UX redesign
+
+The first two passes read the code. This one **executed** it, against a
+specification written by somebody else, which is a different instrument: it
+drove paths the audits had inspected but never run. Eleven defects, all fixed, all with a regression test. U10 is a P1 — an
+authorization control that no caller called — and U11 is two defects in the
+code written during this pass, included because a report that finds faults
+only in other people's work is not an audit.
+
+| # | Defect | Severity | Fixed by | Test that holds it closed |
+|---|---|---|---|---|
+| U1 | A never-bootstrapped fleet home crashes expert creation on 3 of 4 callers | P1 | seeding moved into `fleet.create`, the single gateway; `OSError` refused with a sentence | `test_invariants.py::check_expert_birth_paths` |
+| U2 | Two readers of `exam-results.md` disagree, so an expert can pass an exam and not know it | P1 | `selfmodel._exam` reads the canonical `SCORE:` line first | `test_invariants.py::check_exam_readers_agree` |
+| U3 | Every directory in the file tree rendered as a clickable file | P3 | one shared `fileTreeHtml()`, accepting either field spelling | `test_ux.py::check_advanced_still_reachable` |
+| U4 | A `gpu-worker` could not be chosen for GPU work | P2 | every `KINDS` entry declares what it implies; one `capabilities_of()` | `test_workers.py::check_kind_implies_capability` |
+| U5 | `/api/workers/choose` returned an object where the panel showed a sentence | P3 | flattened at the endpoint, with the rejected alternatives | `test_ux.py::check_worker_connection` |
+| U6 | `acquire.py --help` crashed on a cp1252 console | P3 | the `sys.stdout.reconfigure` guard the other modules already had | `test_invariants.py::check_documented_cli_exists` |
+| U7 | The manual promised eight commands the CLI refuses | P2 | seven subcommands added, two manual entries corrected, one refusal path for `acquire.py`'s whole CLI | `test_invariants.py::check_documented_cli_exists` |
+| U8 | Two test files shared one sandbox directory | P2 | renamed; the property asserted by `ast` across all 93 test files | `test_invariants.py::check_sandbox_names_are_unique` |
+| U9 | The panel scrolled sideways at 375 px; two tables had no scroll container | P3 | `min-width:0` on grid items, and the wrapper moved INTO `taskTable()` | `test_ux.py::check_mobile_layout` |
+| U10 | `org.check` — "the single question every mutating path asks" — was asked by nothing but `org.py` and its own test | **P1** | personal bearer tokens, actor resolved from the credential, a declared permission table with a strict default, `Denied` → 403 | `test_rbac.py` (whole file) |
+| U11 | two new metrics measured something other than their name — rates that could sum past 100%, and an autonomy ratio that was a success rate | P2 | both derived in one pass over one ledger; autonomy reads the events that record a person being needed | `test_metrics.py` (the autonomy check moves the number) |
+
+### What this pass says about the audits
+
+Five of the eight (U1, U2, U4, U6, U7) are the audits' own central pattern:
+
+> a control, a reader, or a promise defends the path its author was thinking
+> about, and does not know about the other paths.
+
+The audits found that pattern in **execution, credentials, filesystem
+containment and authorization**. It turns out to hold in three more places
+nobody had thought to look:
+
+- **Object construction.** Four callers mint an expert; one prepared the
+  ground first. The fix was the same shape as the authorities: move the work
+  into the gateway they all pass through.
+- **Reading a file.** Two readers, two regexes, one file. Neither was wrong on
+  its own terms; together they made an expert misdescribe itself. The
+  invariant test writes the file in every format the platform has produced and
+  requires every reader to agree — the file-format equivalent of enumerating
+  every path.
+- **Documentation.** A command the manual promises is a path a person will
+  take. `MANUAL.md` named eight that argparse refuses. This is now checked
+  mechanically, including bracketed optional subcommands — the first version of
+  the check skipped those, and that is precisely how `proof.py [refresh]`
+  slipped past it.
+
+### Two invariants that did not exist before
+
+Both are the "enumerate, don't exemplify" form the manual's §25.11 asks for,
+applied to things that are not code paths:
+
+- **Every documented command exists** — parses `MANUAL.md`, runs each
+  subcommand's `--help` with `PYTHONUTF8=0`, and fails on `invalid choice` or
+  on a module that cannot print its own help on a non-UTF-8 console.
+- **Every sandbox name is claimed once** — parses all 93 test files with `ast`
+  rather than a regex, because the check's own docstring names the call it
+  looks for, and a checker that cannot tell code from prose reports itself.
+
+### The Proof System demonstrated itself again
+
+Editing `acquire.py`, `mission.py`, `modelrouter.py`, `selfmodel.py`,
+`training.py`, `workers.py` and `ui.py` automatically dropped seven
+capabilities from **OFFLINE VERIFIED** to **IMPLEMENTED** — nobody decided
+that, and nobody could have prevented it without re-running the evidence.
+That is the property the level exists to have.

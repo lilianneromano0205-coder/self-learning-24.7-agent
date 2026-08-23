@@ -155,6 +155,53 @@ def check_cost_accrues_only_when_used(home):
           "accrued $2.50, and stopping it stopped the meter")
 
 
+def check_kind_implies_capability(home):
+    """A computer's KIND already says what it is; the owner must not have to
+    say it twice.
+
+    Found live in the panel: a machine registered with --kind gpu-worker and
+    the capabilities the owner cared about ("cuda", "ffmpeg") was refused GPU
+    work, because the matcher only looked at the typed list. The registry knew
+    the machine was accelerated. Every kind now declares what it implies, so
+    the trap cannot come back for a different kind either — the test walks the
+    whole table rather than the one case that was reported.
+    """
+    for kind, spec in workers.KINDS.items():
+        assert "implies" in spec, (
+            f"kind {kind!r} declares no implied capabilities; if it truly "
+            f"implies nothing, say so with an empty tuple so the next reader "
+            f"knows it was considered")
+        assert isinstance(spec["implies"], tuple), kind
+
+    # a bare registration of each kind is routable for what that kind IS
+    probe = os.path.join(home, "kind-probe")
+    os.makedirs(probe, exist_ok=True)
+    for kind, task in (("gpu-worker", "fine-tune on the gpu"),
+                       ("cloud-vm", "click through the website"),
+                       ("local-docker", "pip install the package"),
+                       ("fleet-worker", "read the file on the internal network")):
+        one = os.path.join(probe, kind)
+        os.makedirs(one, exist_ok=True)
+        workers.register(one, f"Bare {kind}", kind)          # no --can at all
+        w, why = workers.choose(one, task)
+        assert w is not None, (
+            f"a bare {kind} could not be chosen for {task!r}: {why['why']}")
+
+    # implied capabilities are SHOWN as implied, not silently merged: a person
+    # who wonders why a machine claims to do something can see where it came from
+    row = [r for r in workers.summary(os.path.join(probe, "gpu-worker"))["workers"]][0]
+    assert "gpu" in row["implied"] and "gpu" not in row["declared"]
+    assert set(row["capabilities"]) == set(row["declared"]) | set(row["implied"])
+
+    # and an implied capability still loses to a genuinely missing one
+    w, why = workers.choose(os.path.join(probe, "gpu-worker"), "run this on macos")
+    assert w is None and "macos" in why["needed"]
+    print("[implied] every kind declares what it implies, a bare registration "
+          "of each kind routes for what that kind is, implied capabilities are "
+          "shown separately from declared ones, and implying does not paper "
+          "over a capability that is genuinely absent")
+
+
 def main():
     sb = make_sandbox("workers", providers={"m": {"script": "s.json"}},
                       roles={"practitioner": "m"},
@@ -164,6 +211,7 @@ def main():
     check_isolation_outranks_speed(sb)
     check_trusted_is_never_automatic(sb)
     check_capability_matching(sb)
+    check_kind_implies_capability(sb)
     check_explanation_is_human(sb)
     check_policy_scoping(sb)
     check_cost_accrues_only_when_used(sb)

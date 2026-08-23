@@ -34,8 +34,10 @@ dependencies. Python 3.11+ and your own API keys.
 17. [Every HTTP endpoint](#17-every-http-endpoint)
 18. [Every event name](#18-every-event-name)
 19. [The test suite as the specification](#19-the-test-suite-as-the-specification)
+19a. [The UX release gate](#19a-the-ux-release-gate--spec-17)
 20. [Honest limits](#20-honest-limits)
 21. [Running it in production](#21-running-it-in-production)
+22. [Definition of Done, release gates, and where this build stands](#22-definition-of-done-release-gates-and-where-this-build-actually-stands)
 
 ---
 
@@ -905,22 +907,210 @@ the static setting **with the reason stated**. (`test_modelrouter.py`)
 python ui.py            # or bootstrap.py starts it
 ```
 
-Seven sections: **Home · Guide · Agents · Work · Memory · Models · System**.
+Six sections, named for **jobs rather than architecture** (UI/UX spec §2).
+Each states its own purpose in the sidebar:
 
-- **Home** — readiness, what needs you, Today, and the **live pulse** (SSE, not
-  polling)
-- **Agents** — the five lanes and the roster; opening one gives *Overview ·
-  Teach · Board · Mind · Ask · Identity · Wiring* with a teammate rail
-  - **Board** — every task; a row opens its stop condition, checkpoint
-    progress, **context window**, **trace**, cards, and *save as routine*
-  - **Mind** — the file tree, plus **Self-model**, **Knowledge** (sources by
-    authority, standards, conflicts) and **Context windows**
-  - **Identity** — edit `identity.md` (backups kept) and fleet-wide owner pins
-- **Work** — goals with their plans, teams as threads, workflows as pipelines
-- **Memory** — fleet map, failures, competence, retired agents
-- **Models** — providers, catalogue, measured profiles, variants
-- **System** — doctor, harness manifest, tool error rates, routines,
-  federation, remote access
+| Section | Purpose | What is in it |
+|---|---|---|
+| **Home** | Start work and see what needs attention | command bar, active work, needs-you, recently completed, platform health, Today, live pulse |
+| **Work** | Everything being done | missions, goals, teams as threads, workflows, routines |
+| **Agents** | Create and manage intelligence | the roster, the creation wizard, one page per agent |
+| **Resources** | What agents know and can use | Computers · Tools · Knowledge · Skills |
+| **Proof** | Evidence and quality | Work Proof and Platform Proof |
+| **Admin** | Infrastructure and policy | Health · Models & cost · People · Audit · Training lab · Backup & release |
+
+Nothing was deleted to get here. The previous top-level views were **moved**,
+and `tests/test_frontend.py` asserts that each one is still routed *and* still
+reachable from a control a person can click:
+
+| Was | Is now |
+|---|---|
+| Memory | Resources → Knowledge (and Proof → Work proof) |
+| Models | Admin → Models & cost |
+| System | Admin → Health |
+| Guide | contextual help, and `Go: Guide` in the palette |
+
+A view that is hosted inside another page suppresses its own page title, so
+every page has exactly one `<h1>`; opened by name it prints its title as
+before.
+
+### Home — §3
+
+A command bar (*"What do you want accomplished?"*) and four primary actions:
+**New mission · Create specialist · Build team · Connect tool or computer**.
+Typing an outcome and pressing Start opens the mission dialog with the text
+carried over, and that dialog **refuses a mission with no success criteria** —
+a mission without them can only be abandoned, never finished.
+
+Below it: **Active work** (objective, owner, progress against criteria,
+current action, cost, next blocker), **Needs you**, **Recently completed**
+with its proof, and a one-line **platform health** verdict — `Ready`,
+`1 blocker`, `Ready · 2 risks` — linking to Admin and Proof.
+
+A **first-10-minutes checklist** (§13) sits at the top until it is finished.
+Its seven steps read *real state*, not clicks: creating an agent from the
+terminal ticks the box exactly as well as doing it in the panel. Dismissible
+and resumable.
+
+### Creating an agent — §4
+
+**Five intent questions**, none of which names a lane:
+
+| The question a person answers | What the platform builds |
+|---|---|
+| working immediately from files or instructions? | Quick specialist |
+| formally trained and tested on your material? | Trained expert |
+| learn a subject on its own? | Learner |
+| start from a proven job template? | Archetype |
+| does the work need several specialists? | Team |
+
+Then six steps — **Job · Knowledge · Access · Quality · Cost · Review** —
+ending in a plain-language summary of what the agent will be able to know, do,
+spend and change. `LANE_STEPS` declares which steps each lane can honour, so a
+lane can never reach a step whose answer nothing consumes. The lane name
+appears once, in the review, as a footnote.
+
+Everything the later steps collect is applied **after** creation, each through
+the endpoint that owns it — the wizard has no private way to write settings.
+
+### One agent — §5
+
+Seven tabs, named for what a person is looking for. *Mind* is gone: it was
+evocative and operationally ambiguous.
+
+| Tab | What it holds |
+|---|---|
+| **Overview** | job, status, blocked questions, courses, approvals, intentions, skills, recent work |
+| **Work** | every task, with its stop condition, checkpoints, context window, trace and cards |
+| **Knowledge** | the **certification record** (§10), then teach-by-link, teach-by-files and templates |
+| **Skills** | self-model, sources/standards/conflicts, context windows, the file tree |
+| **Performance** | verified success, false success, the case ledger, cost by purpose, which model actually works here, tool error rates, which computers its work ran on |
+| **Access** | the tools it may call, the computers it may use, its file and network scope, pending approvals, and the citation-gated consultation box |
+| **Advanced** | Identity & prompts · Models & compute · Raw files |
+
+### The mission page — §6
+
+The centre of the product. Objective and contract fingerprint; the
+success-criteria checklist with the evidence behind each met one; binding
+constraints; explicit non-goals; **Needs you** separated from **Blocked on**
+(the first cannot be solved by trying harder, the second routes somewhere);
+bound-action and amendment counts; and, under Advanced, the contract exactly
+as the agent sees it, recompiled every iteration.
+
+`mission.compile_state` derives `current_action`, `plan` (every action filed
+under the criterion it serves) and `cost_usd`, so a single request answers
+every question §15 says a supervisor must answer in fifteen seconds.
+
+### Computers — §7
+
+Resources → Computers. Each card shows the trust zone and what that zone
+means, what the machine can do (**declared** capabilities and the ones its
+**kind implies**), cost per hour, whether it scales to zero, how long it has
+been used, and which agents may access it.
+
+The router answers in a sentence and names the machine, not the backend kind:
+
+> Using Office Windows PC because excel + internal-network are required (no compute cost)
+
+…with a disclosure listing why every other computer was passed over. Work is
+placed **cheapest first, then most isolated, then fastest to start** —
+isolation outranks speed deliberately, because an organization machine on the
+internal network is often free and instant and would otherwise become the
+default home for arbitrary model-authored work.
+
+### Proof — §9
+
+Two tabs.
+
+**Work proof** — every mission with its criteria, the evidence behind each met
+one, and which are still open.
+
+**Platform proof** — fifteen capabilities, each with its level (0 SPEC → 5
+PRODUCTION PROVEN), the reason for that level, what a user can actually do
+with it, the invariants it must hold, the code hash the evidence is bound to,
+and the exact `python tests/…` command that reproduces it.
+
+**No endpoint accepts a level.** The panel can re-run evidence and nothing
+else; a level is computed from observations bound to the current code hash and
+falls on its own when the code changes or the evidence ages.
+
+### Training reads as certification — §10
+
+Per course: **Sources → Coverage → Gaps → Exercises → Exams → Competence**.
+Source authority by tier and unresolved conflicts; requirements with evidence
+over requirements required; open gaps; lessons written up over lessons
+ingested; the exam score with whether it was closed-book, how many sittings
+and when the next one is due; and the competence record.
+
+`/api/experts/<slug>/training` **returns no percentages**. It returns
+numerators and denominators, so the page physically cannot print "100%
+learned" — `42/42 requirements covered, exam 92%, 3 unresolved conflicts` is a
+sentence somebody can check.
+
+### Models are a policy — §11
+
+| Policy | Bar | Tie-break | What it costs you |
+|---|---|---|---|
+| Cheapest | 50% verified | cheapest | more retries, so the saving is smaller than it looks |
+| Balanced *(default)* | 80% verified | cheapest | nothing obvious |
+| Highest quality | 90% verified | best rate | money; use it where being wrong is expensive |
+| Custom | yours | yours | — |
+| Pinned | — | — | nothing is chosen automatically |
+
+A policy is a **name for two numbers the router already read** —
+`route_min_pass` and the new `route_prefer`. The policy in force is *derived*
+by comparing settings to the presets rather than stored, for the same reason
+proof levels are derived: a stored label drifts from what it describes.
+
+Every model card carries its sample size. A profile measured over fewer than
+`MIN_PROFILE_SAMPLE` (5) tasks is shown as **unrankable**, never ranked badly.
+
+### Who may do what — spec §2 Admin, manual §21
+
+`org.py` says `check()` is *"the single question every mutating path asks"*.
+Until this pass the panel — the main mutating path — never asked it, because
+one shared token left it no way to know who was calling. Now:
+
+- each member can hold a **personal bearer token** (`python org.py token
+  <email> --as you@…`, or *give one* in Admin → People). The value is returned
+  once and never stored; only its SHA-256 is kept
+- `_authed` resolves the token to a member before every request, and
+  `_may_write` looks the required permission up in a **declared table** — a
+  route with no entry falls through to `create_agent`, so a route added
+  tomorrow is refused for a viewer rather than waved through
+- the audit trail records the **token's owner**, never an actor named in the
+  request body
+- a fleet that **belongs to an organization auto-enables a token**, for the
+  same reason an exposed one does: with nothing to check, `_authed` returns
+  early, every caller resolves to the owner, and the roles somebody configured
+  govern nothing. The panel says so on start-up and points at
+  `python org.py token`
+- with **no organization**, `org.check` returns True for everything, so a solo
+  install behaves exactly as it always did
+
+`tests/test_rbac.py` enumerates it: every write route refused for a viewer,
+the operator/builder boundaries, that no POST route is ungated by omission,
+and that a request claiming a different author is recorded against the real
+one.
+
+### When something fails — §12
+
+`diagnose(task)` translates one task record into three answers, in one place,
+so the board, the dialog and Home cannot disagree about what went wrong:
+
+| Which part failed | Example headline |
+|---|---|
+| the verifier | "The check refused the work after 6 attempts" |
+| the platform | "The platform itself failed, not the agent" |
+| the model provider | "The model provider refused the call" / "Rate-limited" |
+| the budget breaker | "It stopped because it hit a spend limit" |
+| the command it ran | "A command it ran never finished" |
+| you | "It is waiting for a decision only you can make" |
+| the agent | "It could not complete the task" |
+
+Each carries **what happens next** and **what you can do**. The raw error sits
+under an Advanced disclosure; the task board shows state *and* reason, because
+a status nobody can act on is a status nobody reads.
 
 On a phone it becomes a bottom-nav app: single column, full-screen dialogs,
 40px targets.
@@ -1209,30 +1399,58 @@ beside the expert, then at the fleet home, then beside the code:
 
 ## 17. Every HTTP endpoint
 
-**Read (GET):** `/api/system` `/api/experts` `/api/experts/<s>`
-`/api/experts/<s>/tasks` `/api/experts/<s>/tree` `/api/experts/<s>/file`
-`/api/experts/<s>/settings` `/api/experts/<s>/skills`
-`/api/experts/<s>/variants` `/api/experts/<s>/approvals`
-`/api/experts/<s>/prospective` `/api/experts/<s>/workflows`
-`/api/experts/<s>/models` `/api/experts/<s>/context` `/api/experts/<s>/trace`
-`/api/experts/<s>/harness` `/api/experts/<s>/identity`
-`/api/experts/<s>/routines` `/api/experts/<s>/self`
-`/api/experts/<s>/knowledge` `/api/feed` `/api/events` (SSE) `/api/memory`
-`/api/retired` `/api/commons` `/api/commons/pins` `/api/goals` `/api/team`
-`/api/templates` `/api/toolbox` `/api/briefing` `/api/doctor` `/api/harness`
-`/api/readiness` `/api/federation`
+Derived from `ui.py`, not from memory — 51 read routes, 18 write routes and
+23 per-expert actions.
 
-*(All 32 verified answering against a live panel.)*
+**Read (GET) — the fleet**
 
-**Create (POST):** `/api/quick` (⚡ lane) · `/api/learner` (📚 lane) ·
+`/api/system` `/api/systems` `/api/experts` `/api/feed` `/api/events` (SSE)
+`/api/memory` `/api/retired` `/api/commons` `/api/commons/pins` `/api/goals`
+`/api/team` `/api/templates` `/api/toolbox` `/api/briefing` `/api/doctor`
+`/api/harness` `/api/readiness` `/api/federation` `/api/gates`
+`/api/missions` `/api/org` `/api/audit` `/api/training` `/api/workers`
+`/api/proof` `/api/proof/<capability>`
+
+**Read (GET) — one expert**
+
+`/api/experts/<s>` and, under it: `tasks` `tree` `file` `settings` `skills`
+`variants` `approvals` `prospective` `workflows` `models` `context` `trace`
+`harness` `identity` `routines` `self` `knowledge` `acquisitions` `spend`
+`missions` `missions/<id>` `performance` `policy` `training`
+
+**Create (POST)**
+
+`/api/experts` (trained lane) · `/api/quick` (⚡ lane) · `/api/learner`
+(📚 lane) · `/api/team` · `/api/missions` · `/api/workers` ·
+`/api/workers/<id>/state` · `/api/workers/choose` · `/api/org` ·
+`/api/org/users` · `/api/curriculum` · `/api/proof/refresh` ·
+`/api/preflight` · `/api/backup` · `/api/federation` ·
 `/api/retired/<s>/restore` · `/api/shutdown`
 
-**Act (POST `/api/experts/<slug>/<action>`):** `task` `goal` `consult`
-`answer` `start` `stop` `launch` `template` `url` `scan` `intention` `wake`
-`workflow` `variant` `approval` `skill` `routine` `provider` `role` `verify`
-`memcheck` `probe`
+**Act (POST `/api/experts/<slug>/<action>`)**
 
-**Edit (PUT):** `/api/experts/<s>/identity` · `/api/commons/pins`
+`task` `goal` `consult` `answer` `start` `stop` `launch` `template` `url`
+`scan` `intention` `wake` `workflow` `variant` `approval` `skill` `routine`
+`provider` `role` `policy` `verify` `memcheck` `probe`
+
+**Edit (PUT):** `/api/experts/<s>/identity` · `/api/experts/<s>/file` ·
+`/api/commons/pins`
+
+**Delete:** `/api/experts/<slug>` (retire; `?purge=1` to remove)
+
+### What the API deliberately will not do
+
+- **Set a proof level.** `/api/proof/refresh` re-runs the evidence; nothing
+  accepts a level. A status somebody can click green is a status nobody can
+  trust.
+- **Take a raw shell command as a definition of done.** `/api/experts/<s>/task`
+  accepts a gate *specification* from the closed catalogue in `gates.py`; a
+  free-form string is refused.
+- **Reveal a credential.** Keys are reported present or absent. There is no
+  route that returns one, and `/api/toolbox` reports only the environment
+  variable names.
+- **Accept a cross-origin write.** Every mutating verb requires a same-origin
+  request whether or not a token is set (`test_csrf.py`).
 
 All of it is guarded by the same token when you start the panel with
 `--token`; the SSE stream accepts it as `?token=` because `EventSource`
@@ -1262,7 +1480,7 @@ Written as JSON lines to `logs/agent.log`, streamed to the panel:
 ## 19. The test suite as the specification
 
 ```bash
-python tests/run_all.py          # 81 tests, ~250 seconds
+python tests/run_all.py          # 93 tests, ~5 minutes
 ```
 
 The tests are not unit tests of functions; each is an acceptance test of a
@@ -1273,7 +1491,55 @@ Highlights: `test_e2e_crash` kills the process mid-lifecycle and proves it
 resumes · `test_faults` breaks every contract on purpose and proves the
 validator catches it · `test_exam` proves closed-book by context *and* by
 tools · `test_secrets` proves no key value reaches a transcript, log or state
-file · `test_ecosystem` runs every subsystem as one organism.
+file · `test_ecosystem` runs every subsystem as one organism ·
+`test_invariants` enumerates every reachable path instead of exercising one
+example of one · `test_ux` executes the UI spec's own acceptance table.
+
+### The two files that enumerate rather than exemplify
+
+`test_invariants.py` is the answer to the audit's central finding — *a control
+defends the path its author was thinking about*. It does not test behaviour
+through an example; it walks the tree:
+
+| Check | What it enumerates |
+|---|---|
+| execution paths | every subprocess call site in 69 modules |
+| execution catalogue | every declared operation, against what it declares |
+| filesystem zones | every declared control file and directory |
+| traversal spellings | 12 escape forms (posix, windows, UNC, mixed, nested) |
+| credential sources | all 4, asked of every subsystem that must exclude them |
+| metering purposes | all 9 call purposes |
+| role capabilities | all 9 roles against what their job needs |
+| gate catalogue | every entry, and that a raw shell string never builds one |
+| expert birth | every module that mints an expert |
+| exam readers | every reader of `exam-results.md`, in every recorded format |
+| sandbox names | all 139, across 93 test files, parsed with `ast` |
+| documented CLI | all 58 subcommands `MANUAL.md` promises |
+
+The last four came from the third pass, and each was a real defect first.
+
+---
+
+## 19a. The UX release gate — spec §17
+
+The redesign spec is explicit that *"the redesigned UI is not accepted because
+it looks cleaner"*. Its release conditions split cleanly into what a machine
+can settle and what it cannot, and pretending otherwise would be the same
+mistake as a proof level somebody can click:
+
+| §17 condition | Status |
+|---|---|
+| Regression: existing UI API tests plus new task-based tests | **Met.** `test_frontend.py` + `test_ux.py` + `test_rbac.py`, 93 tests green twice consecutively |
+| Safety: destructive UI actions match CLI confirmation semantics | **Met.** Retire, purge and approval all go through the same modules the CLI calls; `test_ux::check_proof_in_one_click` also asserts the API refuses to set a proof level at all |
+| Builder test: the owner can explain every top-level nav item | **Met.** Each of the six states its purpose in `NAV_PURPOSE`, and the palette shows the equivalent CLI for every action |
+| Accessibility: keyboard navigation and focus order | **Partly.** ⌘K palette with arrow keys and Enter, Escape closes, 40 px targets, labels on every field. Contrast and focus order have **not** been audited with a tool |
+| 5-user formative test, ≥90% task completion | **Not done.** This needs five people, and nothing in this repository can substitute for them |
+| ≤2 wrong-navigation events, median, on critical flows | **Not measured.** Same reason |
+
+The first three are the ones a build can honestly claim. The last two are
+stated here as *not done* rather than quietly omitted, because a release gate
+with an unmeasured condition reported as met is a release gate that does
+nothing.
 
 ---
 
@@ -1304,14 +1570,28 @@ Things this platform does **not** do, that you might reasonably assume it does:
 9. **No provider has been benchmarked here.** Every model call in development
    ran against the scripted mock provider by design. The first real-key run is
    yours.
-10. **Windows and OneDrive were the development environment.** Every write
+10. **The UI has not been tested with users.** Spec §17 asks for a five-person
+    formative test at ≥90% task completion. That has not happened, and no
+    amount of green tests substitutes for it — what `test_ux.py` proves is
+    that the information each flow needs is reachable, not that a stranger
+    finds it.
+11. **Accessibility is unaudited.** Keyboard navigation, focus order, labels
+    and 40 px targets are in place and asserted; contrast ratios and screen
+    reader behaviour have not been checked with a tool.
+12. **Windows and OneDrive were the development environment.** Every write
     retries; sandboxes live in the system temp directory on purpose. A CI
     workflow now runs the suite on Linux and Windows across Python
     3.11–3.13, but it has never been executed on a real runner from here.
-11. **Access is single-owner.** One token grants everything: queue work, read
-    any file, edit any identity. There are no per-user roles and no
-    audit-by-user. Do not hand the token to anyone you would not give the
-    server to.
+13. **The panel's master token is still a master key.** Members hold personal
+    bearer tokens and every write is checked against the role that token
+    belongs to — but whoever holds the token the panel was *started* with
+    resolves to the owner and can do everything. That is honest rather than
+    accidental: the master token already implies control of the process. Give
+    people their own tokens (`python org.py token <email> --as you@…`) and do
+    not hand the master one to anybody you would not give the server to.
+14. **There is no password, no session and no TLS.** Authentication is a
+    bearer token over a loopback HTTP server. For anything beyond a machine
+    you control, put it behind something that does have those.
 
 ---
 
@@ -1428,3 +1708,161 @@ your deploy.
 | the fleet disagrees with itself | `python conflicts.py --root experts/<slug> --course <c>` |
 | state file corrupt | it is quarantined and rebuilt automatically; the archive keeps every finished task |
 | you need last week back | `python backup.py restore <archive> --dest ./restored` |
+
+---
+
+## 22. Definition of Done, release gates, and where this build actually stands
+
+The engineering manual's §26 and §27 define what "finished" means and which
+gate each kind of release must clear. Both are reproduced here **with this
+build's real position against them**, because a gate table whose rows are all
+green is a table nobody consulted.
+
+### 22.1 Definition of Done — §26
+
+> *A feature is not Finished because code compiles or the author says it works.
+> Finished is a generated evidence state.*
+
+| Check | Pass condition | This build |
+|---|---|---|
+| **Contract** | capability, criteria and invariants written before implementation | **Met** — `proof.REGISTRY` states each capability's sentence and its invariants; `mission.py` refuses a mission with no criteria |
+| **Tests** | targeted tests cover alternate paths and fail before the fix | **Met** — every `U`-numbered defect had a failing test first; `test_invariants.py` enumerates paths rather than exemplifying them |
+| **Security** | threat model reviewed for network, filesystem, secrets, execution, approvals, effects | **Met for those six**; the seventh — authorization — was reviewed only in this pass, and that is exactly where `U10` was hiding |
+| **Observability** | trace/log/evidence explains the feature afterwards | **Met** — per-task traces, per-call metering, an append-only audit trail, and `evidence.py` |
+| **Failure semantics** | timeout, restart, partial failure and retry defined | **Met** — `test_chaos.py` kills the process at every lifecycle point; stop conditions, checkpoints and retry budgets are declared per task |
+| **Cost** | metered and bounded on every path | **Met** — every provider call goes through `modelgateway`, and `test_invariants` asserts all nine call purposes reach the meter |
+| **Live integration** | required when the feature claims real provider/sandbox/tool support | **NOT MET, and no capability claims it.** Every model call in every test is the scripted mock. `proof.py` reflects this: nothing is above level 2 |
+| **Benchmark** | required for a better/smarter/faster/cheaper claim | **N/A** — this build makes no such claim. `benchmark.py` exists and is exercised offline |
+| **Full regression** | full suite + adversarial suite pass twice from a clean state | **Met** — 93 tests, twice consecutively, `test_chaos.py` among them |
+| **Proof Pack** | generated with code/config hashes, commands, results, artifacts | **Met** — `proof.py` binds every observation to a code hash and prints the reproducing command |
+| **UI status** | Proof Center shows the level; no manual green toggle | **Met** — no endpoint accepts a level; `test_ux.py` asserts it |
+| **Rollback** | upgrade and rollback path tested for production-affecting change | **Partly** — `backup.py` create/verify/restore is tested and `training.rollback` is tested; there is no tested upgrade path between platform versions |
+
+### 22.2 Release gates — §27
+
+| Release | Minimum gate | Position |
+|---|---|---|
+| **Developer build** | offline suite + harness + no unexplained changes | **CLEARED.** 93 tests twice, `harness.py --check` exit 0, working tree explained by this changelog |
+| **Local owner beta** | P0/P1 invariants fixed · real provider smoke · local Docker live test · backup/restore test | **NOT CLEARED.** P0/P1 fixed (2 P0s, 12 P1s, plus `U1`, `U2`, `U10`) and backup/restore tested — but **no real provider has ever been called** and **Docker has never been exercised**. Two of four |
+| **Private cloud beta** | authentication, RBAC, TLS, secret manager, worker isolation, transactional state, live cost breakers, audit-by-user | **NOT CLEARED.** RBAC and audit-by-user now exist and are enforced on every path (`test_rbac.py`); cost breakers exist and are tested offline. **Authentication is a bearer token over plain HTTP**, there is no secret manager, state is files rather than transactions, and worker isolation is a record rather than a container |
+| **Organization pilot** | tenant isolation, edge-worker policy, MCP integrations, SLO telemetry, incident rollback, 24/7 endurance | **NOT CLEARED.** None of these exist. `workers.py` models the policy; nothing enforces it on a real machine |
+| **Training Lab beta** | immutable verifier boundary, hidden evals, model registry, rollback, reward-hacking suite | **PARTLY.** The verifier boundary, the held-out split, the registry and rollback are built and tested (`test_training.py`); there is **no reward-hacking suite**, and the lab performs no gradient updates at all — which it says on every export |
+| **Production "autonomous specialist"** | domain benchmark beats predefined baselines on quality, false-success, safety, cost and intervention | **NOT CLEARED, and not close.** No domain benchmark has been run against a baseline. This is the gate the whole platform points at |
+
+### 22.3 Build status against §24
+
+The manual's §24 table listed seventeen systems. Six have moved:
+
+| System | §24 said | Now |
+|---|---|---|
+| Model routing | PARTIAL | **BUILT** — per-call attribution and universal metering (`modelgateway`), exploration of unproven candidates, and a named policy with a configurable tie-break |
+| Security/control plane | **DEFECTIVE** | **BUILT** — five authorities, CSRF closed, secrets centralised, and (this pass) authorization enforced on the panel |
+| Backups/package | PARTIAL | **BUILT** — one canonical secret inventory (`credentials.py`) used by backup, package, health and runtime alike; restore is tested |
+| Proof Center | PARTIAL primitives | **BUILT** — 15 capabilities, levels derived from hash-bound evidence, visible in the UI, unsettable by hand |
+| Training Lab | MISSING | **BUILT, within a stated boundary** — trajectory store, sanitised export, deterministic split, registry, promotion gate, rollback. No gradient updates, and it says so |
+| Autonomous tool acquisition | MISSING | **BUILT** — the full ladder: search → inspect → install in a disposable worker → mandatory capability test → owner promotion |
+
+**Unmoved, and honestly so:** cloud product (MISSING — auth, tenancy, state
+service, queue, TLS, billing), and the live half of everything above.
+
+### 22.3b The blocking-remediation list — §25
+
+The manual makes twelve items blocking *"before feature expansion or cloud"*.
+Eleven are done; the twelfth is by definition what comes next.
+
+| # | Item | State |
+|---|---|---|
+| 1 | version control, known-good baseline | **done** — git, with the remediation split across commits |
+| 2 | no browser-origin/CSRF into mutating APIs; no free-form network-supplied shell gates | **done** — `_same_origin` on every mutating verb (`test_csrf.py`); `gates.py` is a closed catalogue and a raw string is refused |
+| 3 | one canonical Execution Authority; no alternate path may exist | **done** — `execution.py`, and `--audit` scans all 69 modules for a bypass (`test_invariants.py`) |
+| 4 | agent workspace separated from control state; all filesystem ops through File Authority | **done** — `fileauth.py` with four zones, enforced per zone rather than per file |
+| 5 | `file://` and SSRF blocked; redirects/DNS/IP revalidated | **done** — scheme allowlist, blocked networks, and a redirect handler that re-checks (`test_url.py`) |
+| 6 | one Credential Authority; backup/package/health/runtime agree | **done** — `credentials.py`; `test_invariants` asks the same four sources of every subsystem |
+| 7 | lock ownership repaired; direct concurrency tests | **done** — a lock is stamped `pid:uuid` and verified before release; `locks.py` has its own test |
+| 8 | every provider call through a universal cost/attribution/budget gateway | **done** — `modelgateway.py`; all nine call purposes are enumerated in a test |
+| 9 | skill trust external and non-self-attestable | **done** — provenance comes from the graph, never from the file's own frontmatter |
+| 10 | effect semantics: intent/uncertain/reconciliation; no exactly-once claim without remote idempotency | **done** — `effects.begin()`, `unfinished()`, and the docs no longer claim exactly-once |
+| 11 | invariant tests that enumerate every reachable path | **done** — `test_invariants.py`, twelve enumerations |
+| 12 | *only after these pass:* live provider, sandbox, MCP/federation and long-duration evaluation, then cloud and Training Lab | **this is the next step, and it needs a key.** Items 1–11 pass; nothing here has called a real provider |
+
+Item 12 is the honest boundary of everything above. Eleven items of structural
+repair were the price of being allowed to try the twelfth, and the twelfth has
+not been tried.
+
+### 22.3c Portability — §20
+
+> *"Persistent expert state must be portable across modes; deployment is a
+> location choice, not a different expert format."*
+
+`backup.py` create → verify → restore is tested, and the test does not stop at
+equal bytes: the **restored expert is driven through a gated task in its new
+location** and must pass. A restore that produces identical files an agent
+cannot be run from is a copy, not a restore. (`tests/test_backup.py`)
+
+What a restore deliberately does **not** carry is credentials — the report
+says so, and putting the keys back is the first thing it tells you to do.
+
+### 22.4 Are the numbers moving? — §29
+
+`python metrics.py` computes ten of the manual's twelve metrics from ledgers
+that already exist, and **names the other three with the reason it will not
+invent them**. Every figure carries its numerator, its denominator and the
+ledger it was read from; a rate over fewer than five observations is printed
+with the warning attached rather than as a confident percentage.
+
+| Metric | Read from |
+|---|---|
+| Verified Success Rate | `state.json` — gated tasks a gate passed |
+| False-Success Rate | `state.json` — finish-claims the gate threw back |
+| Recovery Rate | task lineage — failures a retry rescued |
+| Goal Fidelity | mission actions that name their criterion |
+| Autonomy Ratio *(upper bound)* | tasks that never stopped to ask a person |
+| Human interruptions per mission | blockers that route to the owner |
+| Cost per verified task | model gateway ÷ gated passes |
+| Repeat-failure rate | the case ledger — fixes that did not hold |
+| Tool acquisition success | the acquisition ladder |
+| Calibration | predicted confidence band vs the outcome |
+
+**Not computed, and why:** supervision-hours (the denominator is a person's
+time), 90-day retention (the structure is here; the elapsed time is not), any
+safety-violation rate (every refusal recorded here is a control *working* —
+counting refusals as violations would be the most flattering possible mistake),
+and **§14's "100x" multiplier**.
+
+That last one deserves its own paragraph. §14 defines the multiplier as
+*verified output per dollar versus the same raw model without the fleet*. That
+comparison needs the same work run twice and the baseline half has never been
+run here, so no number is printed. What IS reported is the **harness
+contribution**: a count of each moment the fleet changed the outcome, with what
+a bare model would have done instead —
+
+| Lever | Instead, a bare model would have… |
+|---|---|
+| a gate refused a finish-claim | returned it as finished work |
+| a retry carried the failure back in | stopped, or repeated the same attempt |
+| doubt escalated to a stronger model | spent the same on a trivial task and a hard one |
+| a gotcha was filed | met the same environment failure for the first time, again |
+| a repeat failure was recognised | had no record of the first |
+| a command was refused by policy | run it |
+| it stopped for a human decision | guessed and continued |
+| a spend ceiling stopped it | had no ceiling and no idea what it had spent |
+| it resumed after a crash | ended with the process |
+| a case closed and the fix held | not know whether last week's fix worked |
+
+These are counts of what happened, deliberately **not** divided by anything:
+interventions over completions is a number that reads as a multiplier and is
+not one. `metrics.py` carries the field `unit: "narrative"` for exactly this
+row, and `test_metrics.py` asserts it never becomes a rate.
+
+Visible in the panel under **Admin → Is it working?**, with the un-computable
+three shown underneath in their own card, because naming them is the point.
+
+### 22.5 The one sentence that governs all of it
+
+Every row marked **Met** above was verified against the scripted mock provider.
+A green suite proves the harness holds; it has never proved that a provider
+works. `python loop.py check` remains the only live probe, and until somebody
+runs it with a real key, the honest ceiling for every capability in this
+platform is **OFFLINE VERIFIED** — which is exactly what `proof.py` reports.
+
+---

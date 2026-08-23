@@ -33,6 +33,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 
 from common import AGENT_DIR, make_sandbox
 
@@ -281,6 +282,273 @@ def check_gate_catalogue():
           f"a raw shell string never does")
 
 
+def check_expert_birth_paths():
+    """EVERY route that mints an expert, not the one bootstrap.py takes.
+
+    Found live: `fleet.py create --home <a directory nobody bootstrapped>`
+    died with a raw FileNotFoundError from copytree, and the panel's
+    POST /api/experts turned the same thing into a 500 — because only
+    bootstrap.py called seed_home() first. Four callers, one of them correct.
+
+    The test does not check the one path it remembers. It enumerates every
+    call site of fleet.create in the tree and then exercises the gateway on a
+    directory that has never been prepared, which is the state all three
+    broken callers put it in.
+    """
+    import fleet
+
+    # 1. enumerate the callers, so a fifth one added later is not invisible
+    callers = set()
+    for name in sorted(os.listdir(AGENT_DIR)):
+        if not name.endswith(".py"):
+            continue
+        with io.open(os.path.join(AGENT_DIR, name), encoding="utf-8",
+                     errors="replace") as f:
+            if re.search(r"\bfleet\.create\s*\(", f.read()):
+                callers.add(name)
+    assert callers >= {"bootstrap.py", "quick.py", "ui.py"}, callers
+
+    # 2. the gateway itself must work on a directory that is not a fleet yet
+    fresh = os.path.join(tempfile.mkdtemp(prefix="fleet-birth-"), "brand-new")
+    dest = fleet.create(fresh, "Born Here", "prove a fresh home works")
+    for required in ("prompts", "settings.toml", "identity.md",
+                     "inbox", "courses", "logs", "skills"):
+        assert os.path.exists(os.path.join(dest, required)), \
+            f"a newly born expert is missing {required}"
+    assert os.path.isdir(os.path.join(fresh, "prompts")), \
+        "the home itself was never seeded, so the SECOND expert would fail"
+
+    # 3. and a second expert in the same home still works (seeding is
+    #    idempotent and must not overwrite what the owner already put there)
+    marker = os.path.join(fresh, "settings.toml")
+    with io.open(marker, "a", encoding="utf-8") as f:
+        f.write("\n# owner edited this\n")
+    fleet.create(fresh, "Second One", "prove seeding does not clobber")
+    with io.open(marker, encoding="utf-8") as f:
+        assert "# owner edited this" in f.read(), \
+            "seeding overwrote settings the owner had already edited"
+
+    # 4. the panel's route and the CLI's route agree: both go through the
+    #    gateway, so neither can regress independently
+    import subprocess
+    import inspect
+    src = inspect.getsource(fleet.create)
+    assert "seed_home(home)" in src,         "creation must seed at the gateway, not in whichever caller remembers"
+
+    # 5. run the CLI from an unrelated working directory against a home that
+    #    has never been bootstrapped — the exact invocation that used to die
+    fresh2 = os.path.join(tempfile.mkdtemp(prefix="fleet-cli-"), "never-seeded")
+    r = subprocess.run(
+        [sys.executable, os.path.join(AGENT_DIR, "fleet.py"), "create",
+         "From The Cli", "--identity", "prove the CLI path", "--home", fresh2],
+        capture_output=True, text=True, env={**os.environ, "PYTHONUTF8": "1"},
+        cwd=tempfile.mkdtemp(prefix="fleet-elsewhere-"))
+    assert r.returncode == 0 and "Traceback" not in (r.stdout + r.stderr), (
+        "fleet.py create against a never-bootstrapped home still fails: "
+        + (r.stdout + r.stderr)[-700:])
+    assert os.path.isfile(os.path.join(fresh2, "experts", "from-the-cli",
+                                       "identity.md"))
+
+    # 6. a home that genuinely cannot be made refuses with a SENTENCE. Its
+    #    parent is a FILE here, so makedirs cannot succeed however hard it
+    #    tries — the one way to reach that branch on a healthy install.
+    blocker = os.path.join(tempfile.mkdtemp(prefix="fleet-blocked-"), "a-file")
+    with io.open(blocker, "w", encoding="utf-8") as f:
+        f.write("not a directory")
+    r = subprocess.run(
+        [sys.executable, os.path.join(AGENT_DIR, "fleet.py"), "create", "Nope",
+         "--home", os.path.join(blocker, "home")],
+        capture_output=True, text=True, env={**os.environ, "PYTHONUTF8": "1"},
+        cwd=tempfile.mkdtemp(prefix="fleet-elsewhere-"))
+    assert r.returncode != 0, "creating inside a file must not report success"
+    assert "Traceback" not in (r.stdout + r.stderr), (
+        "an impossible home must refuse with an explanation, not a stack "
+        "trace: " + (r.stdout + r.stderr)[-700:])
+
+    print(f"[birth] {len(callers)} modules mint experts; the gateway seeds a "
+          f"never-bootstrapped home itself (library AND CLI, from any working "
+          f"directory), is idempotent, does not clobber owner edits, and "
+          f"refuses with a sentence when the home is genuinely impossible")
+
+
+def check_exam_readers_agree(sb):
+    """EVERY reader of exam-results.md, not the one that happens to be right.
+
+    Found live: the loop's completion check reads "SCORE: 95" (the canonical
+    line the examiner writes), while the self-model looked only for a percent
+    SIGN. So a course could pass at 95, the loop would agree it was complete,
+    and the expert's own self-model — the block injected into every context
+    window, and the number the panel prints — would report no score at all.
+    An expert that cannot state its own exam result is exactly the kind of
+    quiet disagreement this suite exists to catch.
+
+    The test does not assert one regex. It writes the file in each format the
+    platform has ever produced and requires every reader to return the same
+    number for each one.
+    """
+    import selfmodel
+    import loop as loop_mod
+
+    cdir = os.path.join(sb, "courses", "exam-formats")
+    os.makedirs(os.path.join(cdir, "lessons", "01"), exist_ok=True)
+    with io.open(os.path.join(cdir, "spec.md"), "w", encoding="utf-8") as f:
+        f.write('R-001 [from C-1]: the notes exist CHECK: "python" -c "pass"\n')
+    with io.open(os.path.join(cdir, "gaps.md"), "w", encoding="utf-8") as f:
+        f.write("")
+
+    FORMATS = [
+        ("canonical", "R-001: PASS — verified\nSCORE: 95\n", 95),
+        ("percent",   "R-001: PASS — verified\nscored 95% overall\n", 95),
+        ("indented",  "R-001: PASS — verified\n  SCORE: 88\n", 88),
+        ("resat",     "R-001: PASS — verified\nSCORE: 60\nSCORE: 91\n", 91),
+    ]
+    agent = loop_mod.Agent(sb)
+    for label, body, expect in FORMATS:
+        with io.open(os.path.join(cdir, "exam-results.md"), "w",
+                     encoding="utf-8") as f:
+            f.write(body)
+        by_selfmodel = (selfmodel.study(sb) or [])
+        row = next((r for r in by_selfmodel if r["course"] == "exam-formats"), None)
+        assert row is not None, "the course vanished from the self-model"
+        got = (row["exam"] or {}).get("score")
+        assert got == expect, (
+            f"[{label}] the self-model read {got!r} from a file that says "
+            f"{expect}; the loop and the panel would then disagree about "
+            f"whether this course was ever examined")
+        by_loop = agent.course_status("exam-formats")["score"]
+        if label != "percent":            # the loop only ever wrote SCORE:
+            assert by_loop == expect, (
+                f"[{label}] the loop read {by_loop!r}, the self-model {got!r}")
+        # and whatever it read, it must SAY so where a person will see it
+        block = selfmodel.render(selfmodel.build(sb))
+        assert f"exam {expect}%" in block, (
+            f"[{label}] the score never reached the self-model block that goes "
+            f"into every context window:\n{block[:400]}")
+    print(f"[exams] {len(FORMATS)} recorded formats: the loop's completion "
+          f"check, the self-model, and the block injected into every context "
+          f"window all read the same score from the same file")
+
+
+def check_sandbox_names_are_unique():
+    """EVERY test file's sandbox name, not the ones we happened to notice.
+
+    Found live: test_guardrails.py and test_secrets.py both called
+    make_sandbox("secrets"), so they shared one directory under the suite's
+    temp root. Each passed alone. In the suite, whichever ran second raced the
+    first's leftover directory and died with FileExistsError — a failure that
+    appeared only once the suite grew long enough to shift the timing, and
+    that pointed at the wrong test when it did.
+
+    A shared sandbox name is a landmine with a delay fuse, so this asserts the
+    property rather than the incident: no two test FILES may claim the same
+    name. The check reads the tree, so a collision introduced tomorrow fails
+    here rather than as an intermittent red suite three weeks later.
+    """
+    import ast
+    from collections import defaultdict
+    tests_dir = os.path.join(AGENT_DIR, "tests")
+    claimed = defaultdict(set)
+    scanned = 0
+    for name in sorted(os.listdir(tests_dir)):
+        if not (name.startswith("test_") and name.endswith(".py")):
+            continue
+        scanned += 1
+        with io.open(os.path.join(tests_dir, name), encoding="utf-8",
+                     errors="replace") as f:
+            tree = ast.parse(f.read(), filename=name)
+        # ast, not a regex: this very docstring mentions the call, and a
+        # checker that cannot tell code from prose reports itself
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = node.func
+            if getattr(fn, "id", None) != "make_sandbox" and                     getattr(fn, "attr", None) != "make_sandbox":
+                continue
+            if node.args and isinstance(node.args[0], ast.Constant)                     and isinstance(node.args[0].value, str):
+                claimed[node.args[0].value].add(name)
+    shared = {n: sorted(files) for n, files in claimed.items() if len(files) > 1}
+    assert not shared, (
+        "two test files share a sandbox directory; each will pass alone and "
+        "the pair will fail intermittently under load:\n  "
+        + "\n  ".join(f"{n!r}: {', '.join(files)}" for n, files in shared.items())
+        + "\nGive each file its own name — prefixing with the test's own name "
+          "is the convention.")
+    print(f"[sandboxes] {len(claimed)} sandbox names across {scanned} test "
+          f"files, every one claimed by exactly one file — a shared temp "
+          f"directory is the failure that only shows up under load")
+
+
+def check_documented_cli_exists():
+    """EVERY command the manual promises, not the ones we remembered to try.
+
+    Found live: `MANUAL.md` named eight subcommands that argparse refused —
+    `acquire.py search/inspect/install/test`, `mission.py meet/block`,
+    `training.py capture/rollback`. The functions existed as library calls;
+    the CLI had never been given them. An operator following the documented
+    recovery path would have found nothing there, at exactly the moment they
+    needed it.
+
+    Seven were added and one was wrong in the manual (a trajectory is captured
+    by the loop, not by a person). Which of the two happened is a judgement
+    call each time; that the two must AGREE is not, so this checks it.
+
+    It also catches the reverse drift — a module whose `--help` crashes before
+    printing a word, which is how `acquire.py` behaved on a Windows console
+    because argparse tried to write its docstring's arrows through cp1252.
+    """
+    import subprocess
+    manual = os.path.join(AGENT_DIR, "MANUAL.md")
+    with io.open(manual, encoding="utf-8") as f:
+        text = f.read()
+
+    pairs, modules = set(), set()
+    for m in re.finditer(r"`python (\w+\.py)([^`]*)`", text):
+        mod, rest = m.group(1), m.group(2).strip()
+        assert os.path.isfile(os.path.join(AGENT_DIR, mod)), \
+            f"MANUAL.md names {mod}, which does not exist"
+        modules.add(mod)
+        first = rest.split(" ")[0] if rest else ""
+        # `[refresh]` is still a promise: an OPTIONAL subcommand that does not
+        # exist misleads exactly as much as a required one. This check
+        # originally skipped bracketed tokens and therefore missed
+        # `python proof.py [refresh]`, where the real CLI takes --refresh.
+        first = first.strip("[]")
+        if not first or first[0] in "-<\"":
+            continue
+        for sub in first.split(r"\|"):
+            sub = sub.strip().strip("[]")
+            if re.fullmatch(r"[a-z][a-z-]*", sub):
+                pairs.add((mod, sub))
+
+    env = {**os.environ, "PYTHONUTF8": "0"}      # a plain Windows console
+    refused, crashed = [], []
+    for mod in sorted(modules):
+        r = subprocess.run([sys.executable, os.path.join(AGENT_DIR, mod),
+                            "--help"], capture_output=True, text=True,
+                           timeout=60, env=env, cwd=AGENT_DIR)
+        if "UnicodeEncodeError" in (r.stderr or ""):
+            crashed.append(mod)
+    for mod, sub in sorted(pairs):
+        r = subprocess.run([sys.executable, os.path.join(AGENT_DIR, mod), sub,
+                            "--help"], capture_output=True, text=True,
+                           timeout=60, env=env, cwd=AGENT_DIR)
+        if "invalid choice" in (r.stdout + r.stderr):
+            refused.append(f"python {mod} {sub}")
+
+    assert not crashed, (
+        "these modules cannot print their own --help on a console that is not "
+        "UTF-8: " + ", ".join(crashed)
+        + "\nAdd the sys.stdout.reconfigure guard chief.py and mission.py use.")
+    assert not refused, (
+        "MANUAL.md promises commands the CLI refuses:\n  "
+        + "\n  ".join(refused)
+        + "\nEither add the subcommand or correct the manual — a documented "
+          "recovery path that does not exist is worse than none.")
+    print(f"[cli] {len(pairs)} documented subcommands across {len(modules)} "
+          f"modules all parse, and every module prints its own --help on a "
+          f"non-UTF-8 console")
+
+
 def main():
     sb = make_sandbox("invariants", providers={"m": {"script": "s.json"}},
                       roles={"practitioner": "m"},
@@ -294,6 +562,10 @@ def main():
     check_metering_purposes(sb)
     check_role_capabilities(sb)
     check_gate_catalogue()
+    check_expert_birth_paths()
+    check_exam_readers_agree(sb)
+    check_sandbox_names_are_unique()
+    check_documented_cli_exists()
     print("PASS test_invariants")
 
 

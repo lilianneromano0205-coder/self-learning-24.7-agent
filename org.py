@@ -20,8 +20,10 @@ THIS thing to THIS object? It answers with a reason either way, because a
 refusal a person cannot understand is a refusal they will route around.
 """
 
+import hashlib
 import json
 import os
+import secrets
 import time
 
 FILE = os.path.join("org", "org.json")
@@ -189,6 +191,85 @@ def permissions_of(home, actor):
                   if rank(u["role"]) >= rank(need))
 
 
+# ------------------------------------------------------- per-user tokens
+# The gap this closes: this module's own docstring said `check()` is "the
+# single question every mutating path asks", and the PANEL — which is the
+# main mutating path — never asked it. It could not: the panel authenticates
+# with one shared token, so it had no idea who was calling.
+#
+# A permission model that only the CLI consults is a permission model that
+# describes intentions rather than behaviour. So each member gets their own
+# bearer token, and the panel resolves it to a user before every write.
+#
+# The token itself is never stored. What is stored is its SHA-256, so a
+# leaked org.json cannot be replayed as a set of credentials, and the plain
+# value is returned exactly once — at the moment it is minted.
+
+def _hash_token(tok):
+    return hashlib.sha256(str(tok).encode("utf-8")).hexdigest()
+
+
+def issue_token(home, actor, email=None):
+    """Mint a bearer token for one member. Returns it ONCE, in plain text.
+
+    `actor` is who is doing the issuing; `email` is who it is for (defaults
+    to the actor themselves — anyone may mint their own).
+    """
+    email = (email or actor).lower()
+    if email != str(actor).lower():
+        check(home, actor, "manage_users")
+    rec = load(home)
+    if rec is None:
+        raise Denied("no organization here yet: python org.py create <name> "
+                     "--owner you@example.com")
+    u = next((x for x in rec["users"] if x["email"] == email), None)
+    if u is None:
+        raise KeyError(email)
+    token = secrets.token_urlsafe(32)
+    u["token_sha256"] = _hash_token(token)
+    u["token_issued"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+    _save(home, rec)
+    audit(home, actor, "issue_token", "user", email,
+          "minted a personal access token (the value is not recorded)")
+    return token
+
+
+def revoke_token(home, actor, email):
+    email = str(email).lower()
+    if email != str(actor).lower():
+        check(home, actor, "manage_users")
+    rec = load(home)
+    if rec is None:
+        raise Denied("no organization here yet")
+    for u in rec["users"]:
+        if u["email"] == email:
+            had = bool(u.pop("token_sha256", None))
+            u.pop("token_issued", None)
+            _save(home, rec)
+            audit(home, actor, "revoke_token", "user", email,
+                  "revoked" if had else "there was no token to revoke")
+            return had
+    raise KeyError(email)
+
+
+def user_for_token(home, token):
+    """Which member does this bearer token belong to? None if nobody.
+
+    Constant-time comparison, because the alternative is a timing oracle over
+    a credential, and 'nobody would bother locally' is how that argument
+    always starts.
+    """
+    rec = load(home)
+    if rec is None or not token:
+        return None
+    want = _hash_token(token)
+    for u in rec["users"]:
+        have = u.get("token_sha256")
+        if have and secrets.compare_digest(have, want) and u.get("active"):
+            return u
+    return None
+
+
 # ---------------------------------------------------------------- the audit
 
 def audit(home, actor, action, obj_kind, obj_id, detail=""):
@@ -248,7 +329,10 @@ def summary(home):
         return {"organization": None,
                 "note": "solo install: no organization, no RBAC — every "
                         "capability is available to whoever runs the panel"}
-    return {"organization": rec["name"], "users": rec["users"],
+    safe = [{k: v for k, v in u.items() if k != "token_sha256"}
+            | {"has_token": bool(u.get("token_sha256"))}
+            for u in rec["users"]]
+    return {"organization": rec["name"], "users": safe,
             "policy": rec["policy"], "roles": ROLES,
             "permissions": PERMISSIONS, "audit_entries": len(trail(home, 10000))}
 
@@ -269,6 +353,17 @@ def main():
     p = sub.add_parser("audit"); p.add_argument("--home", default=".")
     p.add_argument("--limit", type=int, default=25)
     p = sub.add_parser("roles")
+    # The panel authenticates with a bearer token, so a member who is going to
+    # use the panel needs one of their own — otherwise the roles below are
+    # enforced only on this command line, which is where they started.
+    p = sub.add_parser("token")
+    p.add_argument("email", nargs="?", default=None,
+                   help="whose token (default: your own)")
+    p.add_argument("--as", dest="actor", required=True)
+    p.add_argument("--home", default=".")
+    p = sub.add_parser("revoke"); p.add_argument("email")
+    p.add_argument("--as", dest="actor", required=True)
+    p.add_argument("--home", default=".")
     a = ap.parse_args()
     if a.cmd == "roles":
         print("least to most:", " -> ".join(ROLES))
@@ -279,6 +374,30 @@ def main():
     if a.cmd == "create":
         r = create(home, a.name, a.owner)
         print(f"organization {r['name']!r} created; {a.owner} is the owner")
+        return
+    if a.cmd == "token":
+        try:
+            tok = issue_token(home, a.actor, a.email)
+        except Denied as e:
+            print(f"REFUSED: {e}")
+            raise SystemExit(1)
+        who = (a.email or a.actor).lower()
+        print(f"token for {who}:")
+        print()
+        print(f"  {tok}")
+        print()
+        print("This value is shown ONCE and is not recorded anywhere — only "
+              "its SHA-256 is stored.")
+        print("Use it as: Authorization: Bearer <token>, or paste it when the "
+              "panel asks.")
+        return
+    if a.cmd == "revoke":
+        try:
+            had = revoke_token(home, a.actor, a.email)
+        except Denied as e:
+            print(f"REFUSED: {e}")
+            raise SystemExit(1)
+        print(f"{a.email}: {'token revoked' if had else 'had no token'}")
         return
     if a.cmd == "invite":
         add_user(home, a.actor, a.email, a.role)
