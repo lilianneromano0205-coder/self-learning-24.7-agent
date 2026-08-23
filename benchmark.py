@@ -114,7 +114,8 @@ def bare_arm(agent, root, trial):
     ]
     claimed, cost = True, 0.0
     try:
-        msg, usage, _ = agent.call_model("practitioner", messages)
+        msg, usage, _ = agent.call_model("practitioner", messages,
+                                         purpose="benchmark")
         cost = agent._cost("practitioner", usage)
         calls = msg.get("tool_calls") or []
         if not calls:

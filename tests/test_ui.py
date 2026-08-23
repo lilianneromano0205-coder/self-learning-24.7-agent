@@ -37,9 +37,12 @@ def main():
     home = make_sandbox("ui", providers={"m": {"script": "s.json"}},
                         roles={"tester": "m", "watcher": "m", "ripper": "m"},
                         scripts={"s.json": FINISH})
+    # the panel ingests the fixture URL in-process, so the child needs the
+    # same deliberate opt-in the fixture server declares
     proc = subprocess.Popen([PY, os.path.join(AGENT_DIR, "ui.py"),
                              "--home", home, "--port", str(PORT)],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            env={**os.environ, "ALLOW_PRIVATE_INGEST": "1"})
     try:
         for _ in range(50):
             try:

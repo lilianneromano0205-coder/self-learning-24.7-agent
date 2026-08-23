@@ -80,7 +80,9 @@ def replay_task(agent, task, max_points=None):
            "agree": 0, "drift": 0, "refusal": 0, "details": []}
     for before, tool, args in points:
         try:
-            msg, _usage, _ = agent.call_model(task["role"], before)
+            msg, _usage, _ = agent.call_model(task["role"], before,
+                                              purpose="replay",
+                                              task_id=task["id"])
             calls = msg.get("tool_calls") or []
             if not calls:
                 tc = loop.parse_content_tool_call(msg.get("content"))

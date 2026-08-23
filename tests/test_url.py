@@ -20,7 +20,7 @@ import pathlib
 import sys
 import threading
 
-from common import AGENT_DIR, make_sandbox, read_state
+from common import AGENT_DIR, make_sandbox, read_state, serve_dir
 
 sys.path.insert(0, AGENT_DIR)
 import ingest
@@ -50,24 +50,11 @@ def main():
         f.write(HTML)
 
     # a loopback server, so the test exercises the SAME code path production
-    # uses (http) instead of a file:// stand-in that ingestion must refuse
-    class _Page(http.server.BaseHTTPRequestHandler):
-        def log_message(self, *a):
-            pass
-
-        def do_GET(self):
-            body = HTML.encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-    os.environ["no_proxy"] = "127.0.0.1,localhost"
-    os.environ["NO_PROXY"] = "127.0.0.1,localhost"
-    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Page)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    uri = f"http://127.0.0.1:{srv.server_address[1]}/page.html"
+    # uses (http) instead of a file:// stand-in that ingestion must refuse.
+    # serve_dir opts in to ALLOW_PRIVATE_INGEST: a fixture is a deliberate
+    # loopback target, which the SSRF policy requires you to say out loud.
+    base, stop_site = serve_dir(sb)
+    uri = f"{base}/page.html"
     ingest.add_url(sb, uri, course="webcourse")
     lesson = os.path.join(sb, "courses", "webcourse", "lessons", "01", "lesson.md")
     with open(lesson, "r", encoding="utf-8") as f:
@@ -113,7 +100,7 @@ def main():
     tasks = read_state(sb)["tasks"]
     assert tasks[-1]["role"] == "watcher" and tasks[-1]["course"] == "reading-list"
     print("[.urls] dropped link file became a course with its own lessons")
-    srv.shutdown()
+    stop_site()
     print("PASS test_url")
 
 

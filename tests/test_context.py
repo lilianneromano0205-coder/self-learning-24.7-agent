@@ -114,10 +114,13 @@ def main():
     seen = {}
     real = a3.call_model
 
-    def capture(role, messages, use_tools=True):
+    def capture(role, messages, use_tools=True, **kw):
+        # **kw so the stub survives signature growth (the gateway added
+        # purpose/task_id); a stub that silently rejects a new kwarg turns
+        # into "the summarizer was never called", which is a confusing lie
         if not use_tools:
             seen["prompt"] = json.dumps(messages, ensure_ascii=False)
-        return real(role, messages, use_tools=use_tools)
+        return real(role, messages, use_tools=use_tools, **kw)
 
     a3.call_model = capture
     t3 = {"id": "t-clear", "role": "tester", "goal": "grep the logs",

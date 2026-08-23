@@ -548,6 +548,86 @@ MAX_FETCH_BYTES = 256 * 1024 * 1024  # a course file should never exceed this
 
 ALLOWED_SCHEMES = ("http", "https")
 
+# Manual §25.5: "Block file:// and SSRF classes in ingestion; revalidate
+# redirects/DNS/IP policy." A scheme check alone stops file:// and stops
+# nothing else: http://169.254.169.254/ is a cloud metadata endpoint, and a
+# public URL that 302s to it defeats a check performed only on the first URL.
+BLOCKED_NETS = (
+    ("127.0.0.0", 8, "loopback"),
+    ("10.0.0.0", 8, "private"),
+    ("172.16.0.0", 12, "private"),
+    ("192.168.0.0", 16, "private"),
+    ("169.254.0.0", 16, "link-local / cloud metadata"),
+    ("100.64.0.0", 10, "carrier-grade NAT"),
+    ("0.0.0.0", 8, "unspecified"),
+)
+
+
+def _ip_int(dotted):
+    parts = [int(x) for x in dotted.split(".")]
+    return (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]
+
+
+def _blocked_ip(ip):
+    """-> reason, or "" when the address is a normal public one."""
+    if ":" in ip:                                  # IPv6
+        low = ip.lower()
+        if low in ("::1", "::") or low.startswith(("fe80", "fc", "fd")):
+            return "loopback/link-local/unique-local IPv6"
+        return ""
+    try:
+        v = _ip_int(ip)
+    except (ValueError, IndexError):
+        return ""
+    for net, bits, why in BLOCKED_NETS:
+        mask = (0xFFFFFFFF << (32 - bits)) & 0xFFFFFFFF
+        if (v & mask) == (_ip_int(net) & mask):
+            return why
+    return ""
+
+
+def _check_host(url):
+    """Resolve the host and refuse private/loopback/metadata destinations.
+
+    ALLOW_PRIVATE_INGEST=1 turns this off for an operator who genuinely wants
+    to ingest an intranet page — a deliberate, visible choice rather than a
+    silent hole.
+    """
+    if os.environ.get("ALLOW_PRIVATE_INGEST") == "1":
+        return
+    host = urllib.parse.urlsplit(str(url)).hostname or ""
+    if not host:
+        raise ValueError(f"no host in {url!r}")
+    import socket
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        return                       # unresolvable: the fetch will fail anyway
+    for info in infos:
+        ip = info[4][0]
+        why = _blocked_ip(ip)
+        if why:
+            raise ValueError(
+                f"refusing to fetch {host} — it resolves to {ip} ({why}). "
+                f"Ingestion reads the public web; internal addresses are a "
+                f"server-side request forgery target. Set "
+                f"ALLOW_PRIVATE_INGEST=1 to override deliberately.")
+
+
+class _NoRedirectToPrivate(urllib.request.HTTPRedirectHandler):
+    """A redirect is a NEW request and gets the same checks. Without this, a
+    public URL that 302s to 169.254.169.254 walks straight past a check that
+    only ever looked at the first URL."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _check_scheme(newurl)
+        _check_host(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _opener():
+    return urllib.request.build_opener(_NoRedirectToPrivate)
+
 
 def _check_scheme(url):
     """Ingestion fetches whatever it is pointed at, and urlopen speaks file://
@@ -570,9 +650,10 @@ def fetch_url(url, dst):
     through pymupdf, plain text is saved as-is. Downloads are capped so one
     huge link cannot fill the disk."""
     _check_scheme(url)
+    _check_host(url)
     req = urllib.request.Request(url, headers={
         "User-Agent": "Mozilla/5.0 (compatible; learning-agent/1.0)"})
-    with urllib.request.urlopen(req, timeout=60) as r:
+    with _opener().open(req, timeout=60) as r:
         ctype = r.headers.get_content_type()
         data = r.read(MAX_FETCH_BYTES + 1)
     if len(data) > MAX_FETCH_BYTES:
@@ -722,9 +803,11 @@ def add_url(root, url, course=None, crawl=0, max_items=200):
     # --- a manual / guide / docs course: follow its same-site pages
     if crawl > 0:
         try:
+            _check_scheme(url)
+            _check_host(url)
             req = urllib.request.Request(url, headers={
                 "User-Agent": "Mozilla/5.0 (compatible; learning-agent/1.0)"})
-            with urllib.request.urlopen(req, timeout=60) as r:
+            with _opener().open(req, timeout=60) as r:
                 html = r.read().decode("utf-8", errors="replace")
             # checkpointed per sub-page: a crawl that dies at page 17 resumes
             # at page 18 and never queues a page twice

@@ -770,7 +770,8 @@ class Agent:
         cache[role] = d
         return d
 
-    def call_model(self, role, messages, use_tools=True, escalated=False):
+    def call_model(self, role, messages, use_tools=True, escalated=False,
+                   purpose="step", task_id=None):
         """Call the model with exponential backoff (5 tries) on the primary
         provider, then the fallback provider. Returns (message, usage, provider).
         When escalated, the role's escalate_provider/escalate_model is tried
@@ -794,13 +795,18 @@ class Agent:
         for prov_name, model in attempts:
             prov = self.provider_cfg(prov_name)
             if prov.get("type") == "mock":
+                t0 = time.time()
                 msg = self._call_mock(prov, messages)
                 # scripted calls are spend too: the suite proves the breaker
                 # by charging mock tokens, and a ledger that skipped them
                 # would make the daily brake untestable
-                self._record_spend(self._cost(role, self._mock_usage))
+                cost = self._cost(role, self._mock_usage)
+                self._record_spend(cost)
+                self._meter(purpose, role, prov_name, model,
+                            self._mock_usage, cost, task_id, t0)
                 return msg, self._mock_usage, prov_name
             for attempt in range(5):
+                _t0 = time.time()
                 try:
                     payload = {"model": model, "messages": messages}
                     if self.max_output_tokens > 0:
@@ -827,13 +833,16 @@ class Agent:
                         resp = json.loads(r.read().decode("utf-8"))
                     msg = resp["choices"][0]["message"]
                     usage = resp.get("usage", {})
+                    _cost = self._cost(role, usage)
+                    self._meter(purpose, role, prov_name, model, usage,
+                                _cost, task_id, _t0)
                     # EVERY model call is spend, wherever it was made from.
                     # This used to be recorded by run_task_step alone, so the
                     # compaction summarizer, replay.py and benchmark.py spent
                     # money the daily breaker never saw — and compaction fires
                     # on the longest tasks, so the ceiling under-counted worst
                     # exactly where it mattered most.
-                    self._record_spend(self._cost(role, usage))
+                    self._record_spend(_cost)
                     return msg, usage, prov_name
                 except urllib.error.HTTPError as e:
                     last_err = f"{prov_name} HTTP {e.code}"
@@ -1139,7 +1148,8 @@ class Agent:
                         + ". Under UNCERTAIN list anything you are not sure of — "
                         "never turn a guess into a fact.\n" + blob},
                 ],
-                use_tools=False,
+                use_tools=False, purpose="compaction",
+                task_id=task.get("id"),
             )
             summary = msg.get("content") or blob[:4000]
         except Exception:
@@ -1206,7 +1216,8 @@ class Agent:
                              ("chosen", "why", "cost", "rule") if k in routed}
         try:
             msg, usage, prov_name = self.call_model(
-                task["role"], messages, escalated=bool(task.get("escalated")))
+                task["role"], messages, escalated=bool(task.get("escalated")),
+                purpose="step", task_id=task["id"])
             task["provider"] = prov_name
             task["model"] = (routed.get("model") if routed.get("routed")
                              else self.role_cfg(task["role"]).get("model"))
@@ -1422,6 +1433,20 @@ class Agent:
 
     def _spend_path(self):
         return os.path.join(self.logs_dir, f"spend-{time.strftime('%Y%m%d')}.json")
+
+    def _meter(self, purpose, role, provider, model, usage, cost, task_id, t0):
+        """Manual §19 Model Gateway: EVERY provider call is attributed to a
+        purpose and a model, per call. Task-level attribution credited a whole
+        task to whichever provider served its last step, which mis-credits any
+        task that failed over. Never raises — metering must not break work."""
+        try:
+            import modelgateway
+            modelgateway.record(
+                self.root, purpose=purpose, role=role, provider=provider,
+                model=model, usage=usage, cost=cost, task=task_id,
+                ms=int((time.time() - t0) * 1000))
+        except Exception:
+            pass
 
     def _record_spend(self, usd):
         if usd <= 0:

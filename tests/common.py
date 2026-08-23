@@ -222,6 +222,11 @@ def serve_dir(directory):
     import threading
     _os.environ["no_proxy"] = "127.0.0.1,localhost"
     _os.environ["NO_PROXY"] = "127.0.0.1,localhost"
+    # Ingestion refuses private/loopback destinations by default (SSRF: a
+    # public URL that redirects to 169.254.169.254 is the classic attack).
+    # A test fixture IS a deliberate loopback target, so it opts in the same
+    # way an operator ingesting an intranet page would — visibly.
+    _os.environ["ALLOW_PRIVATE_INGEST"] = "1"
     handler = functools.partial(_QuietFiles, directory=directory)
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
