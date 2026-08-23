@@ -935,24 +935,19 @@ class Agent:
         return None
 
     def _safe_path(self, rel, write=False):
-        """File tools stay inside the agent root (constitution rule 3, enforced
-        mechanically, not just prompted), never touch secrets files, and never
-        REWRITE the files that define the agent's own permissions."""
-        p = os.path.realpath(os.path.join(self.root, rel))
-        root = os.path.realpath(self.root)
-        if p != root and not p.startswith(root + os.sep):
-            raise ValueError(f"path escapes the agent root: {rel}")
-        import credentials
-        if credentials.is_secret(p, root):
-            raise ValueError(f"refusing access to a secrets file: {rel}")
-        if write:
-            why = self._protected_for_write(rel)
-            if why:
-                raise ValueError(
-                    f"refusing to overwrite {rel}: {why}. Ask the owner, or "
-                    f"use the tool that governs it (variants.py for charters, "
-                    f"approvals.py for decisions).")
-        return p
+        """The agent's file tools go through the FILE AUTHORITY (fileauth.py,
+        manual §19): one gateway that canonicalises, refuses traversal and
+        symlink escapes, refuses credentials, and refuses writes to control
+        or runtime state. It used to be a per-call-site check here, which is
+        exactly why five harness writers reached the filesystem without it."""
+        import fileauth
+        try:
+            return fileauth.resolve(self.root, rel,
+                                    "write" if write else "read", "agent")
+        except fileauth.Denied as e:
+            # the tool contract is a ValueError carrying a message the model
+            # can act on; keep that shape
+            raise ValueError(str(e))
 
     def check_done(self, task):
         """Run the task's done_check. Returns (passed, evidence). A task with
@@ -973,22 +968,22 @@ class Agent:
         cmd = task.get("done_check")
         if not cmd:
             return True, ""
-        import policy
-        verdict = policy.check(cmd, task.get("role", "default"),
-                               self.cfg.get("agent", {}))
-        if verdict:
+        # ONE gateway (execution.py, manual §19): policy screens it, the
+        # untrusted-skill guard runs, the sandbox scrubs the environment, and
+        # the whole thing is traced — the same stack run_command gets.
+        import execution
+        try:
+            rc, out, err = execution.run(
+                "gate", cmd, self.root, cfg=self.cfg,
+                role=task.get("role", "default"), task=task.get("id"),
+                timeout=self.command_timeout, reason="definition of done")
+        except execution.Refused as e:
             self.log.info(json.dumps({"event": "gate_refused_by_policy",
                                       "task": task.get("id"),
-                                      "reason": verdict}))
-            return False, f"done_check refused by policy: {verdict}"
-        try:
-            import sandbox
-            rc, out, err = sandbox.run(cmd, self.root, timeout=self.command_timeout,
-                                       cfg=self.cfg)
-            body = ((out or "") + (err or "")).strip()
-            return rc == 0, f"exit={rc}\n{truncate(body, 2000)}"
-        except Exception as e:
-            return False, f"done_check could not run: {e}"
+                                      "reason": str(e)[:200]}))
+            return False, f"done_check refused: {e}"
+        body = ((out or "") + (err or "")).strip()
+        return rc == 0, f"exit={rc}\n{truncate(body, 2000)}"
 
     def exec_tool(self, task, name, args):
         """Every tool returns TEXT, including its failures — an agent can
@@ -1022,41 +1017,35 @@ class Agent:
             cmd = args["cmd"]
             with open(os.path.join(self.logs_dir, "commands.log"), "a", encoding="utf-8") as f:
                 f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} task={task['id']} {cmd}\n")
-            # the policy layer decides what the model MAY run — code, not prompt
-            import policy
-            verdict = policy.check(cmd, task.get("role", "default"),
-                                   self.cfg.get("agent", {}))
-            if verdict:
-                self.log.info(json.dumps({"event": "command_refused",
-                                          "task": task["id"],
-                                          "cmd": cmd[:200]}))
-                return verdict
-            # a community skill's bundled scripts do not run until the owner
-            # has looked at them (provenance-gated execution)
-            guard = skillgraph.script_guard(self.root, cmd)
-            if guard:
-                self.log.info(json.dumps({"event": "command_refused",
-                                          "task": task["id"],
-                                          "reason": "untrusted skill script",
-                                          "cmd": cmd[:200]}))
-                return guard
-            env = {**os.environ, "PYTHONUTF8": "1",
+            env = {"PYTHONUTF8": "1",
                    "AGENT_ROOT": self.root,
                    "AGENT_TASK_ID": task["id"],
                    "AGENT_TASK_LINEAGE": task.get("lineage") or task["id"],
                    "AGENT_ROLE": task.get("role", "default")}
-            # WHERE it runs is a setting, not a hard-coded subprocess: host
-            # today, a container or a hosted microVM the moment the owner
-            # asks for one. An unavailable backend fails closed.
-            import sandbox
+            # ONE gateway (execution.py, manual §19): the policy layer decides
+            # what the model MAY run, the provenance guard keeps a community
+            # skill's bundled scripts disabled, the sandbox decides WHERE it
+            # runs and what it can see, and every attempt is traced. An
+            # unavailable backend fails closed.
+            import execution
             try:
-                rc, out, err = sandbox.run(cmd, self.root, env,
-                                           self.command_timeout, self.cfg)
-                return truncate(
-                    f"exit={rc}\n--- stdout ---\n{out}\n--- stderr ---\n{err}"
-                )
-            except subprocess.TimeoutExpired:
-                return f"ERROR: command timed out after {self.command_timeout}s"
+                rc, out, err = execution.run(
+                    "model_command", cmd, self.root, cfg=self.cfg,
+                    role=task.get("role", "default"), task=task["id"],
+                    timeout=self.command_timeout, env=env)
+            except execution.Refused as e:
+                # carry WHY forward: "refused" without a reason is the kind of
+                # log line that makes an incident unreadable a week later
+                reason = str(e)
+                self.log.info(json.dumps({
+                    "event": "command_refused", "task": task["id"],
+                    "reason": ("untrusted skill script"
+                               if "COMMUNITY skill" in reason
+                               else reason[:200]),
+                    "cmd": cmd[:200]}))
+                return reason
+            return truncate(
+                f"exit={rc}\n--- stdout ---\n{out}\n--- stderr ---\n{err}")
         if name == "ask_human":
             with open(os.path.join(self.root, "blocked.md"), "a", encoding="utf-8") as f:
                 f.write(

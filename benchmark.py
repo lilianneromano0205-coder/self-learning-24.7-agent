@@ -80,10 +80,15 @@ def check_cmd(check):
 
 
 def run_check(root, check):
+    """The benchmark's own acceptance check. It grades BOTH arms, so it runs
+    through the Execution Authority like any other gate — a measurement path
+    that skipped containment would be a measurement path worth attacking."""
     try:
-        r = subprocess.run(check_cmd(check), shell=True, cwd=root,
-                           capture_output=True, timeout=60)
-        return r.returncode == 0
+        import execution
+        rc, _out, _err = execution.run("gate", check_cmd(check), root,
+                                       role="examiner", timeout=60,
+                                       reason="benchmark acceptance check")
+        return rc == 0
     except Exception:
         return False
 

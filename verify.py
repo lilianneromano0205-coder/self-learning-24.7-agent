@@ -57,12 +57,7 @@ def run_checks(items, root, timeout):
     Falls back to a plain run only if those modules are unavailable (verify.py
     is also used standalone, outside an expert)."""
     results = []
-    try:
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        import sandbox
-        import policy
-    except ImportError:
-        sandbox = policy = None
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     cfg = {}
     try:
         import tomllib
@@ -74,24 +69,17 @@ def run_checks(items, root, timeout):
         if cmd is None:
             results.append((rid, "NOT MECHANICAL", ""))
             continue
-        if policy is not None:
-            refused = policy.check(cmd, "examiner", cfg.get("agent", {}))
-            if refused:
-                results.append((rid, "FAIL", f"refused by policy: {refused}"))
-                continue
         try:
-            if sandbox is not None:
-                rc, out, err = sandbox.run(cmd, root, timeout=timeout, cfg=cfg)
-            else:
-                r = subprocess.run(cmd, shell=True, capture_output=True,
-                                   text=True, timeout=timeout, cwd=root)
-                rc, out, err = r.returncode, r.stdout, r.stderr
+            import execution
+            rc, out, err = execution.run("gate", cmd, root, cfg=cfg,
+                                         role="examiner", timeout=timeout,
+                                         reason=f"spec item {rid}")
             verdict = "PASS" if rc == 0 else "FAIL"
             body = ((out or "") + (err or "")).strip()
             evidence = (f"exit={rc}; " + body.splitlines()[0][:160]
                         if body else f"exit={rc}")
-        except subprocess.TimeoutExpired:
-            verdict, evidence = "FAIL", f"timed out after {timeout}s"
+        except Exception as e:
+            verdict, evidence = "FAIL", str(e)[:160]
         results.append((rid, verdict, evidence))
     return results
 

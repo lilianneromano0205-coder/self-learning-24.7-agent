@@ -273,13 +273,11 @@ def pursue(home, expert, goal, criteria="", cycles=4, drive=False,
                 # milestone CHECK: lines are written by the PLANNER model, so
                 # they run under the same containment as any model-authored
                 # command — policy screens, sandbox scrubs the environment
-                import sandbox as _sb
-                import policy as _pol
-                _cfg = _expert_cfg(root)
-                if _pol.check(ms["check"], "examiner", _cfg.get("agent", {})):
-                    failed_checks.append(f"M{ms['n']}")
-                    continue
-                rc, _out, _err = _sb.run(ms["check"], root, timeout=120, cfg=_cfg)
+                import execution
+                rc, _out, _err = execution.run(
+                    "gate", ms["check"], root, cfg=_expert_cfg(root),
+                    role="examiner", timeout=120,
+                    reason=f"milestone M{ms['n']} check")
                 if rc != 0:
                     failed_checks.append(f"M{ms['n']}")
             except Exception:

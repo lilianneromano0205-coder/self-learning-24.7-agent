@@ -81,10 +81,15 @@ def custom_tools(root=None):
             ready, why = True, ""
             check = e.get("ready_check")
             if check:
+                # a ready_check is read from a toolbox.json inside the
+                # workspace, so it is model-influenceable and goes through
+                # the Execution Authority like any model-authored command
                 try:
-                    r = subprocess.run(check, shell=True, capture_output=True,
-                                       timeout=30, cwd=base)
-                    ready = r.returncode == 0
+                    import execution
+                    rc, _o, _e = execution.run("capability_probe", check, base,
+                                               timeout=30,
+                                               reason=f"ready_check for {name}")
+                    ready = rc == 0
                     why = "" if ready else "ready_check failed"
                 except Exception as ex:
                     ready, why = False, str(ex)[:60]

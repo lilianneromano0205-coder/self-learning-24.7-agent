@@ -109,6 +109,20 @@ def fmt_ts(seconds):
 
 # ------------------------------------------------------------- extraction
 
+def _convert(argv, timeout=300, why="", root=None, check=True):
+    """Every external converter runs through the Execution Authority as an
+    ARGUMENT VECTOR — no shell, so a filename can never become shell syntax.
+    (Manual §19: one gateway for any process execution.)"""
+    import execution
+    rc, out, err = execution.run("converter", list(argv),
+                                 root or os.getcwd(), timeout=timeout,
+                                 reason=why)
+    if check and rc != 0:
+        raise RuntimeError(f"{argv[0]} failed (exit {rc}): "
+                           f"{(err or out or '').strip()[:300]}")
+    return rc, out, err
+
+
 def try_rich_convert(src, dst):
     """Optional upgrade path: if Docling or MarkItDown is installed, use it —
     they preserve layout, tables, and reading order far better than a raw text
@@ -184,7 +198,8 @@ def docx_convert(src, dst):
         return
     need("pandoc")
     os.makedirs(os.path.dirname(dst) or ".", exist_ok=True)
-    subprocess.run(["pandoc", src, "-t", "gfm", "-o", dst], check=True, timeout=300)
+    _convert(["pandoc", src, "-t", "gfm", "-o", dst], timeout=300,
+             why="docx/odt/rtf -> markdown")
     print(f"wrote {dst}")
 
 
@@ -194,11 +209,10 @@ def chunk_audio(src, outdir, segment_seconds=1200):
     need("ffmpeg")
     os.makedirs(outdir, exist_ok=True)
     pattern = os.path.join(outdir, "chunk-%03d.mp3")
-    subprocess.run(
-        ["ffmpeg", "-y", "-loglevel", "error", "-i", src, "-vn",
-         "-ar", "16000", "-ac", "1", "-b:a", "32k",
-         "-f", "segment", "-segment_time", str(segment_seconds), pattern],
-        check=True, timeout=3600)
+    _convert(["ffmpeg", "-y", "-loglevel", "error", "-i", src, "-vn",
+              "-ar", "16000", "-ac", "1", "-b:a", "32k",
+              "-f", "segment", "-segment_time", str(segment_seconds), pattern],
+             timeout=3600, why="extract + split audio", root=outdir)
     chunks = sorted(f for f in os.listdir(outdir) if f.startswith("chunk-"))
     print(f"wrote {len(chunks)} chunk(s) to {outdir}")
     return [os.path.join(outdir, c) for c in chunks]
@@ -300,11 +314,10 @@ def transcribe(src, dst):
 def frames(video, outdir, scene=0.3):
     need("ffmpeg")
     os.makedirs(outdir, exist_ok=True)
-    subprocess.run(
-        ["ffmpeg", "-y", "-loglevel", "error", "-i", video,
-         "-vf", f"select='gt(scene,{scene})'", "-vsync", "vfr",
-         os.path.join(outdir, "%04d.png")],
-        check=True, timeout=3600)
+    _convert(["ffmpeg", "-y", "-loglevel", "error", "-i", video,
+              "-vf", f"select='gt(scene,{scene})'", "-vsync", "vfr",
+              os.path.join(outdir, "%04d.png")],
+             timeout=3600, why="scene-change keyframes", root=outdir)
     # crude dedupe: drop a frame whose size is within 2% of its predecessor's
     kept, prev = [], None
     for fn in sorted(os.listdir(outdir)):
@@ -452,7 +465,7 @@ def youtube_subs(url, dst):
         if os.path.exists(ck):
             cmd[1:1] = ["--cookies", ck]
             break
-    subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+    _convert(cmd, timeout=900, why="fetch captions", root=workdir, check=False)
     found = sorted(f for f in os.listdir(workdir) if f.endswith((".vtt", ".srt")))
     if not found:
         print("no captions available — fall back to audio + transcription")
@@ -473,8 +486,13 @@ def youtube_subs(url, dst):
 def playlist_entries(url):
     """Expand a playlist/channel/course URL into its individual video URLs."""
     need("yt-dlp")
-    r = subprocess.run(["yt-dlp", "--flat-playlist", "--dump-json", url],
-                       capture_output=True, text=True, timeout=600)
+    _rc, _stdout, _stderr = _convert(
+        ["yt-dlp", "--flat-playlist", "--dump-json", url],
+        timeout=600, why="expand playlist", check=False)
+
+    class _R:                      # keep the existing r.stdout call shape
+        stdout = _stdout
+    r = _R()
     out = []
     for line in r.stdout.splitlines():
         try:
@@ -589,10 +607,12 @@ def youtube_audio(url, outdir):
         if os.path.exists(ck):
             cmd[1:1] = ["--cookies", ck]
             break
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
-    if r.returncode != 0:
+    rc, _out, err = _convert(cmd, timeout=3600, why="download audio",
+                             root=outdir, check=False)
+    if rc != 0:
         sys.exit(f"ERROR: yt-dlp failed (bot detection? export cookies.txt or "
-                 f"download locally and drop the file in inbox/):\n{r.stderr[-500:]}")
+                 f"download locally and drop the file in inbox/):"
+                 f"\n{(err or '')[-500:]}")
     print(f"downloaded audio to {outdir}")
 
 
