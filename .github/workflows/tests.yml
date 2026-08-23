@@ -58,8 +58,24 @@ jobs:
       - name: Harness contracts hold
         run: python harness.py --check
 
+      # Every process this platform starts must go through the Execution
+      # Authority. This scans the whole tree for a raw subprocess call that
+      # is neither routed nor declared, so a bypass added tomorrow fails the
+      # build rather than being discovered by an audit a year later.
+      - name: No execution bypasses
+        run: python execution.py --audit
+
       - name: Acceptance suite
         run: python tests/run_all.py
+
+      # A passing test proves nothing unless it would fail with the feature
+      # removed. This breaks each load-bearing behaviour in turn and requires
+      # the test that claims to cover it to go red. Linux only: it is
+      # deterministic and slow-ish, and one platform is enough to catch a
+      # test that has stopped measuring anything.
+      - name: Mutation check — do the tests actually notice?
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
+        run: python mutate_check.py
 
       - name: Package builds without secrets
         shell: bash

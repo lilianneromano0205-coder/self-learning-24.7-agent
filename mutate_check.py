@@ -1,0 +1,172 @@
+#!/usr/bin/env python3
+"""MUTATION TESTING — break the feature, confirm the test notices.
+
+A passing test proves nothing on its own: a test that would pass with the
+feature removed is a test that measures nothing. This deliberately breaks
+each load-bearing behaviour and requires the test that claims to cover it to
+FAIL. Every mutation is reverted afterwards.
+
+Run from the agent/ directory.
+"""
+import io
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+
+AGENT = os.path.dirname(os.path.abspath(__file__))
+PY = sys.executable
+
+# (label, file, find, replace, test, what the test must notice)
+MUTATIONS = [
+    ("docker: egress allowed by default", "sandbox.py",
+     '''    if not _cfg(cfg).get("sandbox_network"):
+        argv += ["--network", "none"]           # default-deny egress''',
+     '''    if False:
+        argv += ["--network", "none"]''',
+     "test_docker_live.py",
+     "a container that can reach the internet by default"),
+
+    ("docker: timeout leaves the container", "sandbox.py",
+     '''    except subprocess.TimeoutExpired:
+        _kill_container(name)
+        raise''',
+     '''    except subprocess.TimeoutExpired:
+        raise''',
+     "test_docker_live.py",
+     "an orphaned container after a timeout"),
+
+    ("docker: credentials passed through", "sandbox.py",
+     '''    for k, v in sorted(_agent_env(env).items()):''',
+     '''    for k, v in sorted(env.items()):''',
+     "test_docker_live.py",
+     "API keys inside the container"),
+
+    ("provider: no Authorization header", "loop.py",
+     '''                        "Authorization": f"Bearer {self._api_key(prov)}",''',
+     '''                        "X-Not-Auth": "removed",''',
+     "test_live_provider.py",
+     "requests sent with no credential"),
+
+    ("provider: malformed body kills the task", "loop.py",
+     '''                    except (ValueError, KeyError, IndexError, TypeError) as e:''',
+     '''                    except (KeyError, IndexError) as e:''',
+     "test_live_provider.py",
+     "a garbled body escaping the retry ladder"),
+
+    ("provider: 4xx retried like weather", "loop.py",
+     '''                    if e.code in (429, 500, 502, 503, 504):''',
+     '''                    if e.code in (400, 401, 429, 500, 502, 503, 504):''',
+     "test_live_provider.py",
+     "five paid retries of a request that cannot succeed"),
+
+    ("package: ship the credential file", "package.py",
+     None,   # handled specially: plant agent.env and neuter the skip rule
+     None,
+     "test_package.py",
+     "a shipped API key"),
+
+    ("endurance: never archive finished work", "loop.py",
+     '''        if len(finished) <= self.retain_finished + 25:''',
+     '''        if True:''',
+     "test_endurance.py",
+     "a hot queue that grows without bound"),
+
+    ("rbac: every write allowed", "ui.py",
+     '''            org.check(self.home, getattr(self, "actor", OWNER_ACTOR),
+                      permission, obj)
+            return True''',
+     '''            return True''',
+     "test_rbac.py",
+     "a viewer able to delete an agent"),
+
+    ("fleet: creation stops seeding the home", "fleet.py",
+     '''    seed_home(home)
+    os.makedirs(os.path.join(home, "experts"), exist_ok=True)''',
+     '''    os.makedirs(os.path.join(home, "experts"), exist_ok=True)''',
+     "test_invariants.py",
+     "a crash on a never-bootstrapped home"),
+]
+
+
+def run_test(name, timeout=900):
+    """-> "CAUGHT" | "MISSED" | "SKIP".
+
+    A test that SKIPS itself (docker unavailable, for instance) exits 0
+    without having run anything, and calling that MISSED would report a
+    false alarm on every machine without a daemon. Read the marker the test
+    prints rather than the exit code alone.
+    """
+    r = subprocess.run([PY, os.path.join(AGENT, "tests", name)],
+                       cwd=os.path.join(AGENT, "tests"),
+                       capture_output=True, text=True, timeout=timeout,
+                       env={**os.environ, "PYTHONUTF8": "1"})
+    out = (r.stdout or "") + (r.stderr or "")
+    if r.returncode == 0 and "SKIP " in out:
+        return "SKIP"
+    return "CAUGHT" if r.returncode != 0 else "MISSED"
+
+
+def main():
+    only = sys.argv[1] if len(sys.argv) > 1 else None
+    results = []
+    for label, fname, find, repl, test, expect in MUTATIONS:
+        if only and only not in label:
+            continue
+        path = os.path.join(AGENT, fname)
+        backup = path + ".mutbak"
+        planted = None
+        shutil.copy(path, backup)
+        try:
+            if find is None:                    # the packaging mutation
+                planted = os.path.join(AGENT, "agent.env")
+                if os.path.exists(planted):
+                    results.append((label, "SKIP", "agent.env already exists"))
+                    continue
+                with io.open(planted, "w", encoding="utf-8") as f:
+                    f.write("OPENAI_API_KEY=sk-mutation-should-be-caught\n")
+                src = io.open(path, encoding="utf-8").read()
+                mutated = src.replace("def should_skip(", "def _orig_skip(")
+                mutated += ("\n\ndef should_skip(*a, **k):\n"
+                            "    return False\n")
+                io.open(path, "w", encoding="utf-8", newline="\n").write(mutated)
+            else:
+                src = io.open(path, encoding="utf-8").read()
+                if src.count(find) != 1:
+                    results.append((label, "SKIP",
+                                    f"anchor appears {src.count(find)}x"))
+                    continue
+                io.open(path, "w", encoding="utf-8", newline="\n").write(
+                    src.replace(find, repl, 1))
+            t0 = time.time()
+            verdict = run_test(test)
+            took = time.time() - t0
+            said = {"CAUGHT": "failed", "MISSED": "PASSED ANYWAY",
+                    "SKIP": "skipped itself (a prerequisite is missing)"}
+            results.append((label, verdict,
+                            f"{test} {said[verdict]} in {took:.0f}s — {expect}"))
+        finally:
+            shutil.copy(backup, path)
+            os.remove(backup)
+            if planted and os.path.exists(planted):
+                os.remove(planted)
+    print()
+    print("=" * 78)
+    print("MUTATION RESULTS — a MISSED row is a test that measures nothing")
+    print("=" * 78)
+    for label, verdict, detail in results:
+        print(f"  {verdict:<7} {label}")
+        print(f"          {detail}")
+    missed = [r for r in results if r[1] == "MISSED"]
+    print()
+    print(f"{len(results)} mutations: "
+          f"{sum(1 for r in results if r[1] == 'CAUGHT')} caught, "
+          f"{len(missed)} missed, "
+          f"{sum(1 for r in results if r[1] == 'SKIP')} skipped")
+    return 1 if missed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

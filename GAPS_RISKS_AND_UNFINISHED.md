@@ -1044,3 +1044,160 @@ at all.
 changelog that lists ten defects found in somebody else's code and none in the
 code written to fix them. Both of these shipped as green tests for the length
 of an afternoon.
+
+---
+
+# Fourth pass — closing the paths nothing had ever executed (2026-08-23)
+
+Before handing this build a real API key, the honest question is: *which code
+will run for the first time when that key arrives?* Four answers, and each was
+closed by making it runnable offline.
+
+| Path | Lines that had never executed | Now |
+|---|---|---|
+| The live provider HTTP client | ~90 | `tests/fake_provider.py` + `test_live_provider.py` |
+| `loop.py check`, the only live probe | ~30 | `test_first_day.py` |
+| The docker sandbox | ~40 | `test_docker_live.py` — real containers |
+| The E2B / Daytona REST client | ~35 | `test_hosted_sandbox.py` |
+
+Two real defects fell out.
+
+---
+
+## U12 — a timed-out command left its container running
+
+**Severity:** P1 for a 24/7 fleet (unbounded resource leak), found the first
+time the docker backend was ever executed.
+
+`_docker` ran `subprocess.run(argv, timeout=…)`. That timeout kills the
+**docker client**, and `docker run` is only a client — the container keeps
+running on the daemon.
+
+**Observed:** a `sleep 60` under a 6-second ceiling was still up half a minute
+later, holding its 1 GB memory allowance and its 256 pids:
+
+```
+$ docker ps
+9db1c33f6a96  python:3.12-slim  Up 24 seconds  "sh -lc 'sleep 60'"
+```
+
+On a fleet running 24/7 every timed-out command leaks one, forever, until the
+machine stops. And the backend this affects is the one the documentation
+recommends for untrusted work.
+
+**Fixed by** naming every container (`--name fleet-<uuid>`) and, on
+`TimeoutExpired`, `docker rm -f`-ing it before the exception propagates.
+`rm -f` rather than `stop`, because the command has already blown its deadline
+and a graceful shutdown period would only extend the overrun.
+
+**Test:** `test_docker_live.py::check_a_timeout_kills_the_container` snapshots
+`docker ps` before and after and fails on any container the run added.
+
+---
+
+## U13 — a soak check that measured zero and called it bounded
+
+**Severity:** P3, and it was in the test written an hour earlier.
+
+The endurance check for context growth read `total_chars` from the compile
+manifest. The manifest has no such key — it carries `total_tokens`, a
+`system.tokens` block and per-source `used_tokens`. Every window therefore
+measured 0, early and late, and `0 <= 0 * 2.5` passed:
+
+```
+[context] across 42 compiled windows the median size went 0 -> 0 characters
+```
+
+A check whose numbers are all zero passes whatever the system does. Fixed to
+read the keys the manifest actually has, **and** to assert `early > 0` first —
+so the same mistake fails loudly instead of passing quietly. The real figure
+is flat at 1083 tokens across 42 windows, which is the property that was
+being claimed.
+
+This is the third time in two passes that a green check turned out to be
+reading a field that does not exist (`U2` selfmodel, `U3` the file tree,
+now this). It is worth naming as a pattern: **when a check reads a key from
+another subsystem's data, assert the value is non-trivial before asserting
+anything about it.**
+
+---
+
+## U14 — a garbled provider response killed the task and never tried the fallback
+
+**Severity:** P1 for anyone with a real key. Found by tightening an assertion
+in my own test that could not fail.
+
+`test_live_provider.py` contained this:
+
+```python
+except Exception as e:
+    assert type(e).__name__ != "NameError", e
+```
+
+That is true of essentially every exception. Replacing it with the assertion
+that actually matters — *the message must name the provider* — turned the
+test red and exposed the defect underneath.
+
+**The defect.** When a provider returns HTTP 200 with a body that is not a
+chat completion, `call_model` did:
+
+```python
+resp = json.loads(r.read().decode("utf-8"))
+msg = resp["choices"][0]["message"]
+```
+
+`JSONDecodeError` and `KeyError` are not in the `except` clauses of the retry
+ladder (`HTTPError`, `URLError`, `TimeoutError`, `OSError`), so they escaped
+`call_model` entirely. Consequences, in order of cost:
+
+1. **The fallback provider was never tried** — the one situation a fallback
+   exists for.
+2. The retry ladder was skipped, though a garbled body is usually transient:
+   a proxy's HTML error page, a truncated stream, a gateway answering 200
+   with `{"error": ...}`.
+3. The operator got `Expecting value: line 1 column 1 (char 0)` with **no
+   provider named**. With four providers configured, that is unactionable.
+
+This is the shape a real provider produces during an incident, so it would
+have surfaced on a bad afternoon rather than in a test.
+
+**Fixed by** catching `(ValueError, KeyError, IndexError, TypeError)` around
+the parse inside the ladder, treating it as the transient failure it is —
+retry, then fail over — and logging `provider_malformed` with the provider,
+the model, the exception and the first 200 bytes of the body.
+
+**Test:** `test_live_provider.py::check_a_malformed_response_is_not_a_crash`
+now stands up two servers, makes the first return garbage five times, and
+requires the call to come back from the **fallback**, with the full ladder
+attempted and `provider_malformed` logged against the provider that sent it.
+
+---
+
+## Vacuous assertions — five checks that could not fail
+
+Not a defect in the platform; a defect in its evidence, which is worse in a
+different way. A sweep for tautologies found five assertions that were always
+true:
+
+| File | The assertion | Why it could not fail |
+|---|---|---|
+| `test_docker_live.py` | `assert rc != 0 or "fork" in … or True` | `or True` |
+| `test_hosted_sandbox.py` | `assert … or True` | `or True` |
+| `test_ux.py` | `assert "cannot be edited" not in body or True` | `or True` |
+| `test_harness.py` | `assert "secret" not in json.dumps(r).lower() or True` | `or True` — **pre-existing**; the readiness report could have carried any secret |
+| `test_live_provider.py` | `assert type(e).__name__ != "NameError"` | true of nearly every exception |
+
+Four were written during this build. All five now assert something that can
+fail, and each replacement is stronger than a literal fix of the original:
+
+- the docker pid ceiling is asked to be **exceeded** and the process count
+  measured, rather than merely found on the argv;
+- the hosted backend's two availability messages must **differ**, and the
+  one with a key present may not contain "reachable", "verified" or
+  "working" — a key present is not a service contacted;
+- the proof routes the page POSTs to are **enumerated** and must be a subset
+  of `{/api/proof/refresh}`;
+- the readiness payload is scanned for anything key-shaped at all, under two
+  different environments;
+- the malformed-body branch must name the provider and attempt the ladder —
+  which is what found `U14`.

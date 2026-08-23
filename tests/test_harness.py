@@ -16,6 +16,7 @@ Run from the agent/ directory:  python tests/test_harness.py
 """
 
 import json
+import re
 import os
 import sys
 
@@ -120,10 +121,21 @@ def main():
         assert r["ready"] is False
         blocking = [i for i in r["items"] if i["blocking"]]
         assert any("TEST_KEY_NEVER_SET_ZZ" in i["how"] for i in blocking), r
-        assert "secret" not in json.dumps(r).lower() or True
-        # the key VALUE must never appear anywhere in the payload
+        # The readiness payload names VARIABLES, never values. This line used
+        # to end in `or True`, which made it an assertion that could not fail
+        # — the readiness report could have carried any secret at all and the
+        # test would still have been green.
+        payload = json.dumps(r)
         os.environ["TEST_KEY_NEVER_SET_ZZ_VALUE_PROBE"] = "sk-should-not-leak"
-        assert "sk-should-not-leak" not in json.dumps(r)
+        r2 = api(base, "GET", "/api/readiness")
+        payload2 = json.dumps(r2)
+        for blob in (payload, payload2):
+            assert "sk-should-not-leak" not in blob
+            # nothing key-shaped at all: a long opaque token in a health
+            # report is a leak whatever variable it came from
+            for tok in re.findall(r"[A-Za-z0-9_\-]{24,}", blob):
+                assert not tok.lower().startswith(("sk-", "ghp_", "gsk_",
+                                                   "nvapi-", "hf_")), tok
     finally:
         os.environ.pop("TEST_KEY_NEVER_SET_ZZ_VALUE_PROBE", None)
         stop_panel(proc, base)

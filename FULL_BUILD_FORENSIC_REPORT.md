@@ -23,7 +23,7 @@ smoothed over.
 
 | Property | Value | Evidence |
 |---|---|---|
-| Root | `C:/Users/redab/OneDrive/Bureau/self learning 24.7 agent/agent` | `[RUN]` |
+| Root | `<repository root>` *(the absolute path is redacted here: it named a developer account and is not a fact any reader needs. The audit ran in a OneDrive-synced folder on Windows, which is why sync and antivirus stalls appear in the concurrency findings.)* | `[RUN]` |
 | Version control | **None.** `git rev-parse` fails; no `.git` directory | `[RUN]` |
 | Python used for audit | 3.14.0 | `[RUN]` |
 | Platform | Windows-11-10.0.26200 | `[RUN]` |

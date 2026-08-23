@@ -835,8 +835,30 @@ class Agent:
                         method="POST",
                     )
                     with urllib.request.urlopen(req, timeout=self.model_timeout) as r:
-                        resp = json.loads(r.read().decode("utf-8"))
-                    msg = resp["choices"][0]["message"]
+                        raw = r.read().decode("utf-8", errors="replace")
+                    # A 200 carrying a body that is not a chat completion is
+                    # ordinary provider weather: a proxy's HTML error page, a
+                    # truncated stream, a gateway that answers 200 with
+                    # {"error": ...}. It used to raise JSONDecodeError or
+                    # KeyError straight out of the retry ladder, so the task
+                    # died and the FALLBACK PROVIDER WAS NEVER TRIED — the one
+                    # situation the fallback exists for. Treat it as the
+                    # transient failure it is, and name the provider, because
+                    # an operator with four of them configured cannot act on
+                    # "Expecting value: line 1 column 1".
+                    try:
+                        resp = json.loads(raw)
+                        msg = resp["choices"][0]["message"]
+                    except (ValueError, KeyError, IndexError, TypeError) as e:
+                        last_err = (f"{prov_name} returned a body that is not "
+                                    f"a chat completion ({type(e).__name__}): "
+                                    f"{raw[:160]!r}")
+                        self.log.info(json.dumps({
+                            "event": "provider_malformed",
+                            "provider": prov_name, "model": model,
+                            "error": str(e)[:160], "body": raw[:200]}))
+                        time.sleep(min(2 ** attempt * 2, 30))
+                        continue
                     usage = resp.get("usage", {})
                     _cost = self._cost(role, usage)
                     self._meter(purpose, role, prov_name, model, usage,

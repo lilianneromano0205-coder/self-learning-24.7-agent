@@ -128,12 +128,14 @@ These are **not fixed**, and the reasons differ:
 
 | Item | Status | Why |
 |---|---|---|
-| Live provider behaviour | **Unverified** | No keys configured. Every test call is still a scripted mock. Prompt effectiveness, real costs and genuine API failover remain unmeasured — `python loop.py check` is the only live probe |
-| Docker / E2B / Daytona backends | **Unexercised** | Only the host backend has ever run. The fail-closed path is read-from-source |
-| MCP and A2A against real servers | **Unexercised** | Both are tested against in-process fakes |
-| 24/7 endurance | **Untested at duration** | Longest observation is a full suite run. Memory growth, ledger size, log rotation and lock contention over days are unknown |
+| Live provider **behaviour** | **Unverified** | No keys configured. Prompt effectiveness, real token costs, real rate limits and genuine cross-provider failover remain unmeasured — `python loop.py check` is still the only live probe |
+| Live provider **HTTP client** | **Verified offline** | `tests/fake_provider.py` is a loopback server speaking the OpenAI-compatible contract. `test_live_provider.py` drives the real 90-line HTTP path: payload, auth header, extra headers, usage-based cost, the 429/5xx ladder, the non-retryable break, instant failover on a refused connection, the timeout bound, malformed bodies and inline tools. `test_first_day.py` rehearses bootstrap → `loop.py check` → first task against it |
+| Docker backend | **Exercised for real** | `test_docker_live.py` starts real containers: isolation confirmed by a Debian os-release on a Windows host, the mount in both directions, the host filesystem invisible, egress refused by default, credentials withheld, resource ceilings on the argv, and a gated task completed end to end. One machine, one image, one daemon version |
+| E2B / Daytona | **Client verified, services never contacted** | `test_hosted_sandbox.py` drives the REST client against a stand-in: no key refuses and runs nothing locally, the request carries the contract, credentials do not travel, both response spellings are read, four failure shapes are reported rather than raised. Neither service has ever received a request from this codebase |
+| MCP and A2A against real servers | **Partly — the transport is real** | *This line previously said "in-process fakes", which was wrong.* `mcp.Server` spawns a real subprocess and speaks newline-delimited JSON-RPC over real stdio pipes; `tests/mock_mcp_server.py` implements the actual protocol (initialize → notifications/initialized → tools/list → tools/call). What is untested is a THIRD-PARTY server — someone else's implementation, with its own quirks |
+| 24/7 endurance | **Growth measured, duration not** | `test_endurance.py` drives 120 real tasks through 6 loop restarts and measures what would end a long run: the hot queue stays at its retention bound with nothing lost to the archive, per-task latency is flat (0.13s across all six batches), logs rotate at a 29 MB ceiling, no lock outlives its holder, ~11 KB per task, and the compiled context window is flat at 1083 tokens. That rules out growth which is O(total work). It cannot rule out a leak that needs days |
 | P3-2 routing attribution | **Open** | A task's outcome is credited to the last provider used. Bounded (profiles are keyed by role) and it mis-credits only after a failover; fixing it means per-call attribution, which is a schema change |
-| `package.py`, `evidence.py` | **Untested** | Neither is on the critical runtime path. `locks.py` — which was — now has direct coverage |
+| `package.py`, `evidence.py` | **Now tested** | `test_package.py` checks the shipped archive four ways for credentials (basename, directory, extension, and by reading every text member), plants three decoy key files and proves each is excluded by file AND by value, confirms a fresh unzip passes `harness --check` with no setup, and holds `evidence.py` to naming every registered test with no drift and no ghosts |
 | A secret in prose | **Undetectable** | `credentials.is_secret` catches conventional names, configured key files, key extensions and whole-file tokens. A credential written mid-sentence in a note is not discoverable by any rule, and `backup.py` now says so rather than implying completeness |
 | Prompt injection | **Not a boundary** | `_read_block` fencing remains what it always was: a cost increase, not a control. The real containment is the tool allow-list, path containment, environment scrubbing and the approval gate — all of which are now consistent across paths |
 
@@ -169,7 +171,7 @@ flattened worker choice), `fleet.py` (seeding at the gateway), `selfmodel.py`
 
 ---
 
-## Third pass — U1…U11, found while building the UI/UX redesign
+## Third and fourth passes — U1…U14, found while building the UI/UX redesign
 
 The first two passes read the code. This one **executed** it, against a
 specification written by somebody else, which is a different instrument: it
@@ -190,6 +192,10 @@ only in other people's work is not an audit.
 | U8 | Two test files shared one sandbox directory | P2 | renamed; the property asserted by `ast` across all 93 test files | `test_invariants.py::check_sandbox_names_are_unique` |
 | U9 | The panel scrolled sideways at 375 px; two tables had no scroll container | P3 | `min-width:0` on grid items, and the wrapper moved INTO `taskTable()` | `test_ux.py::check_mobile_layout` |
 | U10 | `org.check` — "the single question every mutating path asks" — was asked by nothing but `org.py` and its own test | **P1** | personal bearer tokens, actor resolved from the credential, a declared permission table with a strict default, `Denied` → 403 | `test_rbac.py` (whole file) |
+| U12 | a timed-out command left its docker container running — an unbounded leak on a 24/7 fleet | **P1** | containers are named and `docker rm -f`'d when the client is killed | `test_docker_live.py::check_a_timeout_kills_the_container` |
+| U14 | a garbled provider body escaped the retry ladder: the task died and the fallback provider was never tried | **P1** | the parse is inside the ladder, retried, failed over, and logged as `provider_malformed` with the provider named | `test_live_provider.py::check_a_malformed_response_is_not_a_crash` |
+| — | five test assertions that could not fail (`or True` × 4, plus one always-true type check); four written during this build, one pre-existing in `test_harness.py` | P2 | each replaced with an assertion that can fail, and stronger than a literal fix | the five tests named in `GAPS…md` |
+| U13 | an endurance check read a manifest key that does not exist, measured 0 and passed | P3 | reads the real keys, and asserts the value is non-trivial before asserting anything about it | `test_endurance.py::check_context_does_not_grow_with_history` |
 | U11 | two new metrics measured something other than their name — rates that could sum past 100%, and an autonomy ratio that was a success rate | P2 | both derived in one pass over one ledger; autonomy reads the events that record a person being needed | `test_metrics.py` (the autonomy check moves the number) |
 
 ### What this pass says about the audits

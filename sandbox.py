@@ -32,6 +32,7 @@ return (returncode, stdout, stderr).
 import os
 import shutil
 import subprocess
+import uuid
 
 BACKENDS = ("host", "docker", "e2b", "daytona")
 DOCKER_IMAGE = "python:3.12-slim"
@@ -151,8 +152,22 @@ def _timeout_result(e, timeout):
 
 
 def _docker(cmd, root, env, timeout, cfg):
+    """Run one command in a throwaway container.
+
+    THE CONTAINER IS NAMED, and the name is what makes a timeout survivable.
+    `docker run` is a CLIENT: killing it — which is all `subprocess.run`'s
+    timeout does — leaves the container running on the daemon. Found by
+    running it: a 60-second command under a 6-second ceiling was still up
+    half a minute later, holding its memory and pid allowance. On a 24/7
+    fleet every timed-out command would leak one until the machine died.
+
+    So the caller can always reach the container by name, and `run()` removes
+    it when the client is killed.
+    """
     mount = os.path.abspath(root).replace("\\", "/")
-    argv = ["docker", "run", "--rm", "--memory", "1g", "--pids-limit", "256",
+    name = f"fleet-{uuid.uuid4().hex[:16]}"
+    argv = ["docker", "run", "--rm", "--name", name,
+            "--memory", "1g", "--pids-limit", "256",
             "-v", f"{mount}:/work", "-w", "/work"]
     if not _cfg(cfg).get("sandbox_network"):
         argv += ["--network", "none"]           # default-deny egress
@@ -161,8 +176,27 @@ def _docker(cmd, root, env, timeout, cfg):
         argv += ["-e", f"{k}={'/work' if k == 'AGENT_ROOT' else v}"]
     argv += [str(_cfg(cfg).get("sandbox_image") or DOCKER_IMAGE),
              "sh", "-lc", cmd]
-    r = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True,
+                           timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_container(name)
+        raise
     return r.returncode, r.stdout, r.stderr
+
+
+def _kill_container(name):
+    """Stop and remove a container by name. Best effort, never raises.
+
+    `docker rm -f` is used rather than `stop`: the command has already
+    exceeded its deadline, so a graceful shutdown period would only extend
+    the overrun this exists to end.
+    """
+    try:
+        subprocess.run(["docker", "rm", "-f", name],
+                       capture_output=True, timeout=30)
+    except Exception:
+        pass
 
 
 def _hosted(kind, cmd, root, env, timeout, cfg):

@@ -1,193 +1,230 @@
-# Expert Fleet — learning & execution agents (v5)
+# Expert Fleet
 
-**Start here:** `python bootstrap.py` sets everything up, tells you exactly
-what is missing, creates your first expert and opens the control panel.
-[MANUAL.md](MANUAL.md) is the practical guide; [REFERENCE.md](REFERENCE.md)
-is the complete end-to-end explanation of every system, its logic and its
-limits. The panel's own Guide covers the same ground inside the app.
+**A file-backed, stdlib-only platform for building expert AI agents that work
+continuously, prove what they did, and remember what they learned.**
 
+70 Python modules · 99 acceptance tests · one HTML control panel · no
+database, no framework, no build step. Python 3.11+ and your own API keys.
+
+```bash
+python bootstrap.py
 ```
-python bootstrap.py --key OPENROUTER_API_KEY=... --expert "Night Analyst"
-python doctor.py            # health + readiness
-python harness.py --check   # every harness contract holds (exit 0)
-python tests/run_all.py     # 74 offline acceptance tests
-```
+
+One idempotent command: creates `agent.env`, tells you exactly what is
+missing (numbered, with the fix), creates your first expert, starts the
+control panel and opens it.
 
 ---
 
-## The v4 build document (still true, plus everything since)
+## The idea in one paragraph
 
-Implementation of the master build document: the loop (Part 5), memory layout
-and fetch discipline (Parts 3, 6), the roles (Part 7, plus the closed-book
-Student for hidden exams), the verification hierarchy's mechanical layer and
-exit criterion with spaced re-exams (Part 8), the file-scale flywheel
-(Part 9), and the ingestion matrix (Part 4).
-Stdlib-only Python 3.11+; ffmpeg/pandoc/pymupdf used by ingestion when present.
+An LLM with a shell is not an employee. It forgets everything between
+sessions, drifts away from the objective inside a long task, cannot be held
+to a specification nobody wrote down, and — most expensively — will tell you
+a job is finished when it is not. None of that is fixable inside the model,
+because the model is the thing being asked. **Capability comes from the
+system around the model.** So this platform surrounds a cheap model with the
+things that make its output verifiable: a *gate* that must exit zero before
+"done" is accepted, a *mission contract* held outside the transcript, ledgers
+that make yesterday's failure cheap, and a *proof system* in which no status
+can be set by hand.
 
-## Layout
+**→ [ARCHITECTURE.md](ARCHITECTURE.md) is the complete technical account** —
+the problem, the thesis, the eleven concepts, how a task actually runs, why I
+claim it works, and what is not proven.
+
+---
+
+## The five ideas you need to know
+
+**1. "Done" is a command, not an opinion.**
+A task can carry a definition of done. When the model calls `finish_task`,
+the platform runs that command. Non-zero exit means the finish is **refused**
+and the failure text goes back to the model. The count of refusals is kept,
+because *how often did it claim completion and get caught* is the most honest
+reliability number this platform has.
+
+**2. The objective lives outside the conversation.**
+A mission is an objective plus success criteria, on disk. The objective is
+immutable — amending it is recorded and fingerprinted. Every criterion is met
+by evidence, never assertion. Every action must name the criterion it serves.
+The contract is recompiled into every context window, so a compaction, a
+restart or a model swap cannot erase the goal.
+
+**3. Five authorities, not scattered checks.**
+A forensic audit of this codebase found the same pattern everywhere: *a
+control defends the path its author was thinking about, and does not know
+about the other paths.* Six places executed shell; one was tested. The answer
+is one mandatory gateway per kind of power — Execution, File, Credential,
+Model Gateway, Effect — and `python execution.py --audit` fails the build if
+any module bypasses one. Today: **0 violations across 70 modules.**
+
+**4. Proof is derived, never claimed.**
+Six levels from SPEC to PRODUCTION PROVEN, computed from evidence bound to a
+code hash. Change a file a capability covers and its badge drops on its own.
+Live evidence expires. **No endpoint accepts a level** — the panel can re-run
+the evidence and nothing else.
+
+**5. Memory is an institution, not a vector store.**
+Courses with cited atoms · skills promoted on outcomes · failures in sixteen
+categories · gotchas this expert already paid for · cases that record whether
+the fix *held* · competence measured from gated results. A memory router
+decides which kinds each role may see — the Student sees the course and
+nothing else, because a closed-book exam is not closed-book if the answers
+are in the window.
+
+---
+
+## Why you should believe any of it
+
+Four kinds of evidence, weakest first.
+
+**The suite passes.** 99 acceptance tests, green twice consecutively from
+clean. Each prints a sentence describing what it observed; `EVIDENCE.md`
+quotes them verbatim.
+
+**The tests enumerate rather than exemplify.** `tests/test_invariants.py`
+does not test through an example — it walks the tree: every subprocess call
+site in 70 modules, every declared control file, 12 traversal spellings, all
+4 credential sources against every subsystem that must exclude them, all 9
+provider-call purposes, all 9 roles, every module that mints an expert, every
+reader of the exam file, all 139 sandbox names across 99 test files, and all
+61 CLI subcommands the manual promises.
+
+**Mutation testing — 10 of 10 caught.** A passing test proves nothing unless
+it would fail with the feature removed. `mutate_check.py` breaks each
+load-bearing behaviour and requires its test to fail:
 
 ```
-loop.py              the agent: queue, five tools, atomic state, course locks,
-                     compaction, skill auto-loading, reflection chain,
-                     exit criterion + spaced re-exam scheduler
-ingest.py            Part 4 ingestion: scan-inbox, pdf-text/pdf-pages, docx,
-                     chunk-audio, transcribe (Groq Whisper), frames, vision
-verify.py            mechanical spec checks: runs every 'CHECK:' command in
-                     spec.md, writes exam-results.md — ground truth, no model
-memcheck.py          memory integrity: ID uniqueness, every [src:] citation
-                     resolves, spec items cite defined atoms, index coverage —
-                     makes the grounding rule mechanically checkable
-fleet.py             mint isolated experts (own identity, memory, courses,
-                     skills, state, spend) under experts/<name>/
-ui.py                mission control (local web panel, stdlib): system
-                     dashboard + per-expert tabs — Overview (teach, courses,
-                     blocked, log), Memory (the expert's whole filesystem,
-                     read-only, secrets refused), Board (task kanban, gaps,
-                     re-exam schedule), Tools (verify/memcheck runs, manual
-                     task queue for any role, provider probe, routing view)
-demo.py              no-keys full-lifecycle demo with scripted models
-settings.toml        per-role providers; Examiner on Groq Llama (different
-                     family than the DeepSeek workers)
-prompts/             constitution.md + _grounding.md prefix every role prompt
-skills/              procedural memory (playbooks, written by the Reflector,
-                     auto-loaded when a task goal matches name/KEYWORDS)
-reputation.md        role × model × prompt-version scorecard
-agent.service        24/7 daemon (Restart=always, unprivileged, hardened)
-agent-inbox.*        systemd timer: scan inbox/ every 5 minutes
-tests/               74 offline acceptance tests — python tests/run_all.py
-inbox/  courses/  logs/  contexts/
+CAUGHT  docker: egress allowed by default
+CAUGHT  docker: timeout leaves the container running
+CAUGHT  docker: credentials passed into the container
+CAUGHT  provider: no Authorization header
+CAUGHT  provider: malformed body kills the task
+CAUGHT  provider: 4xx retried like weather
+CAUGHT  package: ship the credential file
+CAUGHT  endurance: never archive finished work
+CAUGHT  rbac: every write allowed
+CAUGHT  fleet: creation stops seeding the home
 
---- v5: the harness as an inspectable object -------------------------------
-bootstrap.py         one command: env, readiness, first expert, panel
-harness.py           the manifest — tools, gates, policies, budgets, versions;
-                     --check exits 0 only if every contract holds
-context.py           the context COMPILER: per-source token budgets, explicit
-                     trimming, and a manifest of every window it built
-checkpoint.py        fiber-style checkpoints: long tool work recovers, never
-                     restarts (transcription, folder ingest, crawls)
-sandbox.py           where commands run: host | docker | e2b | daytona,
-                     failing closed when a backend is unavailable
-gotchas.py           environment failures, scoped and triggered, from real
-                     failure records
-premise.py           refuses to build on a premise memory already retracted
-memrouter.py         which memory kinds a task may see (student stays
-                     closed-book even against an owner override)
-modelrouter.py       capability routing from measured outcomes, not vibes
-routines.py          a task that worked → a skill + a schedule, one gesture
-trace.py             one trace per task; per-tool error rates
-uicards.py           agent-authored cards from a closed catalogue (no markup)
-
---- awareness, evidence, and the design gate -------------------------------
-sources.py           every ingested source gets an authority tier (normative
-                     → anecdotal), owner-overridable with a reason
-conflicts.py         where the material disagrees with itself: rulings by
-                     authority, recency, condition — or CONTESTED, which no
-                     answer may state as settled
-standards.py         the bar, extracted from normative atoms; contested and
-                     defeated claims are refused
-selfmodel.py         the agent's factual self-model, compiled into every
-                     window: verified atoms, exams, competence, scars, gaps
-designcheck.py       the mechanical design gate: contrast, scale, tokens,
-                     breakpoints, the a11y floor, and the generated-filler
-                     tells — wired as done_check for interface deliverables
-MANUAL.md            the practical guide
-REFERENCE.md         the complete end-to-end explanation, with honest limits
+10 mutations: 10 caught, 0 missed
 ```
 
-## The pipeline end to end
+**The paths that touch something real.** Docker containers actually start —
+isolation is proven by reading a Debian `os-release` from inside a container
+on a Windows host. The provider HTTP client is driven against a loopback
+server that speaks the protocol and can be told to misbehave, so the ~90
+lines that used to first run when somebody spent money now run offline. The
+first day is rehearsed end to end: bootstrap → `loop.py check` → first gated
+task. Endurance is measured over 120 real tasks: latency flat at 0.13 s,
+context window flat at 1083 tokens, nothing lost to the archive.
 
-1. Drop anything into `inbox/` (or run `python ingest.py scan-inbox`).
-   Text/markdown becomes a lesson directly (deterministic, no model); video,
-   audio, PDF, images, docx queue a Ripper task; unknown types are parked.
-2. Ripper converts to `lessons/NN/transcript.txt` using the ingest.py helpers.
-3. Watcher writes cited notes (C-/P-/U- IDs, [src:] stamps), appends R-items
-   to spec.md — mechanically checkable ones embed `CHECK: <command>`.
-4. Practitioner executes spec items (skills playbooks auto-load); Examiner
-   runs `verify.py` and `memcheck.py` first (ground truth), then grades the
-   rest; every FAIL lands in gaps.md; Reflector updates lessons-learned.md,
-   skills/, reputation.md after each execution task.
-   Role hand-offs are automatic: `[agent.chain]` queues the next role when
-   one finishes (ripper → watcher by default), and the idle loop turns every
-   open `- G-nnn (role)` line in gaps.md into a queued task for that role —
-   nothing evaporates, and an unresolved gap set is never re-queued in a loop.
-5. `python loop.py course <name>` reports the exit criterion: all R-items
-   PASS + SCORE ≥ threshold + gaps.md empty → COMPLETE. The idle loop then
-   schedules re-exams at `reexam_days` (default 7/30/90) with NEW questions.
+---
 
-## Commands
+## What is NOT proven
+
+Stated plainly, because a README that only reports wins is marketing.
+
+- **No real provider has ever been called.** Every model call in every test
+  is a scripted mock or a loopback server. `python loop.py check` is the only
+  live probe, and until somebody runs it with a real key the honest ceiling
+  for every capability here is **OFFLINE VERIFIED** — which is what
+  `python proof.py` reports.
+- **The UI has been used by nobody but its author.** The spec asks for a
+  five-person test at ≥90 % task completion; that has not happened.
+- **No gradient updates.** The Training Lab governs promotion and exports
+  data. It does not train weights, and says so on every export.
+- **Authentication is a bearer token over plain HTTP.** RBAC is real and
+  enforced on every write; TLS, sessions and expiry are not there.
+- **The "100×" claim is refused, not made.** It is defined as verified output
+  per dollar *versus the same raw model without the fleet*. That needs the
+  same work run twice and the baseline half has never been run, so
+  `metrics.py` reports the harness's observable contribution as counts and
+  refuses to divide them into a multiplier.
+
+Of the six release gates the engineering manual defines, **only the developer
+build is cleared.** The full table is in
+[ARCHITECTURE.md §11](ARCHITECTURE.md#11-what-is-not-proven).
+
+---
+
+## Try it without a key
 
 ```bash
-python loop.py check          # probe every role's provider — run this FIRST
-python loop.py add --role watcher --course myco --goal "Study lesson 03" \
-    --memory courses/myco/lessons/03/transcript.txt
-python loop.py run            # forever; --drain exits when the queue empties
-python loop.py status
-python loop.py course myco    # exit-criterion report
-python loop.py answer <id> --text "..."   # unblock a task
-python ingest.py scan-inbox
-python verify.py myco         # mechanical spec checks
-python memcheck.py myco       # memory integrity
-python tests/run_all.py       # all 74 offline acceptance tests
+python demo.py            # the whole platform, keyless, in one run
+python tests/run_all.py   # 99 acceptance tests
+python proof.py           # what is proven, and to what level
+python evidence.py        # why we believe it, and where belief runs out
+python metrics.py         # is it working — and the numbers it refuses to invent
+python preflight.py       # is this installation fit to run unattended
+python mutate_check.py    # break each feature, confirm its test notices
 ```
 
-## Plugging in providers (incl. OpenRouter)
+## With a key
 
-Any OpenAI-compatible endpoint works. To run a role through OpenRouter:
-set `provider = "openrouter"` and `model = "<id from openrouter.ai/models>"`
-in that role's block; put the key in `OPENROUTER_API_KEY`. For models
-without function calling, set `native_tools = false` on the provider — the
-agent switches to the grounding header's inline-JSON tool format (tested).
-Optional OpenRouter attribution headers go in
-`[providers.openrouter.extra_headers]`. Then `python loop.py check` probes
-every role's wiring with one live request each and exits nonzero on any
-failure — run it before every deploy.
+```bash
+python bootstrap.py --key DEEPSEEK_API_KEY=sk-...   # the value is never printed
+python loop.py check --root experts/<slug>          # the only live probe
+python loop.py run --drain --root experts/<slug>    # work the queue
+python ui.py                                        # the control panel
+```
 
-## Spec file conventions (parsed by verify.py and course_status)
+Keys live in `agent.env` beside the code, one `NAME=VALUE` per line. They are
+reported present or absent and **never printed** — there is no route, log
+line or backup that returns one. Set spend caps at every provider before
+first use; the platform's own daily breaker is a second line of defence, not
+the first.
 
-- `spec.md`: `R-041 [from C-0701,P-0703]: <requirement> CHECK: <shell command
-  that exits 0 iff the requirement holds>` — the CHECK part is optional but
-  preferred; items without one are graded by the Examiner.
-- `exam-results.md`: lines containing `R-nnn ... PASS|FAIL|NOT ATTEMPTED`
-  (last occurrence per item wins) and a `SCORE: <n>` line for the exam.
-- `gaps.md`: open gaps are lines starting with `- G-nnn`; empty file = no gaps.
+---
 
-## Tested guarantees (offline, mock providers, no keys)
+## The control panel
 
-kill-and-resume (Part 12-B) · single-writer lock incl. stale-break · native
-and inline-JSON tool calls · reflection chain (exactly one, no self-chain) ·
-context compaction · mechanical verification (impossible item FAILs with
-evidence; re-runs replace, not stack) · inbox scan with real pymupdf/ffmpeg
-extraction · skills compounding (run 2 loads run 1's playbook; unrelated
-tasks don't) · exit criterion (each dimension blocks alone) + re-exam
-scheduling (queued once, never re-queued) · memory integrity (all four
-violation types detected; sound memory certified) · failure retries (fresh
-context, error carried forward, capped, base goal un-stacked) · blocked-task
-resume (`loop.py answer <task-id> --text "..."` injects the human's reply
-and requeues) · hidden exams (a file in exam/pending/ dispatches a
-closed-book Student whose context provably excludes the notes AND whose tool
-allowlist has no read access — cheating is mechanically refused; grading is
-chained; dispatched exactly once per question-file CONTENT, and a replaced
-file is a fresh exam) · secrets denial (agent.env / ui-token.txt / .keys/
-refused to the file tools, so injected material cannot order keys exfiltrated)
-· **full lifecycle (test_e2e): one inbox
-drop → ripper → watcher → practitioner → reflector → examiner+verify → gap →
-librarian → COMPLETE → re-exam, 7 tasks, zero human interventions, and the
-produced memory passes memcheck**.
+Six sections named for jobs rather than architecture: **Home · Work · Agents
+· Resources · Proof · Admin**. A command bar that asks *"what do you want
+accomplished?"*, an agent-creation wizard that asks five intent questions
+instead of exposing a taxonomy, a mission page that answers objective /
+current action / blocker / remaining criteria / cost in one screen, a Proof
+Center where clicking a badge shows the evidence and the command that
+reproduces it, and a failure view that names *which part* failed — the
+verifier, the platform, the provider, the budget, the command, the agent, or
+you.
 
-## Deploying (Part 4)
+⌘K opens a palette where every action shows its equivalent CLI command, so
+the panel teaches the terminal instead of hiding it.
 
-One command as root from this directory: `sudo bash setup-vps.sh` — installs
-packages, creates the unprivileged user, copies files, installs (without
-enabling) the systemd units, writes the key-file template, and runs the full
-test suite. Then: fill `/home/agent/agent.env` (**spend caps first**), run
-`python3 loop.py check` until every role says OK, and
-`systemctl enable --now agent agent-inbox.timer`.
+---
 
-## What still needs live models (key-gated, per Part 12)
+## Documentation
 
-- C: Watcher note quality on a real lesson — read notes.md yourself; expect
-  2–3 prompt iterations (the document's own JUDGMENT grade).
-- D: planted contradiction → Librarian rewrite + retractions.md entry.
-- E: Examiner grading quality on non-mechanical items (the mechanical layer
-  is already proven by test_verify).
-- G: scoped tokens (T2) against a real external system, draft-mode first.
+| Document | What it is |
+|---|---|
+| **[ARCHITECTURE.md](ARCHITECTURE.md)** | **the complete technical account — start here** |
+| [MANUAL.md](MANUAL.md) | the operator's guide: every command, every setting |
+| [REFERENCE.md](REFERENCE.md) | every system end to end, and an honest list of limits |
+| [GAPS_RISKS_AND_UNFINISHED.md](GAPS_RISKS_AND_UNFINISHED.md) | the audit record — four passes, 14 numbered defects |
+| [REMEDIATION.md](REMEDIATION.md) | what was done about each, and the residual risk |
+| [ARCHITECTURE_DECISIONS.md](ARCHITECTURE_DECISIONS.md) | each decision, the alternative rejected, the price paid |
+| [SYSTEM_DIAGRAMS.md](SYSTEM_DIAGRAMS.md) | execution, memory, trust boundaries, and where the defects lived |
+| [TRACEABILITY_MATRIX.md](TRACEABILITY_MATRIX.md) | capability → test → **what it does not establish** |
+| [EVIDENCE.md](EVIDENCE.md) | generated from an actual suite run, quoting each test |
+| [FULL_BUILD_FORENSIC_REPORT.md](FULL_BUILD_FORENSIC_REPORT.md) | the forensic audit, evidence-labelled |
+| [CHANGELOG.md](CHANGELOG.md) | what shipped, and the defects each release found |
+
+---
+
+## Requirements
+
+Python 3.11 or newer, and nothing else. Optional and detected at runtime:
+`ffmpeg` and `yt-dlp` for audio/video ingestion, `pandoc` or `pymupdf` for
+documents, `docker` for the isolated sandbox. `python toolbox.py` reports
+what this machine actually has, and a missing capability is reported as
+missing — an agent that cannot read a PDF says so instead of inventing its
+contents.
+
+## A note on the audit record
+
+`GAPS_RISKS_AND_UNFINISHED.md` is kept in the audit's own present tense, and
+`REMEDIATION.md` records what was done about each finding. Fourteen numbered
+defects, each with reproduction and the test that holds it closed — **and
+three of them are defects in code written during those same passes**, because
+a report that finds faults only in other people's work is not an audit.

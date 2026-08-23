@@ -2,7 +2,7 @@
  "audit": {
   "generated": "2026-08-22T19:16:09",
   "auditor": "forensic read-only pass",
-  "repository_path": "C:\\Users\\redab\\OneDrive\\Bureau\\self learning 24.7 agent\\agent",
+  "repository_path": "<repository root>",
   "version_control": "NONE - not a git repository (git rev-parse failed)",
   "platform_version_constant": "harness.HARNESS_VERSION",
   "python_runtime_used": "3.14.0",
@@ -158,7 +158,8 @@
     "24/7 endurance",
     "routing attribution after failover (P3-2)"
    ]
-  }
+  },
+  "repository_path_note": "redacted before publication: the absolute path named a developer account and is not a fact any reader needs"
  },
  "totals": {
   "modules": 60,
@@ -190,7 +191,7 @@
    "sha256_12": "ff8683f19ecc",
    "lines": 156,
    "subsystem": "governance",
-   "purpose": "Approval-gated side effects \u2014 the human in the loop, as a mechanism.",
+   "purpose": "Approval-gated side effects — the human in the loop, as a mechanism.",
    "entry_point": true,
    "cli_subcommands": [
     "deny",
@@ -237,7 +238,7 @@
    "sha256_12": "71d4565e3b16",
    "lines": 366,
    "subsystem": "control-plane",
-   "purpose": "BACKUP AND RESTORE \u2014 the fleet's memory is the asset, so it is portable.",
+   "purpose": "BACKUP AND RESTORE — the fleet's memory is the asset, so it is portable.",
    "entry_point": true,
    "cli_subcommands": [
     "create",
@@ -284,7 +285,7 @@
    "sha256_12": "fab17d4ddd64",
    "lines": 284,
    "subsystem": "governance",
-   "purpose": "Lift benchmark \u2014 what does the harness actually add to the rented model?",
+   "purpose": "Lift benchmark — what does the harness actually add to the rented model?",
    "entry_point": true,
    "cli_subcommands": [
     "run",
@@ -361,7 +362,7 @@
    "sha256_12": "87dd248a6874",
    "lines": 385,
    "subsystem": "governance",
-   "purpose": "TEST-TIME COMPUTE \u2014 spend thinking, not parameters, and keep the best.",
+   "purpose": "TEST-TIME COMPUTE — spend thinking, not parameters, and keep the best.",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -409,7 +410,7 @@
    "sha256_12": "2a53d5842aaa",
    "lines": 252,
    "subsystem": "memory",
-   "purpose": "THE CASE LEDGER \u2014 did the fix actually work?",
+   "purpose": "THE CASE LEDGER — did the fix actually work?",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -452,7 +453,7 @@
    "sha256_12": "c83eb9202875",
    "lines": 138,
    "subsystem": "harness-loop",
-   "purpose": "Fiber-style checkpoints for long tool work \u2014 recover, don't restart.",
+   "purpose": "Fiber-style checkpoints for long tool work — recover, don't restart.",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -484,7 +485,7 @@
    "sha256_12": "4d3e8f445e10",
    "lines": 306,
    "subsystem": "control-plane",
-   "purpose": "Chief of Staff \u2014 the Personal Strategic Operator.",
+   "purpose": "Chief of Staff — the Personal Strategic Operator.",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -526,7 +527,7 @@
    "sha256_12": "dcbd80578923",
    "lines": 86,
    "subsystem": "governance",
-   "purpose": "Citation gate for consultations \u2014 zero room for hallucinated authority.",
+   "purpose": "Citation gate for consultations — zero room for hallucinated authority.",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -559,7 +560,7 @@
    "sha256_12": "814530e02032",
    "lines": 412,
    "subsystem": "memory",
-   "purpose": "The Commons \u2014 shared memory for the whole fleet, plus peer consultation.",
+   "purpose": "The Commons — shared memory for the whole fleet, plus peer consultation.",
    "entry_point": true,
    "cli_subcommands": [
     "ask",
@@ -610,7 +611,7 @@
    "sha256_12": "0d660ed48bc7",
    "lines": 281,
    "subsystem": "governance",
-   "purpose": "CONFIDENCE \u2014 spend compute in proportion to doubt, not in proportion to habit.",
+   "purpose": "CONFIDENCE — spend compute in proportion to doubt, not in proportion to habit.",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -656,7 +657,7 @@
    "sha256_12": "d3a016839f11",
    "lines": 467,
    "subsystem": "memory",
-   "purpose": "CONTRADICTION CONTROL \u2014 what to believe when the material disagrees.",
+   "purpose": "CONTRADICTION CONTROL — what to believe when the material disagrees.",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -711,7 +712,7 @@
    "sha256_12": "193ff29a986b",
    "lines": 171,
    "subsystem": "work-systems",
-   "purpose": "Consult an expert \u2014 the mode for fields an agent cannot execute.",
+   "purpose": "Consult an expert — the mode for fields an agent cannot execute.",
    "entry_point": true,
    "cli_subcommands": [
     "ask",
@@ -750,7 +751,7 @@
    "sha256_12": "a9df9c12393d",
    "lines": 537,
    "subsystem": "harness-loop",
-   "purpose": "The context compiler \u2014 what the model sees is a COMPILED VIEW, not a pile.",
+   "purpose": "The context compiler — what the model sees is a COMPILED VIEW, not a pile.",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -814,7 +815,7 @@
    "sha256_12": "14252eec8420",
    "lines": 405,
    "subsystem": "memory",
-   "purpose": "CURRICULUM \u2014 study in a considered order, not the order things arrived.",
+   "purpose": "CURRICULUM — study in a considered order, not the order things arrived.",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -886,7 +887,7 @@
    "sha256_12": "312a8098dc9f",
    "lines": 373,
    "subsystem": "governance",
-   "purpose": "THE DESIGN GATE \u2014 mechanical checks a produced interface must survive.",
+   "purpose": "THE DESIGN GATE — mechanical checks a produced interface must survive.",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -926,7 +927,7 @@
    "sha256_12": "ee108b479b8c",
    "lines": 382,
    "subsystem": "control-plane",
-   "purpose": "Doctor \u2014 one command that tells you whether the whole platform is healthy.",
+   "purpose": "Doctor — one command that tells you whether the whole platform is healthy.",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -971,7 +972,7 @@
    "sha256_12": "4abf067084d9",
    "lines": 153,
    "subsystem": "harness-loop",
-   "purpose": "Effects ledger \u2014 exactly-once side effects across retries.",
+   "purpose": "Effects ledger — exactly-once side effects across retries.",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -1005,7 +1006,7 @@
    "sha256_12": "a0f6b01c34ef",
    "lines": 309,
    "subsystem": "governance",
-   "purpose": "EVIDENCE \u2014 why we believe each system works, and where belief runs out.",
+   "purpose": "EVIDENCE — why we believe each system works, and where belief runs out.",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -1033,7 +1034,7 @@
    "sha256_12": "319d069bd8d4",
    "lines": 473,
    "subsystem": "control-plane",
-   "purpose": "Federation \u2014 let another owner's agents work with yours, without trust.",
+   "purpose": "Federation — let another owner's agents work with yours, without trust.",
    "entry_point": true,
    "cli_subcommands": [
     "ask",
@@ -1171,7 +1172,7 @@
    "sha256_12": "97095c19cce9",
    "lines": 383,
    "subsystem": "work-systems",
-   "purpose": "Goal pursuit \u2014 state what you want; the system pursues it until it is",
+   "purpose": "Goal pursuit — state what you want; the system pursues it until it is",
    "entry_point": true,
    "cli_subcommands": [
     "list",
@@ -1214,7 +1215,7 @@
    "sha256_12": "04c109587ba6",
    "lines": 270,
    "subsystem": "memory",
-   "purpose": "ENVIRONMENT GOTCHAS \u2014 the failures this expert already paid for.",
+   "purpose": "ENVIRONMENT GOTCHAS — the failures this expert already paid for.",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -1583,7 +1584,7 @@
    "sha256_12": "6d74fb9f8fbb",
    "lines": 469,
    "subsystem": "control-plane",
-   "purpose": "MCP client \u2014 plug ANY Model Context Protocol tool server into the fleet.",
+   "purpose": "MCP client — plug ANY Model Context Protocol tool server into the fleet.",
    "entry_point": true,
    "cli_subcommands": [
     "call",
@@ -1634,7 +1635,7 @@
    "sha256_12": "ea2fa84d9acd",
    "lines": 119,
    "subsystem": "governance",
-   "purpose": "Memory integrity checker \u2014 makes the grounding rule mechanically checkable.",
+   "purpose": "Memory integrity checker — makes the grounding rule mechanically checkable.",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -1662,7 +1663,7 @@
    "sha256_12": "53198c04140d",
    "lines": 490,
    "subsystem": "memory",
-   "purpose": "The fleet's memory institution \u2014 the categories that outlive every model,",
+   "purpose": "The fleet's memory institution — the categories that outlive every model,",
    "entry_point": true,
    "cli_subcommands": [
     "competence",
@@ -1725,7 +1726,7 @@
    "sha256_12": "e215542e8602",
    "lines": 129,
    "subsystem": "harness-loop",
-   "purpose": "THE MEMORY ROUTER \u2014 which kinds of memory this task is allowed to see.",
+   "purpose": "THE MEMORY ROUTER — which kinds of memory this task is allowed to see.",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -1754,7 +1755,7 @@
    "sha256_12": "d1052aa19dd2",
    "lines": 272,
    "subsystem": "control-plane",
-   "purpose": "CAPABILITY ROUTING \u2014 pick the model from measured outcomes, not vibes.",
+   "purpose": "CAPABILITY ROUTING — pick the model from measured outcomes, not vibes.",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -1817,7 +1818,7 @@
    "sha256_12": "08d8f3e686bc",
    "lines": 87,
    "subsystem": "harness-loop",
-   "purpose": "Command policy \u2014 a deterministic guard between the model and the shell.",
+   "purpose": "Command policy — a deterministic guard between the model and the shell.",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -1847,7 +1848,7 @@
    "sha256_12": "3e80fd4f0e65",
    "lines": 427,
    "subsystem": "control-plane",
-   "purpose": "PRODUCTION PREFLIGHT \u2014 is this fleet fit to run someone's business on?",
+   "purpose": "PRODUCTION PREFLIGHT — is this fleet fit to run someone's business on?",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -1892,7 +1893,7 @@
    "sha256_12": "9a14e81f48c7",
    "lines": 190,
    "subsystem": "memory",
-   "purpose": "PREMISE AWARENESS \u2014 refuse to build on something already known false.",
+   "purpose": "PREMISE AWARENESS — refuse to build on something already known false.",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -1929,7 +1930,7 @@
    "sha256_12": "39161f1a4a05",
    "lines": 348,
    "subsystem": "work-systems",
-   "purpose": "Prospective memory \u2014 remembering to ACT, not just remembering facts.",
+   "purpose": "Prospective memory — remembering to ACT, not just remembering facts.",
    "entry_point": true,
    "cli_subcommands": [
     "add",
@@ -1983,7 +1984,7 @@
    "sha256_12": "8fc4d69d3b11",
    "lines": 269,
    "subsystem": "control-plane",
-   "purpose": "Plug in any model, from anywhere \u2014 and point any role at it.",
+   "purpose": "Plug in any model, from anywhere — and point any role at it.",
    "entry_point": true,
    "cli_subcommands": [
     "add",
@@ -2025,7 +2026,7 @@
    "sha256_12": "02eacaed6ba5",
    "lines": 273,
    "subsystem": "fleet-lanes",
-   "purpose": "Quick Specialists \u2014 spin up a working expert in seconds, not study-days.",
+   "purpose": "Quick Specialists — spin up a working expert in seconds, not study-days.",
    "entry_point": true,
    "cli_subcommands": [
     "spin",
@@ -2069,7 +2070,7 @@
    "sha256_12": "945142a552aa",
    "lines": 194,
    "subsystem": "memory",
-   "purpose": "Recall \u2014 search an expert's ENTIRE mind, including what compaction paged",
+   "purpose": "Recall — search an expert's ENTIRE mind, including what compaction paged",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -2106,7 +2107,7 @@
    "sha256_12": "3725cd56d848",
    "lines": 200,
    "subsystem": "governance",
-   "purpose": "Trajectory replay \u2014 measure a model (or charter) against recorded",
+   "purpose": "Trajectory replay — measure a model (or charter) against recorded",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -2137,7 +2138,7 @@
    "sha256_12": "bb1e56f50b86",
    "lines": 189,
    "subsystem": "work-systems",
-   "purpose": "AGENTIC RETRIEVAL \u2014 establish the facts before answering the question.",
+   "purpose": "AGENTIC RETRIEVAL — establish the facts before answering the question.",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -2172,7 +2173,7 @@
    "sha256_12": "5b7f9e5a60ab",
    "lines": 233,
    "subsystem": "work-systems",
-   "purpose": "ROUTINES \u2014 show the work once, then have it done forever.",
+   "purpose": "ROUTINES — show the work once, then have it done forever.",
    "entry_point": true,
    "cli_subcommands": [
     "cancel",
@@ -2213,7 +2214,7 @@
    "sha256_12": "1c29962efe58",
    "lines": 286,
    "subsystem": "harness-loop",
-   "purpose": "WHERE model-written commands actually run \u2014 a swappable execution backend.",
+   "purpose": "WHERE model-written commands actually run — a swappable execution backend.",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -2256,7 +2257,7 @@
    "sha256_12": "348665060a7f",
    "lines": 305,
    "subsystem": "memory",
-   "purpose": "THE SELF-MODEL \u2014 the agent works from facts about itself, not a persona.",
+   "purpose": "THE SELF-MODEL — the agent works from facts about itself, not a persona.",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -2304,7 +2305,7 @@
    "sha256_12": "ed602f6da425",
    "lines": 563,
    "subsystem": "memory",
-   "purpose": "Skill Graph \u2014 procedural memory as a validated, composable graph.",
+   "purpose": "Skill Graph — procedural memory as a validated, composable graph.",
    "entry_point": true,
    "cli_subcommands": [
     "export",
@@ -2372,7 +2373,7 @@
    "sha256_12": "b43383fee34d",
    "lines": 353,
    "subsystem": "memory",
-   "purpose": "THE SOURCE LEDGER \u2014 every claim knows where it came from, and what that",
+   "purpose": "THE SOURCE LEDGER — every claim knows where it came from, and what that",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -2422,7 +2423,7 @@
    "sha256_12": "aa0c01dc65f5",
    "lines": 277,
    "subsystem": "memory",
-   "purpose": "STANDARDS \u2014 the bar, extracted from the material and made checkable.",
+   "purpose": "STANDARDS — the bar, extracted from the material and made checkable.",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -2510,7 +2511,7 @@
    "sha256_12": "50a9d66c203b",
    "lines": 309,
    "subsystem": "fleet-lanes",
-   "purpose": "Pre-built specialists \u2014 a curated gallery of quick agents that spin up in",
+   "purpose": "Pre-built specialists — a curated gallery of quick agents that spin up in",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -2540,7 +2541,7 @@
    "sha256_12": "76a6e1b1881a",
    "lines": 190,
    "subsystem": "control-plane",
-   "purpose": "Toolbox \u2014 live capability scan of this machine, for humans and agents.",
+   "purpose": "Toolbox — live capability scan of this machine, for humans and agents.",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -2578,7 +2579,7 @@
    "sha256_12": "3efdc2fdcbd4",
    "lines": 282,
    "subsystem": "control-plane",
-   "purpose": "ONE TRACE PER TASK \u2014 spans, costs, gates, and per-tool error rates.",
+   "purpose": "ONE TRACE PER TASK — spans, costs, gates, and per-tool error rates.",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -2616,7 +2617,7 @@
    "sha256_12": "8fcceaac4120",
    "lines": 1626,
    "subsystem": "control-plane",
-   "purpose": "Expert Fleet control panel \u2014 mission control for the whole system.",
+   "purpose": "Expert Fleet control panel — mission control for the whole system.",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -2704,7 +2705,7 @@
    "sha256_12": "776c06d18605",
    "lines": 184,
    "subsystem": "control-plane",
-   "purpose": "GENERATIVE UI, SAFELY \u2014 agents return structured cards, not markup.",
+   "purpose": "GENERATIVE UI, SAFELY — agents return structured cards, not markup.",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -2736,7 +2737,7 @@
    "sha256_12": "a7654408768c",
    "lines": 329,
    "subsystem": "governance",
-   "purpose": "Charter evolution \u2014 the Agent Selection Farm idea, governed.",
+   "purpose": "Charter evolution — the Agent Selection Farm idea, governed.",
    "entry_point": true,
    "cli_subcommands": [
     "list",
@@ -2782,7 +2783,7 @@
    "sha256_12": "803deae98e5c",
    "lines": 147,
    "subsystem": "governance",
-   "purpose": "Mechanical spec verification \u2014 layer 1 of the hierarchy (Part 8).",
+   "purpose": "Mechanical spec verification — layer 1 of the hierarchy (Part 8).",
    "entry_point": true,
    "cli_subcommands": [],
    "public_functions": [
@@ -2808,7 +2809,7 @@
    "sha256_12": "6dd1f85b403d",
    "lines": 167,
    "subsystem": "work-systems",
-   "purpose": "Deterministic workflows \u2014 fixed stages with gates, before autonomy.",
+   "purpose": "Deterministic workflows — fixed stages with gates, before autonomy.",
    "entry_point": true,
    "cli_subcommands": [
     "list",
@@ -3051,7 +3052,7 @@
   {
    "file": "tests/test_cases.py",
    "lines": 152,
-   "claim": "Did the fix actually WORK? \u2014 the half a failure log never records.",
+   "claim": "Did the fix actually WORK? — the half a failure log never records.",
    "sections": [
     "open",
     "fixed",
@@ -3321,7 +3322,7 @@
   {
    "file": "tests/test_ecosystem.py",
    "lines": 220,
-   "claim": "THE BEAST TEST \u2014 every subsystem, one organism, cross-checked.",
+   "claim": "THE BEAST TEST — every subsystem, one organism, cross-checked.",
    "sections": [
     "organism",
     "prospective",
@@ -3565,7 +3566,7 @@
   {
    "file": "tests/test_lanes.py",
    "lines": 220,
-   "claim": "The five agent-creation lanes \u2014 and every framework behind the panel \u2014",
+   "claim": "The five agent-creation lanes — and every framework behind the panel —",
    "sections": [
     "teach",
     "intentions",
@@ -3637,7 +3638,7 @@
   {
    "file": "tests/test_mcp.py",
    "lines": 138,
-   "claim": "Plug ANY MCP tool server into the fleet \u2014 proven against a faithful",
+   "claim": "Plug ANY MCP tool server into the fleet — proven against a faithful",
    "sections": [
     "handshake",
     "fence",
@@ -3785,7 +3786,7 @@
   {
    "file": "tests/test_prospective.py",
    "lines": 138,
-   "claim": "Prospective memory: remembering to ACT later, executed by the scheduler \u2014",
+   "claim": "Prospective memory: remembering to ACT later, executed by the scheduler —",
    "sections": [
     "deadline",
     "watch",
@@ -3804,7 +3805,7 @@
   {
    "file": "tests/test_providers.py",
    "lines": 170,
-   "claim": "Plug in any model, from any platform \u2014 and any tool you provide.",
+   "claim": "Plug in any model, from any platform — and any tool you provide.",
    "sections": [
     "add",
     "roles",
@@ -3888,7 +3889,7 @@
   {
    "file": "tests/test_replay.py",
    "lines": 70,
-   "claim": "Trajectory replay \u2014 a number for \"how much does this model agree with our",
+   "claim": "Trajectory replay — a number for \"how much does this model agree with our",
    "sections": [
     "same",
     "swap"
@@ -3931,7 +3932,7 @@
   {
    "file": "tests/test_retention.py",
    "lines": 155,
-   "claim": "Durability under months of operation \u2014 the hardening that keeps a 24/7",
+   "claim": "Durability under months of operation — the hardening that keeps a 24/7",
    "sections": [
     "bounded",
     "lossless",
@@ -4082,7 +4083,7 @@
   {
    "file": "tests/test_team.py",
    "lines": 130,
-   "claim": "Teams: chosen specialists collaborate \u2014 lead decomposes, workers run",
+   "claim": "Teams: chosen specialists collaborate — lead decomposes, workers run",
    "sections": [
     "flow",
     "handoff",
@@ -4192,7 +4193,7 @@
   {
    "file": "tests/test_variants.py",
    "lines": 130,
-   "claim": "Charter evolution with a promotion gate \u2014 the Agent Selection Farm idea,",
+   "claim": "Charter evolution with a promotion gate — the Agent Selection Farm idea,",
    "sections": [
     "guards",
     "trial",

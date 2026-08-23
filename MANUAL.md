@@ -223,6 +223,7 @@ dialogs, 40 px targets.
 | `python modelrouter.py policy <name>` | Cheapest · Balanced · Highest quality · Custom |
 | `python curriculum.py --root <e> --course <c> [--plan\|--apply]` | what to study first, and why |
 | `python evidence.py` | why we believe each system works, and what remains unproven |
+| `python mutate_check.py` | break each load-bearing behaviour and confirm the test that claims to cover it goes red — a passing test that would pass anyway measures nothing |
 | `python metrics.py [--expert <slug>] [--json]` | the twelve numbers that say whether any of this is working — and the three it refuses to invent |
 
 ---

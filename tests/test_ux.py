@@ -165,8 +165,13 @@ def check_proof_in_one_click(base, html):
     assert not re.search(r'"/api/proof[^"]*".*level', html), \
         "the page must never post a proof level"
     assert "proof/refresh" in html and "refreshProof(" in html
-    body = _page()
-    assert "cannot be edited" not in body or True
+    # and the ONLY proof route the page may write to is the one that re-runs
+    # the evidence: enumerate the POSTs rather than trusting the comment
+    posted = set(re.findall(r"api\('(/api/proof[^']*)',\s*\{method:\"POST\"",
+                            html))
+    assert posted <= {"/api/proof/refresh"}, (
+        f"the page POSTs to {sorted(posted)} — the only proof route that may "
+        f"take a write is the one that re-runs the tests")
     print(f"[proof] {len(d['features'])} capabilities each carry level, badge, "
           f"the reason, the covering tests and the code hash the evidence is "
           f"bound to; the panel has no way to set a level, only to re-run the "

@@ -114,7 +114,8 @@ SYSTEMS = {
     "6. Control plane & interop": {
         "what": "panel, live events, cards, chief, doctor, preflight, backup, "
                 "providers, MCP, A2A federation, traces",
-        "tests": ["test_ui.py", "test_csrf.py", "test_frontend.py", "test_panel_v2.py",
+        "tests": ["test_ui.py", "test_csrf.py", "test_frontend.py",
+                  "test_package.py", "test_panel_v2.py",
                   "test_events.py", "test_uicards.py", "test_remote.py",
                   "test_chief.py", "test_doctor.py", "test_mcp.py",
                   "test_federation.py", "test_providers.py", "test_check.py",
@@ -171,6 +172,27 @@ SYSTEMS = {
                  "so on every export. What is proven is the governance around "
                  "a training run — nothing here has trained anything, and no "
                  "reward-hacking suite exists.",
+    },
+    "12. The paths that touch something real": {
+        "what": "the two code paths that had never been executed by anything "
+                "— the live provider HTTP client, and the docker sandbox — "
+                "each driven against a real server and a real container",
+        "tests": ["test_live_provider.py", "test_docker_live.py",
+                  "test_hosted_sandbox.py", "test_first_day.py",
+                  "test_endurance.py"],
+        "blind": "the provider tests run against a LOOPBACK SERVER that "
+                 "implements the documented OpenAI-compatible shape. They "
+                 "prove this platform's HTTP client is correct against that "
+                 "shape; they prove nothing about how any real provider "
+                 "behaves, and a provider that deviates will still surprise "
+                 "us. `python loop.py check` remains the only live probe. "
+                 "The docker tests DO start real containers, but on one "
+                 "machine, one image and one daemon version — not on the "
+                 "hosted backends (E2B, Daytona), whose CLIENT is verified "
+                 "against the documented shape while the services themselves "
+                 "have never been contacted. The endurance soak drives real "
+                 "tasks for minutes, which rules out growth that is O(total "
+                 "work) and cannot rule out a leak that needs days.",
     },
     "11. The interface itself": {
         "what": "the UI/UX specification's own acceptance table: that each "

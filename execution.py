@@ -215,6 +215,12 @@ ALLOWED_RAW = {
     "demo.py": "self-contained demo runner; builds its own world and calls "
                "loop.py/verify.py/memcheck.py by argv",
     "evidence.py": "runs the TEST SUITE by argv to harvest its own evidence",
+    "mutate_check.py": "the mutation harness: deliberately breaks a module, "
+                       "runs one test by argv, and reverts. A developer tool "
+                       "that never runs in production and never sees model "
+                       "input — but it is declared here rather than exempted "
+                       "silently, because an audit with an undeclared "
+                       "exception is an audit with a hole",
     "ui.py": "control plane: spawns loop.py/goal.py/team.py by argv on the "
              "owner's explicit action; no model input reaches the argv",
     "commons.py": "peer consultation drives a loop by argv",

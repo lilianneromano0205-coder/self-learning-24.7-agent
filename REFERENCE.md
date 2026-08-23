@@ -1495,6 +1495,46 @@ file · `test_ecosystem` runs every subsystem as one organism ·
 `test_invariants` enumerates every reachable path instead of exercising one
 example of one · `test_ux` executes the UI spec's own acceptance table.
 
+### Mutation testing — `python mutate_check.py`
+
+The question that decides whether a test is worth anything is not *does it
+pass*, it is **would it fail if the feature were removed**. A test that would
+pass either way measures nothing, and there is no way to tell from reading it.
+
+`mutate_check.py` answers that mechanically. For each load-bearing behaviour
+it edits the module to break it, runs the single test that claims to cover
+it, requires that test to FAIL, and reverts:
+
+```
+CAUGHT  docker: egress allowed by default          test_docker_live.py
+CAUGHT  docker: timeout leaves the container       test_docker_live.py
+CAUGHT  docker: credentials passed through         test_docker_live.py
+CAUGHT  provider: no Authorization header          test_live_provider.py
+CAUGHT  provider: malformed body kills the task    test_live_provider.py
+CAUGHT  provider: 4xx retried like weather         test_live_provider.py
+CAUGHT  package: ship the credential file          test_package.py
+CAUGHT  endurance: never archive finished work     test_endurance.py
+CAUGHT  rbac: every write allowed                  test_rbac.py
+CAUGHT  fleet: creation stops seeding the home     test_invariants.py
+
+10 mutations: 10 caught, 0 missed
+```
+
+A **MISSED** row is a defect in the test, not in the platform, and is treated
+as one. A test whose prerequisite is absent (docker on a machine without a
+daemon) reports **SKIP** rather than MISSED, because calling a skipped test a
+missed mutation would raise a false alarm on every machine without docker.
+
+It runs in CI on Linux/3.12. It is declared in `execution.ALLOWED_RAW` with
+its reason rather than exempted silently — an audit with an undeclared
+exception is an audit with a hole, and this file was in fact caught by that
+audit before being declared.
+
+**What it does not do.** It mutates ten behaviours, not every line. It is a
+spot check on the tests that carry the heaviest claims, not a coverage
+metric, and a green mutation run says nothing about the tests it did not
+mutate.
+
 ### The two files that enumerate rather than exemplify
 
 `test_invariants.py` is the answer to the audit's central finding — *a control
