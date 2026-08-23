@@ -57,7 +57,7 @@ control defends the path its author was thinking about, and does not know
 about the other paths.* Six places executed shell; one was tested. The answer
 is one mandatory gateway per kind of power — Execution, File, Credential,
 Model Gateway, Effect — and `python execution.py --audit` fails the build if
-any module bypasses one. Today: **0 violations across 70 modules.**
+any module bypasses one. Today: **0 violations across 71 modules.**
 
 **4. Proof is derived, never claimed.**
 Six levels from SPEC to PRODUCTION PROVEN, computed from evidence bound to a
@@ -85,7 +85,7 @@ quotes them verbatim.
 
 **The tests enumerate rather than exemplify.** `tests/test_invariants.py`
 does not test through an example — it walks the tree: every subprocess call
-site in 70 modules, every declared control file, 12 traversal spellings, all
+site in 71 modules, every declared control file, 12 traversal spellings, all
 4 credential sources against every subsystem that must exclude them, all 9
 provider-call purposes, all 9 roles, every module that mints an expert, every
 reader of the exam file, all 139 sandbox names across 99 test files, and all

@@ -205,7 +205,7 @@ patches — it is **five gateways every caller must pass through**:
 **These are enforced, not documented.** `python execution.py --audit` scans
 every module in the tree for a raw `subprocess` call outside the authority
 and reports violations; `tests/test_invariants.py` fails the suite if there
-are any. Today: **0 violations across 70 modules**, with 15 modules declared
+are any. Today: **0 violations across 71 modules**, with 16 modules declared
 platform-internal, each carrying a written reason.
 
 ### 3.6 The Memory Institution — what outlives every model
@@ -588,7 +588,7 @@ Design rules that are asserted by tests rather than aspired to:
 - **Colour never carries status alone.** Every coloured pill also has text.
 - **One `<h1>` per page.** A view hosted inside another suppresses its own
   page title.
-- **Every table sits in a scroll container** — 36 of them, checked — so a
+- **Every table sits in a scroll container** — 37 of them, checked — so a
   long cell scrolls the table and not the page.
 - **Failures name which part failed** — the verifier, the platform, the
   provider, the budget breaker, the command, the agent, or you — plus what
@@ -627,7 +627,7 @@ walks the tree:
 
 | Check | Enumerates |
 |---|---|
-| execution paths | every subprocess call site in 70 modules |
+| execution paths | every subprocess call site in 71 modules |
 | execution catalogue | every declared operation against what it declares |
 | filesystem zones | every declared control file and directory |
 | traversal spellings | 12 escape forms |
