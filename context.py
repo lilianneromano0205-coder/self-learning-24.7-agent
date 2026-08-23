@@ -37,6 +37,9 @@ import os
 import re
 
 DEFAULT_BUDGETS = {          # tokens (~4 chars each)
+    # the mission contract goes FIRST and is never trimmed away: it is the
+    # one thing whose loss makes every other token pointless (manual §11)
+    "mission": 900,
     "self": 600,
     "commons": 1500,
     "course": 2500,
@@ -53,8 +56,8 @@ DEFAULT_BUDGETS = {          # tokens (~4 chars each)
 # self first: an agent that knows what it has actually verified reads
 # everything after it differently. Authority and conflicts ride with the
 # course, because they are the rules for reading that material.
-ORDER = ["self", "commons", "course", "standards", "authority", "conflicts",
-         "cases", "gotchas", "premise", "skills", "memory_files"]
+ORDER = ["mission", "self", "commons", "course", "standards", "authority",
+         "conflicts", "cases", "gotchas", "premise", "skills", "memory_files"]
 SKILL_INDEX_CAP = 30
 SKILL_INDEX_TOKENS = 600
 
@@ -190,10 +193,32 @@ def compile(agent, task):
               {"rule": "all", "kinds": list(ORDER), "excluded": [],
                "why": "no memory router installed"})
     kinds = set(router.get("kinds") or ORDER)
+    # The mission contract is NOT a memory kind and is never routed away. It
+    # is the assignment itself — what this task is FOR — so a role that may
+    # see less MEMORY (the Student sits closed-book) must still see what it
+    # was asked to do and by what standard it will be judged. Routing it
+    # would reintroduce exactly the drift the contract exists to prevent.
+    kinds.add("mission")
     src = {n: _Source(n, bud.get(n, 1000)) for n in ORDER}
     for n in ORDER:
         if n not in kinds:
             src[n].excluded = router.get("why") or "excluded by the memory router"
+
+    # --- mission: the contract this task exists to serve. Recompiled from
+    # disk on every call, so compaction, a restart or a model swap cannot
+    # quietly soften the objective (manual §11 anti-drift).
+    if src["mission"].excluded is None and task.get("mission"):
+        try:
+            import mission as _mission
+            state = _mission.compile_state(root, task["mission"])
+            block = _mission.render(state)
+            if task.get("criterion"):
+                block += ("\nTHIS TASK serves criterion "
+                          f"{task['criterion']}. If what you are about to do "
+                          f"does not advance it, stop and say so.")
+            src["mission"].add_text("mission", block)
+        except Exception:
+            pass
 
     # --- self: what this agent has actually verified, and where it ends
     if src["self"].excluded is None and _selfmodel:

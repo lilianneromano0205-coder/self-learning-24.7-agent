@@ -490,7 +490,7 @@ class Agent:
 
     def add_task(self, role, goal, memory_files=None, course=None,
                  attempt=1, base_goal=None, done_check=None, lineage=None,
-                 stop=None):
+                 stop=None, mission=None, criterion=None):
         tid = uuid.uuid4().hex[:12]
         # every loop is defined by its STOP CONDITION (the 2026 loop
         # taxonomy): criteria the evaluator checks, a ceiling on attempts,
@@ -513,6 +513,11 @@ class Agent:
             # pass through _safe_path; unsanitised, "../../x" wrote outside
             # the expert root entirely. Sanitise where it enters the system.
             "course": safe_course(course),
+            # the mission this task serves, and the success criterion it
+            # advances. context.compile recompiles the contract from disk on
+            # every call, so the objective cannot drift out of the window.
+            "mission": mission,
+            "criterion": criterion,
             "done_check": done_check,   # shell command that must exit 0 to finish
             "stop": stop,
             "memory_files": memory_files or [],
