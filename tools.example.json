@@ -1,0 +1,20 @@
+[
+  {
+    "name": "shopify_products",
+    "cmd": "python tools/shopify.py products --limit 50",
+    "desc": "list this store's products as JSON (needs SHOPIFY_TOKEN)",
+    "ready_check": "python -c \"import os,sys; sys.exit(0 if os.environ.get('SHOPIFY_TOKEN') else 1)\""
+  },
+  {
+    "name": "company_search",
+    "cmd": "python tools/search.py \"<query>\"",
+    "desc": "search the internal knowledge base",
+    "ready_check": "python -c \"import os,sys; sys.exit(0 if os.path.exists('tools/search.py') else 1)\""
+  },
+  {
+    "name": "mcp_bridge",
+    "cmd": "npx -y @modelcontextprotocol/inspector --cli <server> --method tools/call --params '<json>'",
+    "desc": "call any MCP server's tool from the shell",
+    "ready_check": "node --version"
+  }
+]

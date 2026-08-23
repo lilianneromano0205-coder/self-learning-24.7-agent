@@ -1,0 +1,8 @@
+[
+  {"tool": "write_file", "args": {"path": "tests/tmp/out/step1.txt", "content": "step 1 done"}},
+  {"tool": "write_file", "args": {"path": "tests/tmp/out/step2.txt", "content": "step 2 done"}},
+  {"tool": "write_file", "args": {"path": "tests/tmp/out/step3.txt", "content": "step 3 done"}},
+  {"tool": "write_file", "args": {"path": "tests/tmp/out/step4.txt", "content": "step 4 done"}},
+  {"tool": "write_file", "args": {"path": "tests/tmp/out/step5.txt", "content": "step 5 done"}},
+  {"tool": "finish_task", "args": {"summary": "all five steps written"}}
+]

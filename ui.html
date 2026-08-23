@@ -1,0 +1,2698 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Expert Fleet</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,500;6..72,600;6..72,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* ---------- design tokens: full light palette, then dark twice ---------- */
+:root{
+  --bg:#F6F7F4; --bg2:#ECEFE9; --card:#FFFFFF; --line:#D9DED6; --line2:#C7CEC4;
+  --ink:#1B2A2C; --ink2:#48595A; --ink3:#71827F; --acc:#0E6A70; --acc2:#0B565B;
+  --accbg:#E3EFEE; --ok:#2E7D4F; --okbg:#E4F0E8; --warn:#96660F; --warnbg:#F5ECD9;
+  --bad:#AD3E2C; --badbg:#F6E4E0; --run:#2A5F8F; --runbg:#E2EBF4;
+  --code:#EFF2EC; --shadow:0 1px 2px rgba(27,42,44,.06),0 4px 14px rgba(27,42,44,.05);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#101A1C; --bg2:#0C1416; --card:#182527; --line:#27383A; --line2:#33474A;
+  --ink:#D9E2E0; --ink2:#A3B3B1; --ink3:#748785; --acc:#5FB8BE; --acc2:#7CC8CD;
+  --accbg:#1233359C; --ok:#5FB877; --okbg:#14301F99; --warn:#CFA054; --warnbg:#33270E99;
+  --bad:#D97A66; --badbg:#3A1B1499; --run:#78AEDC; --runbg:#14283A99;
+  --code:#131F21; --shadow:0 1px 2px rgba(0,0,0,.35),0 4px 16px rgba(0,0,0,.28);
+}}
+:root[data-theme="dark"]{
+  --bg:#101A1C; --bg2:#0C1416; --card:#182527; --line:#27383A; --line2:#33474A;
+  --ink:#D9E2E0; --ink2:#A3B3B1; --ink3:#748785; --acc:#5FB8BE; --acc2:#7CC8CD;
+  --accbg:#1233359C; --ok:#5FB877; --okbg:#14301F99; --warn:#CFA054; --warnbg:#33270E99;
+  --bad:#D97A66; --badbg:#3A1B1499; --run:#78AEDC; --runbg:#14283A99;
+  --code:#131F21; --shadow:0 1px 2px rgba(0,0,0,.35),0 4px 16px rgba(0,0,0,.28);
+}
+*{box-sizing:border-box} html,body{height:100%}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px;border-radius:6px}
+@media (prefers-reduced-motion:no-preference){
+  .btn,.acard,.navbtn,.pill{transition:border-color .15s,background .15s,
+    box-shadow .15s,transform .12s}
+  .acard:hover{transform:translateY(-1px)}
+  .btn:active{transform:translateY(1px)}
+}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:14px/1.55 "IBM Plex Sans",system-ui,"Segoe UI",Roboto,sans-serif}
+.mono{font-family:"IBM Plex Mono",ui-monospace,Consolas,monospace}
+a{color:var(--acc2)}
+/* ---------- shell: sidebar + main ---------- */
+#app{display:flex;min-height:100%}
+#side{width:216px;flex:0 0 216px;background:var(--bg2);border-right:1px solid var(--line);
+  padding:14px 10px;display:flex;flex-direction:column;gap:2px;position:sticky;top:0;
+  height:100vh;overflow-y:auto}
+#brand{font-weight:600;font-size:17px;letter-spacing:.01em;padding:4px 10px 12px;
+  display:flex;align-items:center;gap:8px;font-family:"Newsreader",Georgia,serif}
+#brand .dot{width:9px;height:9px;border-radius:50%;background:var(--acc)}
+.navbtn{display:flex;align-items:center;gap:9px;width:100%;text-align:left;border:0;
+  background:none;color:var(--ink2);padding:8px 10px;border-radius:8px;cursor:pointer;
+  font:inherit;font-weight:500}
+.navbtn:hover{background:var(--card);color:var(--ink)}
+.navbtn.on{background:var(--accbg);color:var(--acc2);font-weight:600}
+.navbtn .ic{width:18px;text-align:center;flex:0 0 18px}
+.navbtn .badge{margin-left:auto;background:var(--bad);color:#fff;border-radius:9px;
+  font-size:10.5px;padding:1px 7px;font-weight:700}
+#sideFoot{margin-top:auto;padding:10px;font-size:11px;color:var(--ink3)}
+#main{flex:1;min-width:0;padding:20px clamp(14px,3vw,34px) 70px}
+.pagehead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin:2px 0 4px}
+.pagehead h1{font-size:26px;margin:0;font-weight:600;
+  font-family:"Newsreader",Georgia,serif;letter-spacing:.01em}
+.pagehead h1.mono{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:21px;
+  font-weight:700}
+.pagehead .sub{color:var(--ink3);font-size:13px}
+.pagehead .spacer{flex:1}
+/* ---------- primitives ---------- */
+.card{background:var(--card);border:1px solid var(--line);border-radius:11px;
+  box-shadow:var(--shadow);margin:14px 0;overflow:hidden}
+.card>h3{margin:0;padding:11px 16px;font-size:13px;font-weight:650;color:var(--ink2);
+  border-bottom:1px solid var(--line);display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.card>h3 .spacer{flex:1}
+.card .body{padding:13px 16px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:0 14px}
+.grid2>.card{margin:14px 0 0}
+.btn{border:1px solid var(--line2);background:var(--card);color:var(--ink);
+  border-radius:8px;padding:7px 13px;font:inherit;font-weight:550;cursor:pointer}
+.btn:hover{border-color:var(--acc)}
+.btn.pri{background:var(--acc);border-color:var(--acc);color:#fff}
+.btn.pri:hover{background:var(--acc2)}
+.btn.warn{color:var(--bad);border-color:var(--bad)}
+.btn.sm{padding:3px 9px;font-size:12px;border-radius:6px}
+.btn.ghost{background:none}
+.btn:disabled{opacity:.5;cursor:default}
+.field,select.field,textarea.field{width:100%;background:var(--bg);color:var(--ink);
+  border:1px solid var(--line2);border-radius:8px;padding:8px 11px;font:inherit}
+textarea.field{min-height:74px;resize:vertical}
+label.lb{display:block;font-size:11.5px;font-weight:650;color:var(--ink3);
+  text-transform:uppercase;letter-spacing:.06em;margin:11px 0 4px}
+.row{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+.pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;
+  font-weight:650;white-space:nowrap}
+.pill.queued{background:var(--warnbg);color:var(--warn)}
+.pill.running{background:var(--runbg);color:var(--run)}
+.pill.done,.pill.ok{background:var(--okbg);color:var(--ok)}
+.pill.failed,.pill.bad{background:var(--badbg);color:var(--bad)}
+.pill.blocked{background:var(--badbg);color:var(--bad)}
+.pill.dim{background:var(--bg2);color:var(--ink3)}
+.pill.acc{background:var(--accbg);color:var(--acc2)}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;
+  color:var(--ink3);padding:7px 12px 7px 0;border-bottom:1px solid var(--line2)}
+td{padding:8px 12px 8px 0;border-bottom:1px solid var(--line);vertical-align:top}
+tr.click{cursor:pointer} tr.click:hover td{background:var(--bg2)}
+.tablewrap{overflow-x:auto}
+pre.out{background:var(--code);border:1px solid var(--line);border-radius:8px;
+  padding:11px 13px;font-size:12px;line-height:1.55;overflow:auto;max-height:420px;
+  white-space:pre-wrap;word-break:break-word;margin:10px 0 4px;
+  font-family:"IBM Plex Mono",ui-monospace,Consolas,monospace}
+.muted{color:var(--ink3)} .num{font-variant-numeric:tabular-nums}
+.empty{padding:26px;text-align:center;color:var(--ink3)}
+.kchip{display:inline-block;background:var(--bg2);border:1px solid var(--line);
+  border-radius:7px;padding:6px 12px;margin:0 8px 8px 0;font-size:12.5px}
+.kchip b{font-size:16px;margin-right:5px}
+/* agent cards */
+.agrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(285px,1fr));gap:13px}
+.acard{background:var(--card);border:1px solid var(--line);border-radius:11px;
+  box-shadow:var(--shadow);padding:13px 15px;cursor:pointer;position:relative}
+.acard:hover{border-color:var(--acc)}
+.acard h4{margin:0 0 2px;font-size:15px;display:flex;gap:8px;align-items:center;
+  flex-wrap:wrap}
+.acard .id{color:var(--ink3);font-size:12.5px;min-height:18px;margin-bottom:8px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acard .stats{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:9px}
+.tag{font-size:9.5px;font-weight:750;letter-spacing:.08em;padding:2px 7px;
+  border-radius:4px}
+.tag.trained{background:var(--accbg);color:var(--acc2)}
+.tag.quick{background:var(--warnbg);color:var(--warn)}
+.tag.retired{background:var(--bg2);color:var(--ink3)}
+/* subtabs inside a workspace */
+.subtabs{display:flex;gap:4px;flex-wrap:wrap;border-bottom:2px solid var(--line);
+  margin:12px 0 2px}
+.subtabs button{border:0;background:none;color:var(--ink3);font:inherit;font-weight:600;
+  padding:8px 13px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px}
+.subtabs button.on{color:var(--acc2);border-bottom-color:var(--acc)}
+/* tree + viewer */
+.mindwrap{display:grid;grid-template-columns:minmax(210px,300px) 1fr;gap:14px}
+@media (max-width:760px){.mindwrap{grid-template-columns:1fr}}
+#tree{max-height:520px;overflow:auto;font-size:12.5px;
+  font-family:"IBM Plex Mono",ui-monospace,Consolas,monospace}
+#tree .t{cursor:pointer;padding:2px 6px;border-radius:5px;white-space:nowrap}
+#tree .t:hover{background:var(--bg2)} #tree .t.on{background:var(--accbg);color:var(--acc2)}
+#tree .d{color:var(--ink2);font-weight:700}
+/* live pulse feed */
+.feed{max-height:340px;overflow-y:auto}
+.frow{display:flex;gap:10px;align-items:baseline;padding:6px 0;
+  border-bottom:1px solid var(--line);font-size:13px}
+.frow:last-child{border-bottom:0}
+.fdot{width:8px;height:8px;border-radius:50%;flex:0 0 8px;align-self:center}
+.fdot.ok{background:var(--ok)} .fdot.warn{background:var(--warn)}
+.fdot.bad{background:var(--bad)} .fdot.info{background:var(--run)}
+.frow .who{font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--acc2);
+  white-space:nowrap}
+.frow .when{margin-left:auto;color:var(--ink3);font-size:11.5px;white-space:nowrap}
+/* progress bars */
+.bar{height:7px;background:var(--bg2);border-radius:4px;overflow:hidden;
+  min-width:64px;flex:1}
+.bar>i{display:block;height:100%;background:var(--acc);border-radius:4px}
+.bar.ok>i{background:var(--ok)}
+.crs{padding:9px 0;border-bottom:1px solid var(--line)}
+.crs:last-child{border-bottom:0}
+/* dialog + toast */
+#ovl{position:fixed;inset:0;background:rgba(10,18,19,.45);display:none;
+  align-items:flex-start;justify-content:center;z-index:50;padding:6vh 14px}
+#ovl.show{display:flex}
+/* command palette: one place to ask for anything */
+#cmdk{position:fixed;inset:0;background:rgba(10,18,19,.5);display:none;
+  align-items:flex-start;justify-content:center;z-index:60;padding:10vh 14px}
+#cmdk.show{display:flex}
+#cmdbox{background:var(--card);border:1px solid var(--line2);border-radius:13px;
+  box-shadow:var(--shadow);width:min(640px,100%);overflow:hidden}
+#cmdq{border:0;border-bottom:1px solid var(--line);border-radius:0;
+  font-size:15px;padding:14px 16px;width:100%}
+#cmdq:focus{outline:none}
+#cmdlist{max-height:52vh;overflow:auto}
+.cmdrow{padding:9px 16px;border-bottom:1px solid var(--line);cursor:pointer;
+  display:flex;flex-direction:column;gap:2px}
+.cmdrow:last-child{border-bottom:0}
+.cmdrow.on,.cmdrow:hover{background:var(--accbg)}
+.cmdfoot{padding:9px 16px;border-top:1px solid var(--line);font-size:11.5px}
+@media (max-width:860px){ #cmdk{padding:4vh 8px} #cmdlist{max-height:60vh} }
+#dlg{background:var(--card);border:1px solid var(--line2);border-radius:13px;
+  box-shadow:var(--shadow);width:min(660px,100%);max-height:86vh;overflow:auto}
+#dlg h3{margin:0;padding:14px 18px;border-bottom:1px solid var(--line);font-size:15px}
+#dlg .db{padding:14px 18px}
+#dlg .df{padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:9px;
+  justify-content:flex-end;flex-wrap:wrap}
+#toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);
+  background:var(--ink);color:var(--bg);padding:9px 17px;border-radius:9px;
+  font-weight:600;display:none;z-index:60;max-width:88vw}
+/* guide */
+.step{display:flex;gap:13px;margin:15px 0}
+.step .n{flex:0 0 27px;height:27px;border-radius:50%;background:var(--acc);color:#fff;
+  font-weight:750;display:flex;align-items:center;justify-content:center;font-size:13px}
+.step h4{margin:0 0 3px;font-size:14px}
+.step p{margin:0;color:var(--ink2);font-size:13.5px}
+.hero{background:linear-gradient(135deg,var(--accbg),transparent 65%);
+  border:1px solid var(--line);border-radius:13px;padding:26px 24px;margin:16px 0}
+.hero h2{margin:0 0 6px;font-size:24px;font-family:"Newsreader",Georgia,serif;
+  font-weight:600}
+/* teammate rail — the fleet as a roster of colleagues, always in view */
+.wswrap{display:grid;grid-template-columns:1fr 210px;gap:16px;align-items:start}
+#teammates{position:sticky;top:12px;border:1px solid var(--line);border-radius:12px;
+  background:var(--card);padding:8px}
+.rail-h{font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--ink3);padding:4px 6px 8px}
+.mate{display:flex;gap:8px;align-items:center;width:100%;text-align:left;
+  background:none;border:0;border-radius:9px;padding:6px;cursor:pointer;color:inherit}
+.mate:hover{background:var(--bg2)} .mate.on{background:var(--accbg)}
+.mate .mn{display:flex;flex-direction:column;line-height:1.2;min-width:0}
+.mate .mn b{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mate .mn .muted{font-size:11px}
+/* team runs read as threads */
+.msg{border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:8px 0}
+.msg .from{font-size:12px;color:var(--acc2);font-family:"IBM Plex Mono",monospace}
+.msg pre{white-space:pre-wrap;margin:6px 0 0;font-size:12.5px}
+/* agent-authored cards (fixed catalogue, escaped text, never markup) */
+.uicard{border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:8px 0;
+  background:var(--bg2)}
+.uicard h4{margin:0 0 6px;font-size:13px}
+.uicard table{width:100%;border-collapse:collapse;font-size:12.5px}
+.uicard td,.uicard th{border-bottom:1px solid var(--line);padding:4px 6px;text-align:left}
+.uicard .del{color:var(--bad)} .uicard .ins{color:var(--ok)}
+.uicard .mrow{display:flex;gap:16px;flex-wrap:wrap}
+.uicard .mrow div{min-width:90px} .uicard .mrow b{font-size:18px;display:block}
+/* responsive shell */
+@media (max-width:860px){
+  #app{flex-direction:column;padding-bottom:58px}
+  /* the sidebar becomes a bottom bar: top:auto and height:auto are REQUIRED,
+     or the desktop rule's top:0 + height:100vh stretches it over the page */
+  #side{width:100%;position:fixed;top:auto;bottom:0;left:0;right:0;
+    height:auto;max-height:66px;flex:0 0 auto;z-index:40;
+    flex-direction:row;align-items:center;justify-content:space-around;
+    overflow-x:auto;overflow-y:hidden;border-right:0;
+    border-top:1px solid var(--line);border-bottom:0;padding:4px 6px;gap:2px;
+    background:var(--card)}
+  #brand{display:none} #sideFoot{display:none}
+  .navbtn{width:auto;white-space:nowrap;padding:8px 10px;min-height:42px;
+    flex-direction:column;gap:2px}
+  .navbtn .lbl{font-size:10.5px}
+  .wswrap{grid-template-columns:1fr}
+  #teammates{position:static;order:-1;display:flex;gap:6px;overflow-x:auto;
+    padding:6px}
+  #teammates .rail-h{display:none}
+  #railList{display:flex;gap:6px}
+  .mate{width:auto;flex:0 0 auto}
+  /* dialogs become bottom sheets: full width, thumb-reachable, never taller
+     than the screen minus the nav bar */
+  #ovl{padding:0;align-items:flex-end}
+  #ovl #dlg{width:100%;max-width:100%;max-height:calc(92vh - 66px);
+    border-radius:14px 14px 0 0;margin:0 0 66px}
+  #dlg .df{position:sticky;bottom:0;background:var(--card)}
+  .btn,.navbtn,.subtabs button{min-height:40px}
+  .card{border-radius:12px} table{font-size:12px}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <nav id="side">
+    <div id="brand"><span class="dot"></span><span class="t">Expert Fleet</span></div>
+    <div id="navlist" style="display:contents"></div>
+    <div id="sideFoot">local panel · <span id="footRoot" class="mono"></span></div>
+  </nav>
+  <main id="main"><div class="empty">loading…</div></main>
+</div>
+
+<div id="ovl"><div id="dlg"><h3 id="dlgT"></h3><div class="db" id="dlgB"></div>
+  <div class="df" id="dlgF"></div></div></div>
+
+<div id="cmdk" onclick="if(event.target.id==='cmdk')closeCmd()">
+  <div id="cmdbox">
+    <input id="cmdq" class="in" autocomplete="off" spellcheck="false"
+           placeholder="What do you want to do?  (type: create, task, backup, ready…)"
+           oninput="renderCmd(this.value)">
+    <div id="cmdlist"></div>
+    <div class="cmdfoot muted">↑↓ to move · Enter to run · Esc to close ·
+      every command shows the terminal equivalent</div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+/* =================================================================
+   STATE + PLUMBING
+================================================================= */
+const NAV = [
+  ['home','Home'], ['guide','Guide'], ['agents','Agents'], ['work','Work'],
+  ['memory','Memory'], ['models','Models'], ['system','System'],
+];
+const ICONS = {home:"🏠",guide:"📖",agents:"🤖",work:"🎯",memory:"🧠",
+               models:"🔌",system:"🩺"};
+const S = {view:"home", sel:null, sub:"ov", hist:false, sys:null, map:null,
+           mindPath:null, timer:null, blockedN:0};
+
+function token(){ return localStorage.getItem("fleet_token") || ""; }
+async function api(url, opt){
+  opt = opt || {};
+  opt.headers = Object.assign({}, opt.headers);
+  if (token()) opt.headers["Authorization"] = "Bearer " + token();
+  if (opt.body && typeof opt.body === "object" && !(opt.body instanceof Blob)){
+    opt.body = JSON.stringify(opt.body);
+    opt.headers["Content-Type"] = "application/json";
+  }
+  try{
+    const r = await fetch(url, opt);
+    if (r.status === 401){
+      const t = prompt("This panel is token-guarded. Paste the access token:");
+      if (t){ localStorage.setItem("fleet_token", t.trim()); return api(url, opt); }
+    }
+    return await r.json();
+  }catch(e){ return {error: String(e)}; }
+}
+function esc(s){ return String(s==null?"":s)
+  .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+  .replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
+function ago(iso){
+  if(!iso) return "—";
+  const s = (Date.now() - new Date(iso).getTime())/1000;
+  if (isNaN(s)) return esc(iso);
+  if (s<60) return Math.max(0,Math.round(s))+"s ago";
+  if (s<3600) return Math.round(s/60)+"m ago";
+  if (s<86400) return Math.round(s/3600)+"h ago";
+  return Math.round(s/86400)+"d ago";
+}
+function usd(x){ return "$"+(+x||0).toFixed(2).replace(/\.00$/,""); }
+function toast(m){ const t=document.getElementById("toast");
+  t.textContent=m; t.style.display="block";
+  clearTimeout(t._h); t._h=setTimeout(()=>t.style.display="none", 2600); }
+function showDlg(title, bodyHtml, buttons){
+  document.getElementById("dlgT").innerHTML = title;
+  document.getElementById("dlgB").innerHTML = bodyHtml;
+  document.getElementById("dlgF").innerHTML = (buttons||[["Close","closeDlg()","ghost"]])
+    .map(b=>`<button class="btn ${b[2]||""}" onclick="${b[1]}">${b[0]}</button>`).join("");
+  document.getElementById("ovl").classList.add("show");
+}
+function closeDlg(){ document.getElementById("ovl").classList.remove("show"); }
+document.getElementById("ovl").addEventListener("click",
+  e=>{ if(e.target.id==="ovl") closeDlg(); });
+document.addEventListener("keydown", e=>{ if(e.key==="Escape"){ closeCmd(); closeDlg(); } });
+
+/* ---------------------------------------------------------------- palette
+   Every capability in one searchable list. 23 dialogs behind 7 sections is a
+   platform you have to remember; Ctrl/Cmd-K is one you can ask. Each entry
+   carries the CLI that does the same thing, so the panel teaches the terminal
+   rather than hiding it. */
+const COMMANDS = [
+  ["Create a trained expert", "agents", "dlgCreate()", "python fleet.py create \"Name\" --identity \"...\"", "create"],
+  ["Quick specialist (⚡ lane)", "agents", "dlgQuick()", "python quick.py spin \"Name\" --goal \"...\"", "create quick"],
+  ["Start from an archetype", "agents", "dlgArchetype()", "python templates.py", "create template"],
+  ["Learner — give it a topic", "agents", "dlgLearner()", "python ingest.py add-url <url>", "create learn"],
+  ["Team of specialists", "agents", "dlgLauncher()", "python team.py run \"goal\" --experts a,b,c", "create team"],
+  ["Queue a task", "board", "dlgTask()", "python loop.py add --role practitioner --goal \"...\"", "task work"],
+  ["Pursue a goal until a judge agrees", "work", "dlgLauncher()", "python goal.py pursue \"goal\" --expert <slug>", "goal"],
+  ["Run a workflow", "work", "dlgWorkflow()", "python workflows.py run spec.json --root <e>", "workflow pipeline"],
+  ["Arm a future intention", "work", "dlgIntention()", "python prospective.py", "schedule intention wake"],
+  ["Save a task as a routine", "work", "dlgRoutine()", "python routines.py save <task-id> --every-days 1", "routine repeat"],
+  ["Import a SKILL.md", "memory", "dlgSkillImport()", "python skills.py import ./folder --root <e>", "skill import"],
+  ["Spawn a charter variant", "models", "dlgVariant()", "python variants.py spawn ...", "variant charter"],
+  ["Add a provider", "models", "dlgProvider()", "python providers.py", "provider model key"],
+  ["Point a role at a model", "models", "dlgRole()", "python providers.py", "role routing"],
+  ["Publish to the federation", "system", "dlgPublish()", "python federation.py card", "federation a2a"],
+  ["Retire an expert", "agents", "dlgRetire()", "python fleet.py delete <name>", "retire delete"],
+  ["Go: Home", "nav", "go('home')", "", "home today"],
+  ["Go: Guide", "nav", "go('guide')", "", "guide help how"],
+  ["Go: Agents", "nav", "go('agents')", "", "agents experts roster"],
+  ["Go: Work", "nav", "go('work')", "", "work goals teams"],
+  ["Go: Memory", "nav", "go('memory')", "", "memory notes skills"],
+  ["Go: Models", "nav", "go('models')", "", "models providers"],
+  ["Go: System", "nav", "go('system')", "", "system doctor health"],
+  ["Check readiness for production", "system", "runPreflight()", "python preflight.py", "preflight production ready"],
+  ["Back up the fleet", "system", "runBackup()", "python backup.py create --out ../fleet-backups", "backup restore"],
+  ["Why do we believe this works?", "system", "openEvidence()", "python evidence.py", "evidence proof tests"],
+];
+function go(view){ S.view=view; closeCmd(); render(); }
+async function runPreflight(){
+  showDlg("Production preflight", `<p class="muted">auditing this installation…</p>`);
+  const r = await api('/api/preflight', {method:"POST", body:{}});
+  if (!r || r.error){ showDlg("Production preflight",
+    `<div class="empty">${esc((r&&r.error)||"unavailable")}</div>`); return; }
+  const rows = (r.findings||[]).map(f=>`
+    <div style="margin:6px 0;padding:7px;border-left:3px solid ${
+      f.level==="BLOCKER"?"var(--bad)":f.level==="RISK"?"var(--warn)":"var(--line)"}">
+      <span class="pill ${f.level==="BLOCKER"?"bad":f.level==="RISK"?"warn":
+        f.level==="OK"?"ok":""}">${esc(f.level)}</span>
+      <span class="mono" style="font-size:12px">${esc(f.area)}</span>
+      <div style="font-size:12.5px;margin-top:3px">${esc(f.what)}</div>
+      ${f.fix?`<div class="mono muted" style="font-size:11.5px">→ ${esc(f.fix)}</div>`:""}
+    </div>`).join("");
+  showDlg("Production preflight", `
+    <p><span class="pill ${r.verdict==="READY"?"ok":r.verdict==="NOT READY"?"bad":"warn"}">
+      ${esc(r.verdict)}</span>
+      <span class="muted">${r.counts.BLOCKER} blocker(s), ${r.counts.RISK} risk(s),
+      ${r.counts.NOTE} note(s)</span></p>
+    <p class="muted" style="font-size:12.5px">doctor says the software is healthy;
+    this says whether it is fit to run your business unattended.</p>
+    ${rows}
+    <p class="mono muted" style="font-size:11.5px">python preflight.py</p>`);
+}
+async function runBackup(){
+  showDlg("Back up the fleet", `<p class="muted">writing and verifying…</p>`);
+  const r = await api('/api/backup', {method:"POST", body:{}});
+  if (!r || r.error){ showDlg("Back up the fleet",
+    `<div class="empty">${esc((r&&r.error)||"unavailable")}</div>`); return; }
+  showDlg("Back up the fleet", `
+    <p><span class="pill ${r.verified?"ok":"bad"}">${r.verified?"verified":"DAMAGED"}</span>
+      ${r.backup.files} file(s), ${(r.backup.bytes/1e6).toFixed(1)} MB</p>
+    <p class="mono" style="font-size:12px">${esc(r.backup.path)}</p>
+    <p style="font-size:12.5px">Experts: ${esc((r.backup.experts||[]).join(", ")||"none")}.
+    <b>${r.backup.secrets_excluded} credential file(s) were deliberately excluded</b> —
+    a backup that carries keys turns every copy of it into a breach, so a restore
+    asks you to put them back.</p>
+    <p class="mono muted" style="font-size:11.5px">python backup.py create --out ../fleet-backups</p>`);
+}
+function openEvidence(){
+  showDlg("Why do we believe this works?", `
+    <p class="muted" style="font-size:12.5px">Not "the tests pass" — what each test
+    actually observed, per system, with what it does <b>not</b> cover.</p>
+    <p>Generate the report:</p>
+    <pre class="out">python evidence.py</pre>
+    <p style="font-size:12.5px">It runs every registered test, captures the sentence
+    each one prints about what it proved, maps those to the six systems, and writes
+    <span class="mono">EVIDENCE.md</span> with a blind spot for each. A test nobody
+    classified makes it fail, so coverage cannot drift silently.</p>
+    <p class="muted" style="font-size:12px">Standing caveat it repeats on every page:
+    every model call in every test is the scripted mock, so a green suite proves the
+    harness holds, never that a provider works.</p>`);
+}
+async function loadSystemsMap(){
+  const el=document.getElementById("sysmap"); if(!el) return;
+  const r=await api('/api/systems');
+  const rows=((r&&r.systems)||[]).map(s=>`
+    <tr><td><b>${s.n}. ${esc(s.name)}</b><div class="muted" style="font-size:12px">${esc(s.what)}</div></td>
+      <td style="font-size:12.5px">${esc(s.where)}</td>
+      <td class="mono" style="font-size:11.5px">${esc(s.cli)}</td>
+      <td class="muted" style="font-size:12px">${esc(s.state)}</td></tr>`).join("");
+  el.innerHTML = rows ? `<div class="tablewrap"><table>
+    <thead><tr><th>system</th><th>where in the panel</th><th>from the terminal</th><th>right now</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>
+    <p class="muted" style="font-size:11.5px;margin:8px 0 0">Press
+    <b>Ctrl/⌘ + K</b> anywhere to search every action — each one shows the command
+    that does the same thing.</p>` : `<span class="muted">unavailable</span>`;
+}
+function openCmd(){
+  const el=document.getElementById("cmdk");
+  el.classList.add("show");
+  const i=document.getElementById("cmdq");
+  i.value=""; renderCmd(""); i.focus();
+}
+function closeCmd(){ const e=document.getElementById("cmdk"); if(e) e.classList.remove("show"); }
+function renderCmd(q){
+  q=(q||"").toLowerCase().trim();
+  const hits=COMMANDS.filter(c=>!q||(c[0]+" "+c[1]+" "+c[4]).toLowerCase().includes(q)).slice(0,12);
+  const box=document.getElementById("cmdlist");
+  box.innerHTML = hits.length ? hits.map((c,i)=>`
+    <div class="cmdrow${i===0?" on":""}" data-run="${esc(c[2])}" onclick="runCmd(this)">
+      <div><b>${esc(c[0])}</b> <span class="pill">${esc(c[1])}</span></div>
+      ${c[3]?`<div class="mono muted" style="font-size:11.5px">${esc(c[3])}</div>`:""}
+    </div>`).join("")
+    : `<div class="empty">nothing matches — try "create", "task", "backup"</div>`;
+}
+function runCmd(el){
+  const fn = el.getAttribute("data-run");
+  closeCmd();
+  try { (new Function(fn))(); } catch(e){ toast("could not run: "+e.message); }
+}
+document.addEventListener("keydown", e=>{
+  if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="k"){ e.preventDefault(); openCmd(); return; }
+  const box=document.getElementById("cmdk");
+  if(!box || !box.classList.contains("show")) return;
+  const rows=[...document.querySelectorAll("#cmdlist .cmdrow")];
+  const at=rows.findIndex(r=>r.classList.contains("on"));
+  if(e.key==="ArrowDown"||e.key==="ArrowUp"){
+    e.preventDefault();
+    if(!rows.length) return;
+    const next=e.key==="ArrowDown"?Math.min(rows.length-1,at+1):Math.max(0,at-1);
+    rows.forEach(r=>r.classList.remove("on")); rows[next].classList.add("on");
+    rows[next].scrollIntoView({block:"nearest"});
+  }
+  if(e.key==="Enter" && rows[at<0?0:at]){ e.preventDefault(); runCmd(rows[at<0?0:at]); }
+});
+function typing(){
+  const a=document.activeElement;
+  return a && (a.tagName==="INPUT"||a.tagName==="TEXTAREA") && a.value!=="";
+}
+function avatar(name, size){
+  size = size||34;
+  let x=0; for (const ch of String(name)) x = (x*31 + ch.codePointAt(0)) >>> 0;
+  const h1=x%360, h2=(h1+40)%360;
+  const initials = String(name).split(/[-_\s]+/).filter(Boolean)
+    .slice(0,2).map(w=>w[0].toUpperCase()).join("")||"?";
+  return `<svg width="${size}" height="${size}" viewBox="0 0 40 40" role="img"
+    style="border-radius:10px;flex:0 0 ${size}px;vertical-align:middle">
+    <defs><linearGradient id="g${x}" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="hsl(${h1} 45% 38%)"/>
+      <stop offset="1" stop-color="hsl(${h2} 50% 26%)"/></linearGradient></defs>
+    <rect width="40" height="40" fill="url(#g${x})"/>
+    <text x="20" y="26" text-anchor="middle" font-family="IBM Plex Sans,sans-serif"
+      font-size="15" font-weight="700" fill="rgba(255,255,255,.92)">${initials}</text>
+  </svg>`;
+}
+function hb(h, running){
+  if (h && h.age_s != null){
+    if (h.age_s < 90) return `<span class="pill ok" title="${esc(h.note||"")}">alive ${Math.round(h.age_s)}s</span>`;
+    if (running) return `<span class="pill bad">stalled ${Math.round(h.age_s/60)}m</span>`;
+    return `<span class="pill dim">off</span>`;
+  }
+  return running ? `<span class="pill queued">no pulse yet</span>`
+                 : `<span class="pill dim">off</span>`;
+}
+/* =================================================================
+   NAV + ROUTER
+================================================================= */
+function renderNav(){
+  document.getElementById("navlist").innerHTML = NAV.map(([k,label])=>`
+    <button class="navbtn ${S.view===k&&!S.sel?"on":""}" onclick="go('${k}')">
+      <span class="ic">${ICONS[k]}</span><span class="lbl">${label}</span>
+      ${k==="home"&&S.blockedN?`<span class="badge">${S.blockedN}</span>`:""}
+    </button>`).join("")
+    + (S.sel?`<button class="navbtn on" onclick="openAgent('${esc(S.sel)}')">
+        <span class="ic">▸</span><span class="lbl mono">${esc(S.sel)}</span></button>`:"");
+}
+function go(view){ S.view=view; S.sel=null; render(); }
+function openAgent(slug, sub){ S.view="agents"; S.sel=slug;
+  if(sub) S.sub=sub; S.mindPath=null; render(); }
+async function render(){
+  renderNav();
+  const m = document.getElementById("main");
+  if (S.sel){ await renderWorkspace(m); return; }
+  if (S.view==="home")   await renderHome(m);
+  if (S.view==="guide")  renderGuide(m);
+  if (S.view==="agents") await renderAgents(m);
+  if (S.view==="work")   await renderWork(m);
+  if (S.view==="memory") await renderMemory(m);
+  if (S.view==="models") await renderModels(m);
+  if (S.view==="system") await renderSystem(m);
+}
+async function refreshSys(){
+  const d = await api('/api/system');
+  if (d && !d.error){ S.sys = d;
+    S.blockedN = (d.totals&&d.totals.blocked)||0;
+    const f=document.getElementById("footRoot");
+    if (f) f.textContent = (d.root||"").split(/[\\/]/).pop();
+  }
+  return S.sys;
+}
+/* =================================================================
+   HOME — status at a glance + what needs you
+================================================================= */
+async function renderHome(m){
+  const d = await refreshSys();
+  if (!d){ m.innerHTML = `<div class="empty">panel unreachable</div>`; return; }
+  if (!d.n_experts){
+    m.innerHTML = `
+    <div class="hero">
+      <h2>Welcome to your fleet</h2>
+      <p class="muted" style="max-width:60ch">Agents here are not chatbots: each one is a
+      directory with its own identity, memory, and verified work. Three ways to begin —</p>
+      <div class="row" style="margin-top:14px">
+        <button class="btn pri" onclick="dlgLauncher()">＋ Create your first agent (5 ways)</button>
+        <button class="btn ghost" onclick="go('guide')">📖 Read the 5-minute guide</button>
+      </div>
+    </div>
+    <div class="card"><h3>How it will flow</h3><div class="body">
+      <div class="step"><div class="n">1</div><div><h4>Create an agent</h4>
+        <p>Trained expert (studies courses deeply, exams included) or quick specialist
+        (briefing files → working now).</p></div></div>
+      <div class="step"><div class="n">2</div><div><h4>Teach it</h4>
+        <p>Drop files, folders, or paste links in its <b>Teach</b> tab. It converts,
+        studies, cites, self-tests — you watch it on its <b>Board</b>.</p></div></div>
+      <div class="step"><div class="n">3</div><div><h4>Make it work</h4>
+        <p>Give a task with a definition of done, a goal it pursues to completion,
+        put it on a team, or just ask it (answers are citation-gated).</p></div></div>
+    </div></div>`;
+    return;
+  }
+  const needs = d.experts.filter(e=>(e.tasks.blocked||0)>0 || (e.approvals||0)>0);
+  const running = d.experts.filter(e=>e.running).length;
+  m.innerHTML = `
+  <div class="pagehead"><h1>Home</h1>
+    <span class="sub">your whole ecosystem at a glance</span><span class="spacer"></span>
+    <button class="btn pri sm" onclick="dlgLauncher()">＋ New agent</button></div>
+  <div id="readyBanner"></div>
+  ${needs.length?`<div class="card" style="border-color:var(--bad)">
+    <h3 style="color:var(--bad)">⚠ Needs you — agents waiting on your answer</h3>
+    <div class="body">${needs.map(e=>`
+      <div class="row" style="justify-content:space-between;padding:5px 0">
+        <span><b class="mono">${esc(e.name)}</b>
+          ${e.tasks.blocked?`<span class="pill blocked">${e.tasks.blocked} blocked</span>`:""}
+          ${e.approvals?`<span class="pill warn">${e.approvals} approval record(s)</span>`:""}</span>
+        <button class="btn sm pri" onclick="openAgent('${esc(e.name)}','ov')">answer</button>
+      </div>`).join("")}</div></div>`:""}
+  <div class="card" style="border-color:var(--acc)"><h3>📋 Today — what should I do?
+    <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:11.5px">
+    ranked from real fleet state — rules, never guesses</span></h3>
+    <div class="body" id="today"><span class="muted">compiling…</span></div></div>
+  <div class="card"><h3>⚡ Live pulse — the fleet, as it happens
+    <span class="spacer"></span><span id="liveDot" class="pill dim">connecting</span>
+    <span class="muted" style="font-weight:400;font-size:11.5px">
+    streamed from the agents&#39; own logs, never invented</span></h3>
+    <div class="body feed" id="pulse"><span class="muted">listening…</span></div></div>
+  <div>
+    <span class="kchip"><b>${d.n_experts}</b>agents</span>
+    <span class="kchip"><b>${running}</b>running</span>
+    <span class="kchip"><b>${d.totals.queued}</b>queued</span>
+    <span class="kchip"><b>${d.totals.done}</b>done</span>
+    <span class="kchip" ${d.totals.failed?'style="color:var(--bad)"':""}><b>${d.totals.failed}</b>failed</span>
+    <span class="kchip"><b>${usd(d.spend_today_usd)}</b>spent today</span>
+  </div>
+  <div class="muted" style="font-size:12px;margin:2px 0 6px;letter-spacing:.02em">
+    every task here is <b>gated</b> (done = a command passing, never a claim) →
+    <b>examined</b> by a second model family → <b>cited</b> or refused →
+    <b>archived</b> forever · <a href="javascript:go(&#39;guide&#39;)">how it works</a></div>
+  <div class="card"><h3>Fleet activity<span class="spacer"></span>
+    <button class="btn ghost sm" onclick="render()">refresh</button></h3>
+    <div class="body tablewrap"><table><thead><tr>
+      <th>agent</th><th>pulse</th><th>work</th><th>knows</th><th>last activity</th>
+      <th>today</th><th></th></tr></thead><tbody>
+      ${d.experts.map(e=>`<tr class="click" onclick="openAgent('${esc(e.name)}')">
+        <td><span class="row" style="gap:8px;flex-wrap:nowrap">${avatar(e.name,26)}
+          <b class="mono">${esc(e.name)}</b>
+          <span class="tag ${e.quick?"quick":"trained"}">${e.quick?"QUICK":"TRAINED"}</span></span><br>
+          <span class="muted" style="font-size:12px">${esc(e.identity||"")}</span></td>
+        <td>${hb(e.heartbeat, e.running)}</td>
+        <td class="num">${e.tasks.running?`<span class="pill running">${e.tasks.running} running</span> `:""}
+            ${e.tasks.queued?`<span class="pill queued">${e.tasks.queued} queued</span>`:""}
+            ${!e.tasks.running&&!e.tasks.queued?`<span class="muted">idle</span>`:""}</td>
+        <td class="num">${e.courses.length} course${e.courses.length===1?"":"s"}</td>
+        <td class="muted">${ago(e.last_activity)}</td>
+        <td class="num">${usd(e.spend_today_usd)}</td>
+        <td><button class="btn sm" onclick="event.stopPropagation();openAgent('${esc(e.name)}')">open</button></td>
+      </tr>`).join("")}
+    </tbody></table></div></div>
+  <div class="card"><h3>Health<span class="spacer"></span>
+    <button class="btn sm" onclick="runDoctor(this)">run doctor</button></h3>
+    <div class="body" id="docOut"><span class="muted">The doctor inspects the whole
+      platform — runtime, every agent's settings and memory integrity, keys — and gives
+      one verdict. Full detail lives in <a href="javascript:go('system')">System</a>.</span>
+    </div></div>
+  <div class="card"><h3>Your six systems — what they are and how to drive them
+    <span class="spacer"></span>
+    <button class="btn sm" onclick="openCmd()">⌘K search every action</button>
+    <button class="btn sm ghost" onclick="runPreflight()">ready for production?</button></h3>
+    <div class="body" id="sysmap"><span class="muted">loading…</span></div></div>`;
+  loadPulse(); loadToday(); loadReadiness(); loadSystemsMap();
+}
+async function loadToday(){
+  const el=document.getElementById("today"); if(!el) return;
+  const b=await api('/api/briefing');
+  if(!b||b.error){ el.innerHTML=`<span class="muted">unavailable</span>`; return; }
+  const V={ANSWER:"bad",RESTART:"bad",FUND:"warn",REPAIR:"warn",PREPARE:"acc",
+           REVIEW:"dim",HARVEST:"ok",ADVANCE:"ok"};
+  el.innerHTML = (b.recommendations||[]).slice(0,7).map(r=>`
+    <div class="frow"><span class="pill ${V[r.verb]||"dim"}">${esc(r.verb)}</span>
+      <span>${esc(r.what)}</span>
+      <span class="when">${esc(r.where)}</span></div>`).join("")
+    + `<p class="muted" style="font-size:11.5px;margin:8px 0 0">Order: answer the
+    blocked → restart the stalled → fund the unfunded → repair gaps → prepare for
+    due intentions → review quarantined skills → harvest finished goals.</p>`;
+}
+/* READINESS BANNER — the first thing on the page answers the first question:
+   can this platform actually run right now, and if not, what is missing? */
+async function loadReadiness(){
+  const el = document.getElementById("readyBanner"); if (!el) return;
+  const r = await api('/api/readiness');
+  if (!r || r.error){ el.innerHTML = ""; return; }
+  const block = (r.items||[]).filter(i=>i.blocking);
+  if (r.ready && !block.length){
+    el.innerHTML = `<div class="card" style="border-color:var(--ok)"><div class="body row">
+      <span class="pill ok">READY TO RUN</span>
+      <span class="muted" style="font-size:12.5px">keys present, prompts intact,
+      sandbox reachable — start a loop and it works</span></div></div>`;
+    return;
+  }
+  el.innerHTML = `<div class="card" style="border-color:var(--warn)">
+    <h3 style="color:var(--warn)">Before this can run</h3><div class="body">
+    ${block.map((i,n)=>`<div style="font-size:12.5px;padding:3px 0">
+      <b>${n+1}.</b> ${esc(i.what)} — <span class="muted">${esc(i.how)}</span></div>`).join("")}
+    ${(r.items||[]).filter(i=>!i.blocking).slice(0,4).map(i=>`
+      <div class="muted" style="font-size:12px;padding:2px 0">note: ${esc(i.what)}</div>`).join("")}
+    </div></div>`;
+}
+async function loadPulse(){
+  const el=document.getElementById("pulse"); if(!el) return;
+  if (S.streamOn && S.live && S.live.length){ paintLive(null); return; }
+  const rows=await api('/api/feed');
+  if(!Array.isArray(rows)){ el.innerHTML=`<span class="muted">no signal</span>`; return; }
+  el.innerHTML = rows.length ? rows.map(feedRowHtml).join("")
+   : `<div class="empty">quiet — events appear the moment a loop starts working:
+      tasks finishing, gates refusing wrong answers, exams, escalations, retries</div>`;
+}
+async function runDoctor(btn){
+  if(btn){btn.disabled=true;btn.textContent="running…";}
+  const r = await api('/api/doctor');
+  const el = document.getElementById("docOut")||document.getElementById("sysDoc");
+  if (el) el.innerHTML = (r.healthy
+      ? `<span class="pill ok">HEALTHY</span>`
+      : `<span class="pill bad">PROBLEMS FOUND</span>`)
+    + `<pre class="out">${esc(r.out||r.error||"")}</pre>`;
+  if(btn){btn.disabled=false;btn.textContent="run doctor";}
+}
+/* =================================================================
+   GUIDE — how to use the ecosystem (lives IN the product)
+================================================================= */
+function renderGuide(m){
+  m.innerHTML = `
+  <div class="pagehead"><h1>Guide</h1>
+    <span class="sub">everything, in the order you'll actually do it</span></div>
+
+  <div class="card"><h3>1 · The two kinds of agents — and when to use each</h3>
+  <div class="body">
+    <p><span class="tag trained">TRAINED</span> <b>Trained expert</b> — for depth you'll
+    rely on for months. You feed it whole courses (videos, books, folders, links); it
+    studies them into <b>cited notes</b>, proves each skill against a checkable spec,
+    then sits <b>closed-book exams</b>. Slow to build, extremely hard to fool.</p>
+    <p><span class="tag quick">QUICK</span> <b>Quick specialist</b> — for work you need
+    today. One dialog + briefing files → it's working in seconds. Same harness, same
+    done-gates, one verification layer fewer (no exams). Its briefing always outranks
+    its general knowledge.</p>
+    <p class="muted">Both live in <b>Agents</b>. Every agent = its own directory, own
+    memory, own identity — models are rented parts you can swap under it.</p>
+  </div></div>
+
+  <div class="card"><h3>1b · Five ways to create an agent (Agents → ＋ New agent)</h3><div class="body">
+    <div class="tablewrap"><table>
+      <tr><th>lane</th><th>you give</th><th>you get</th><th>honest bar</th></tr>
+      <tr><td>🎓 Trained expert</td><td>courses — videos, books, folders, links</td><td>cited notes, proven skills, exam-verified mastery</td><td>99–100% on what it studied</td></tr>
+      <tr><td>⚡ Quick specialist</td><td>speciality + kind + your prompt + goal + briefing files</td><td>a working agent in seconds, tools chosen for its kind</td><td>95–99%</td></tr>
+      <tr><td>🧬 From an archetype</td><td>a name + one of 19 charters</td><td>Scout, Critic, TradeOps, Local Radar, SEO Orchestrator… boundaries included</td><td>95–99%</td></tr>
+      <tr><td>📚 Learner</td><td>a topic (+ optional sources)</td><td>an expert AND a running study goal that cycles until the exam clears</td><td>climbs toward trained</td></tr>
+      <tr><td>🤝 Team</td><td>2–4 existing agents + a lead + a goal</td><td>a decomposed, file-handoff collaboration with constraint digests</td><td>the members' bars</td></tr>
+    </table></div>
+  </div></div>
+  <div class="card"><h3>2 · Create → Teach → Watch</h3><div class="body">
+    <div class="step"><div class="n">1</div><div><h4>Create</h4>
+      <p><b>Agents → ＋ New expert</b> (name + specialty) or <b>⚡ Quick specialist</b>.
+      The button mints a full agent with its own memory. Nothing shares state.</p></div></div>
+    <div class="step"><div class="n">2</div><div><h4>Teach</h4>
+      <p>Open the agent → <b>Teach</b> tab. Drop any files (video, PDF, epub, audio,
+      images, zips) or paste a URL/playlist and name the course. For a quick specialist,
+      files land in <span class="mono">briefing/</span> and become memory instantly.</p></div></div>
+    <div class="step"><div class="n">3</div><div><h4>Watch it study</h4>
+      <p>Press <b>▶ start loop</b> on the agent. Its <b>Board</b> shows every task:
+      ripper (converts) → watcher (cited notes) → practitioner (does the exercises for
+      real) → examiner (a different model family checks) → student (closed-book exam).
+      A course is complete only when spec = 100% PASS, exam ≥ threshold, gaps = none.</p></div></div>
+  </div></div>
+
+  <div class="card"><h3>3 · Four ways to make agents work</h3><div class="body">
+    <div class="tablewrap"><table>
+      <tr><th>way</th><th>where</th><th>what happens</th></tr>
+      <tr><td><b>Task</b></td><td>agent → Board → ＋ task</td>
+        <td>one job for one role. Add a <b>done check</b> (a command that must exit 0) —
+        the agent cannot claim finished until it passes.</td></tr>
+      <tr><td><b>Goal</b></td><td>Work → Goals</td>
+        <td>pursued until objectively achieved: plan → gated work → judge (different
+        model family) → the judge itself is re-checked and <b>overruled if it lies</b>
+        → re-plan. Learning goals get a study-shaped plan automatically.</td></tr>
+      <tr><td><b>Team</b></td><td>Work → Teams</td>
+        <td>pick 2–4 specialists + a lead. The lead splits the goal by who's trained for
+        what; handoffs are files; hard constraints are hashed so a dropped one is
+        detected, not discovered late.</td></tr>
+      <tr><td><b>Ask</b></td><td>agent → Ask</td>
+        <td>consultation for fields no agent can execute (medicine, law…). Every atom it
+        cites must exist in its notes; outside them it must say
+        <b>NOT IN MY TRAINING</b>. A fabricated citation is mechanically undeliverable.</td></tr>
+    </table></div>
+  </div></div>
+
+  <div class="card"><h3>4 · Where everything is logged (nothing is lost)</h3><div class="body">
+    <div class="tablewrap"><table>
+      <tr><th>you want</th><th>where it lives</th></tr>
+      <tr><td>what an agent knows</td><td>agent → <b>Mind</b> → <span class="mono">courses/…/notes.md</span> (every claim cited) · <span class="mono">skills/</span></td></tr>
+      <tr><td>every conversation an agent ever had</td><td>agent → Mind → <span class="mono">contexts/</span> (live) and <span class="mono">contexts/archive/</span> (verbatim, forever)</td></tr>
+      <tr><td>all work ever done, incl. old</td><td>agent → Board → <b>history</b> toggle (archived tasks with cost, error, summary, transcript)</td></tr>
+      <tr><td>drafts &amp; deliverables</td><td>agent → Mind → <span class="mono">workspace/</span> and <span class="mono">out/</span></td></tr>
+      <tr><td>accomplishments (proven)</td><td><b>Memory</b> → Competence — computed from verified outcomes only, never self-praise</td></tr>
+      <tr><td>mistakes</td><td><b>Memory</b> → Failure ledger — 16 categories, recurrence counted, kept after the fix</td></tr>
+      <tr><td>fleet-wide lessons</td><td><b>Memory</b> → Commons — corroborated knowledge shared by all agents</td></tr>
+      <tr><td>past agents</td><td><b>Agents</b> → Retired — retiring preserves the whole world; one click restores it</td></tr>
+    </table></div>
+  </div></div>
+
+  <div class="card"><h3>5 · Models &amp; tools</h3><div class="body">
+    <p><b>Plug any model:</b> open an agent → <b>Wiring</b> (or Models → pick agent) →
+    add a provider (OpenRouter, NVIDIA, Hugging Face, Groq, any OpenAI-compatible URL) →
+    browse its live catalog → point any role at any model. Keys go in
+    <span class="mono">agent.env</span> next to the code — never in settings, never
+    shown in this panel.</p>
+    <p><b>Give any tool:</b> drop a <span class="mono">tools.json</span> (name, command,
+    ready_check) at the fleet home — every agent sees it as a capability with the exact
+    command to run. The Toolbox card in <b>Models</b> shows what this machine can
+    already do.</p>
+  </div></div>
+
+  <div class="card"><h3>6 · Run it 24/7 and from your phone</h3><div class="body">
+    <p>Each agent's loop is its own process — <b>▶ start loop</b> keeps it working
+    through its queue; a <b>heartbeat</b> chip shows alive / stalled / off at a glance.
+    For always-on: the repo ships <span class="mono">agent.service</span> (systemd) and
+    <span class="mono">setup-vps.sh</span>.</p>
+    <p>Phone access: run <span class="mono">python ui.py --host 0.0.0.0 --token YOURTOKEN</span>
+    behind Tailscale (<span class="mono">setup-remote.sh</span>) — private HTTPS, no open
+    ports; this same panel, full control, anywhere.</p>
+    <p class="muted">If anything feels off: Home → <b>run doctor</b>. One verdict,
+    plain words.</p>
+  </div></div>
+
+  <div class="card"><h3>7 · Events &amp; webhooks — wake an agent from outside</h3><div class="body">
+    <p>The pulse on Home is a <b>live stream</b>, not a refresh: the panel opens
+    <span class="mono">/api/events</span> and every line an agent writes arrives as it
+    happens. If a proxy will not hold the stream open, it silently falls back to polling.</p>
+    <p>Anything outside can wake an agent — a webhook, a cron job, another agent:</p>
+    <pre class="out">curl -X POST http://127.0.0.1:7777/api/experts/&lt;agent&gt;/wake \
+  -H "Content-Type: application/json" \
+  -d '{"event": "price.drop", "payload": {"sku": "A1", "drop": 0.15}}'</pre>
+    <p>Arm what should happen with an <b>intention</b> of kind <span class="mono">event</span>
+    (Overview → arm an intention). The payload is handed to the task as a fenced file —
+    <b>data, never instructions</b> — and a repeating intention fires on every arrival.</p>
+  </div></div>
+
+  <div class="card"><h3>8 · Context windows &amp; traces — see exactly what it saw</h3><div class="body">
+    <p>Every task's window is <b>compiled</b>, not piled: commons, course, gotchas,
+    premise, skills and handed files each get a token budget. Board → open a task →
+    <b>context window</b> shows what went in, what was trimmed (with how to read the
+    rest), and which memory kinds the router excluded and why.</p>
+    <p><b>trace</b> on the same dialog is the whole life of the task: one span per model
+    turn, tool call, gate refusal and compaction, with durations and cost. System →
+    <b>Tool health</b> aggregates the part that matters most: which tool is failing.</p>
+  </div></div>
+
+  <div class="card"><h3>9 · Skills as folders, and routines</h3><div class="body">
+    <p>Skills follow the open <span class="mono">SKILL.md</span> format, so playbooks
+    from anywhere import directly (Overview → Skills → <b>import a SKILL.md</b>). An
+    imported skill arrives as <b>community</b>: injected with a warning and its bundled
+    scripts refused until you press <b>trust</b>. What it has <i>earned</i> is separate:
+    3 distinct gate-verified wins makes it PROVEN.</p>
+    <p>When a task worked, open it and press <b>save as routine</b>: the steps that
+    actually worked become a skill, and a schedule (or an event) re-runs them —
+    carrying the same definition of done. Show it once; it keeps happening.</p>
+  </div></div>
+
+  <div class="card"><h3>10 · Where commands run</h3><div class="body">
+    <p><span class="mono">[agent] sandbox = "host"</span> is this machine, gated by
+    policy. Set <span class="mono">"docker"</span> and every command runs in a throwaway
+    container with <b>no network</b>; <span class="mono">"e2b"</span> or
+    <span class="mono">"daytona"</span> run it in a hosted microVM behind your key.</p>
+    <p>If the chosen backend is not available the command is <b>refused</b> and says why —
+    it never quietly falls back to your laptop.</p>
+  </div></div>
+
+  <div class="card"><h3>11 · Run it today</h3><div class="body">
+    <p><span class="mono">python bootstrap.py</span> — creates the env file, tells you
+    what is missing as a numbered list, makes your first expert, starts this panel.
+    Add <span class="mono">--key NAME=VALUE</span> to store a provider key (the value is
+    never printed) and <span class="mono">--teach &lt;url-or-folder&gt;</span> to hand it
+    the first material in the same breath.</p>
+    <p>The full reference lives in <span class="mono">MANUAL.md</span>.</p>
+  </div></div>`;
+}
+/* =================================================================
+   AGENTS — the fleet, active and retired
+================================================================= */
+async function renderAgents(m){
+  const [d, retired] = await Promise.all([refreshSys(), api('/api/retired')]);
+  if (!S.map) S.map = await api('/api/memory?view=map');
+  const comp = {}; const fails = {};
+  if (S.map && S.map.active) [...S.map.active, ...S.map.retired].forEach(a=>{
+    comp[a.expert]=a.competence||{}; fails[a.expert]=(a.failures&&a.failures.total)||0; });
+  const best = n=>{
+    const doms = Object.entries(comp[n]||{}).sort((a,b)=>b[1].score-a[1].score)[0];
+    return doms?`${esc(doms[0])} ${Math.round(doms[1].score*100)}%`:null; };
+  m.innerHTML = `
+  <div class="pagehead"><h1>Agents</h1>
+    <span class="sub">every mind you own — active and preserved</span>
+    <span class="spacer"></span>
+    <button class="btn pri" onclick="dlgLauncher()">＋ New agent — 5 ways</button></div>
+  ${d&&d.n_experts?`<div class="agrid">${d.experts.map(e=>`
+    <div class="acard" onclick="openAgent('${esc(e.name)}')">
+      <h4>${avatar(e.name)}<span class="mono">${esc(e.name)}</span>
+        <span class="tag ${e.quick?"quick":"trained"}">${e.quick?"QUICK":"TRAINED"}</span>
+        <span style="margin-left:auto">${hb(e.heartbeat,e.running)}</span></h4>
+      <div class="id">${esc(e.identity||"no specialty written yet")}</div>
+      <div class="stats">
+        <span class="pill dim">${e.courses.length} courses</span>
+        ${e.tasks.running?`<span class="pill running">${e.tasks.running} running</span>`:""}
+        ${e.tasks.queued?`<span class="pill queued">${e.tasks.queued} queued</span>`:""}
+        ${e.tasks.blocked?`<span class="pill blocked">${e.tasks.blocked} needs you</span>`:""}
+        ${best(e.name)?`<span class="pill ok" title="proven from verified outcomes">★ ${best(e.name)}</span>`:""}
+        ${fails[e.name]?`<span class="pill dim">${fails[e.name]} failures logged</span>`:""}
+      </div>
+      <div class="row">
+        <button class="btn sm pri" onclick="event.stopPropagation();openAgent('${esc(e.name)}')">open</button>
+        <button class="btn sm" onclick="event.stopPropagation();toggleRun('${esc(e.name)}',${e.running})">${e.running?"⏸ stop":"▶ start"}</button>
+        <button class="btn sm ghost" onclick="event.stopPropagation();openAgent('${esc(e.name)}','ask')">ask</button>
+      </div>
+    </div>`).join("")}</div>`
+   :`<div class="empty">No agents yet — create your first above, or read the
+      <a href="javascript:go('guide')">Guide</a>.</div>`}
+  <div class="card"><h3>🕯 Retired — past agents, fully preserved
+    <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:12px">
+    retiring stops compute, never memory — everything stays queryable &amp; restorable</span></h3>
+    <div class="body">${(retired&&retired.length&&!retired.error)?`<div class="agrid">
+      ${retired.map(r=>`<div class="acard" style="cursor:default;opacity:.85">
+        <h4>${avatar(r.expert)}<span class="mono">${esc(r.expert)}</span><span class="tag retired">RETIRED</span></h4>
+        <div class="id">${esc(r.reason||"")}</div>
+        <div class="stats">
+          <span class="pill dim">${(r.courses||[]).length} courses kept</span>
+          <span class="pill dim">${esc((r.retired_at||"").slice(0,10))}</span></div>
+        <div class="row">
+          <button class="btn sm pri" onclick="restoreAgent('${esc(r.expert)}')">↩ restore</button>
+          <button class="btn sm ghost" onclick="showManifest('${esc(r.expert)}')">what it was</button>
+        </div></div>`).join("")}</div>`
+    :`<span class="muted">none — no agent has ever been retired</span>`}</div></div>`;
+}
+async function restoreAgent(slug){
+  const r = await api('/api/retired/'+slug+'/restore', {method:"POST", body:{}});
+  toast(r.restored?`${slug} restored to the active fleet`:(r.error||"failed"));
+  S.map=null; render();
+}
+async function showManifest(slug){
+  const rows = await api('/api/retired');
+  const r = (Array.isArray(rows)?rows:[]).find(x=>x.expert===slug)||{};
+  showDlg("Retired · "+esc(slug), `
+    <p><b>Retired:</b> ${esc(r.retired_at||"?")} — ${esc(r.reason||"")}</p>
+    <p><b>Courses preserved:</b> ${(r.courses||[]).map(c=>`<span class="pill dim">${esc(c)}</span>`).join(" ")||"—"}</p>
+    <p><b>Proven competence at retirement:</b></p>
+    ${Object.keys(r.competence||{}).length?`<div class="tablewrap"><table>
+      ${Object.entries(r.competence).map(([d,b])=>`<tr><td>${esc(d)}</td>
+      <td class="num">${Math.round(b.score*100)}% (${b.attempts} tasks, ${esc(b.claim)})</td></tr>`).join("")}
+      </table></div>`:`<span class="muted">no verified record</span>`}
+    <p class="muted" style="margin-top:10px">Its full memory (notes, contexts, logs) is
+    on disk under <span class="mono">retired/${esc(slug)}/</span> and searchable in
+    Memory → Search.</p>`);
+}
+const LANES = [
+  ["trained","🎓","Trained expert","Feed it whole courses; it studies into cited notes, proves skills, sits closed-book exams. Deepest bar — 99–100%.","dlgCreate()"],
+  ["quick","⚡","Quick specialist","Name + speciality + kind + your system prompt + first goal. Working in seconds; picks its own tools. 95–99%.","dlgQuick()"],
+  ["archetype","🧬","From an archetype","19 crafted charters — Scout, Critic, Market Researcher, TradeOps, Local Radar, SEO Orchestrator… with authority boundaries built in.","dlgArchetype()"],
+  ["learner","📚","Learner — give it a topic","Creates the expert AND launches the study goal: gather → cited notes → memcheck → self-exam → re-study what it missed, until mastery.","dlgLearner()"],
+  ["team","🤝","Team of specialists","Pick 2–4 existing agents and a lead; the lead splits the goal by who is trained for what; handoffs are files, constraints are hashed.","closeDlg();go('work')"],
+];
+function dlgLauncher(){
+  showDlg("＋ New agent — five ways to make one", `
+    <div style="display:grid;gap:9px">${LANES.map(([k,ic,t,d,act])=>`
+      <div class="acard" style="margin:0" onclick="${act}">
+        <h4><span style="font-size:20px">${ic}</span>${t}
+          <span class="tag ${k==='trained'?'trained':(k==='quick'||k==='archetype'?'quick':'retired')}"
+            style="margin-left:auto">${k.toUpperCase()}</span></h4>
+        <div class="muted" style="font-size:12.5px">${d}</div>
+      </div>`).join("")}</div>
+    <p class="muted" style="font-size:12px;margin:10px 0 0">Every lane lands in the same
+    harness: gates, budgets, fences, memory, the examiner. They differ only in how the
+    agent gets its knowledge — and therefore in the bar it can honestly claim.</p>`,
+    [["Close","closeDlg()","ghost"]]);
+}
+function dlgArchetype(){
+  showDlg("🧬 From an archetype", `
+    <label class="lb">Archetype</label>
+    <select class="field" id="arTpl"><option value="">loading…</option></select>
+    <div class="muted" id="arDesc" style="font-size:12.5px;margin-top:6px;min-height:34px"></div>
+    <label class="lb">Name this agent</label>
+    <input class="field" id="arName" placeholder="e.g. Customs Copilot">
+    <label class="lb">First goal (optional — queued immediately)</label>
+    <textarea class="field" id="arGoal" placeholder="e.g. Analyse the landed cost of the three quotes in my briefing"></textarea>`,
+    [["Cancel","closeDlg()","ghost"],["Create","doArchetype()","pri"]]);
+  api('/api/templates').then(t=>{
+    const sel=document.getElementById("arTpl"); if(!sel||!Array.isArray(t)) return;
+    sel.innerHTML = t.map(x=>`<option value="${esc(x.slug)}">${esc(x.name)} — ${esc(x.kind)}</option>`).join("");
+    const show=()=>{const x=t.find(y=>y.slug===sel.value);
+      document.getElementById("arDesc").textContent = x?x.specialty:"";};
+    sel.onchange=show; show();
+  });
+}
+async function doArchetype(){
+  const name=document.getElementById("arName").value.trim();
+  const tpl=document.getElementById("arTpl").value;
+  if(!name||!tpl){toast("pick an archetype and name the agent");return;}
+  const r=await api('/api/quick',{method:"POST",body:{name, template:tpl,
+    goal:document.getElementById("arGoal").value.trim()||undefined}});
+  closeDlg();
+  if(r.created){ toast(`${r.kind||"specialist"} created from ${tpl}`); S.map=null;
+    openAgent(r.created,"teach"); } else toast(r.error||"failed");
+}
+function dlgLearner(){
+  showDlg("📚 Learner — give it a topic, it studies to mastery", `
+    <label class="lb">Name</label>
+    <input class="field" id="lnName" placeholder="e.g. ECG Scholar">
+    <label class="lb">Topic to master</label>
+    <input class="field" id="lnTopic" placeholder="e.g. 12-lead ECG interpretation">
+    <label class="lb">Sources to start from (optional, one URL per line)</label>
+    <textarea class="field" id="lnSrc" placeholder="https://…"></textarea>
+    <p class="muted" style="font-size:12.5px">It creates the expert and launches the
+    goal engine with a study-shaped plan: gather sources → cited notes → memcheck →
+    closed-book self-exam → re-study exactly what was missed. Drop more material in
+    its Teach tab any time; the goal keeps cycling until the exam clears the bar.</p>`,
+    [["Cancel","closeDlg()","ghost"],["Create & start learning","doLearner()","pri"]]);
+}
+async function doLearner(){
+  const name=document.getElementById("lnName").value.trim();
+  const topic=document.getElementById("lnTopic").value.trim();
+  if(!name||!topic){toast("name it and give it a topic");return;}
+  const sources=document.getElementById("lnSrc").value.split(/\n+/).map(x=>x.trim()).filter(Boolean);
+  const r=await api('/api/learner',{method:"POST",body:{name,topic,sources}});
+  closeDlg();
+  if(r.created){ toast(`learning goal ${r.pursuing} launched`); S.map=null;
+    openAgent(r.created,"ov"); } else toast(r.error||"failed");
+}
+function dlgCreate(){
+  showDlg("＋ New trained expert", `
+    <label class="lb">Name</label>
+    <input class="field" id="cName" placeholder="e.g. Cardio Consultant">
+    <label class="lb">Specialty &amp; mission (its identity)</label>
+    <textarea class="field" id="cId" placeholder="e.g. clinical cardiology — learn my course library and answer with citations"></textarea>
+    <p class="muted" style="font-size:12.5px">It's born empty. Next: open it → Teach →
+    drop its first course. It studies with citations, proves skills, sits exams.</p>`,
+    [["Cancel","closeDlg()","ghost"],["Create","doCreate()","pri"]]);
+}
+async function doCreate(){
+  const name=document.getElementById("cName").value.trim();
+  if(!name){toast("give it a name");return;}
+  const r = await api('/api/experts',{method:"POST",
+    body:{name, identity:document.getElementById("cId").value.trim()}});
+  closeDlg();
+  if(r.created){ toast("expert created — now teach it"); S.map=null; openAgent(r.created,"teach"); }
+  else toast(r.error||"failed");
+}
+function dlgQuick(){
+  showDlg("⚡ Quick specialist — personalise it, it picks its own tools", `
+    <label class="lb">Name</label>
+    <input class="field" id="qName" placeholder="e.g. Landing Page Surgeon">
+    <label class="lb">Role &amp; speciality (one line — what it is)</label>
+    <input class="field" id="qSpec" placeholder="e.g. conversion-focused frontend dev; ships accessible HTML/CSS">
+    <label class="lb">Kind of agent</label>
+    <select class="field" id="qKind">
+      <option value="auto">auto — detect from the work (recommended)</option>
+      <option value="advisor">advisor — answers &amp; reviews, cites its briefing, no shell</option>
+      <option value="maker">maker — writes, drafts, designs documents</option>
+      <option value="operator">operator — builds &amp; runs code; every job auto-reviewed by the Examiner</option>
+    </select>
+    <label class="lb">Your system prompt (optional — kept verbatim in its identity)</label>
+    <textarea class="field" id="qSys" placeholder="Extra rules, tone, constraints… layered ON TOP of the anti-hallucination charter, never instead of it."></textarea>
+    <label class="lb">The work it needs to do — its first goal (optional)</label>
+    <textarea class="field" id="qGoal" placeholder="e.g. Rebuild pricing.html to match the brand brief, under 50KB, accessible"></textarea>
+    <p class="muted" style="font-size:12.5px">On create it scans this machine&#39;s toolbox
+    and picks the right tools &amp; role for the kind. Next screen: drop briefing
+    files/images — they become grounded memory instantly and outrank its general
+    knowledge. Same harness and done-gates as trained experts; one layer fewer (no
+    exams) — that is the honest 95–99% vs 99–100% difference.</p>`,
+    [["Cancel","closeDlg()","ghost"],["⚡ Spin it up","doQuick()","pri"]]);
+}
+async function doQuick(){
+  const name=document.getElementById("qName").value.trim();
+  if(!name){toast("give it a name");return;}
+  const r = await api('/api/quick',{method:"POST", body:{
+    name, specialty:document.getElementById("qSpec").value.trim(),
+    kind:document.getElementById("qKind").value,
+    system_prompt:document.getElementById("qSys").value.trim()||undefined,
+    goal:document.getElementById("qGoal").value.trim()||undefined}});
+  closeDlg();
+  if(r.created){
+    toast(r.kind?("ready as "+r.kind+" — first goal queued; add briefing files, then start")
+               :"specialist ready — drop briefing files in Teach");
+    S.map=null; openAgent(r.created,"teach");
+  } else toast(r.error||"failed");
+}
+async function toggleRun(slug, running){
+  const r = await api('/api/experts/'+slug+'/'+(running?'stop':'start'),
+                      {method:"POST", body:{}});
+  toast(r.error?r.error:(running?"stopping "+slug:"▶ "+slug+" is working its queue"));
+  setTimeout(render, 600);
+}
+/* =================================================================
+   WORKSPACE — one agent, six panels
+================================================================= */
+const SUBTABS = [["ov","Overview"],["teach","Teach"],["board","Board"],
+                 ["mind","Mind"],["ask","Ask"],["identity","Identity"],
+                 ["wiring","Wiring"]];
+async function renderWorkspace(m){
+  const d = await api('/api/experts/'+S.sel);
+  if (d.error){ m.innerHTML=`<div class="empty">${esc(d.error)}</div>`; return; }
+  const sys = S.sys || await refreshSys();
+  const row = ((sys&&sys.experts)||[]).find(e=>e.name===S.sel)||{};
+  m.innerHTML = `
+  <div class="pagehead">
+    <button class="btn ghost sm" onclick="go('agents')">← all agents</button>
+    ${avatar(S.sel, 40)}
+    <h1 class="mono">${esc(S.sel)}</h1>
+    <span class="tag ${row.quick?"quick":"trained"}">${row.quick?"QUICK":"TRAINED"}</span>
+    ${hb(row.heartbeat, d.running)}
+    <span class="spacer"></span>
+    <button class="btn sm ${d.running?"":"pri"}"
+      onclick="toggleRun('${esc(S.sel)}',${!!d.running})">${d.running?"⏸ stop loop":"▶ start loop"}</button>
+    <button class="btn sm warn" onclick="dlgRetire()">retire</button>
+  </div>
+  <div class="muted" style="margin-top:-2px">${esc(d.identity||row.identity||"")}</div>
+  <div class="subtabs">${SUBTABS.map(([k,l])=>
+    `<button class="${S.sub===k?"on":""}" onclick="S.sub='${k}';render()">${l}</button>`).join("")}
+  </div>
+  <div class="wswrap"><div id="wsbody"></div>
+  <aside id="teammates"><div class="rail-h">Teammates</div><div id="railList"
+    class="muted" style="font-size:12px">loading…</div></aside></div>`;
+  const b = document.getElementById("wsbody");
+  if (S.sub==="ov")    renderOv(b, d);
+  if (S.sub==="teach") renderTeach(b, d);
+  if (S.sub==="board") await renderBoard(b);
+  if (S.sub==="mind")  await renderMind(b);
+  if (S.sub==="ask")   renderAsk(b, d);
+  if (S.sub==="identity") await renderIdentity(b, d);
+  if (S.sub==="wiring")await renderWiring(b);
+  renderRail();
+}
+/* TEAMMATE RAIL — the fleet is a roster of colleagues with ongoing roles,
+   not a list of chats. Switching agent keeps you exactly where you were. */
+function renderRail(){
+  const el = document.getElementById("railList"); if (!el) return;
+  const list = ((S.sys&&S.sys.experts)||[]);
+  if (!list.length){ el.innerHTML = `<span class="muted">no teammates yet</span>`; return; }
+  el.innerHTML = list.map(e=>{
+    const alive = e.heartbeat && (Date.now()/1000 - (e.heartbeat.ts||0) < 90);
+    const busy = (e.tasks&&e.tasks.running)||0, block=(e.tasks&&e.tasks.blocked)||0;
+    return `<button class="mate ${e.name===S.sel?"on":""}" onclick="openAgent('${esc(e.name)}', S.sub)"
+      title="${esc(e.identity||"")}">
+      ${avatar(e.name, 26)}
+      <span class="mn"><b>${esc(e.name)}</b>
+        <span class="muted">${busy?busy+" working":(alive?"idle":"stopped")}</span></span>
+      ${""}
+      ${block?`<span class="pill bad">${block}</span>`:(e.approvals?`<span class="pill warn">${e.approvals}</span>`:"")}
+    </button>`;
+  }).join("");
+}
+async function renderIdentity(b, d){
+  b.innerHTML = `<div class="card"><h3>Identity — the words this agent wakes up with
+    <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:12px">
+      identity.md, injected into every context</span></h3>
+    <div class="body"><span class="muted">loading…</span></div></div>`;
+  const r = await api('/api/experts/'+S.sel+'/identity');
+  const body = b.querySelector(".body");
+  body.innerHTML = `
+    <p class="muted" style="font-size:12.5px">This text sits between the constitution
+    and the role charter in every window this agent is given. Editing it changes who
+    the agent is on its next task — the previous version is kept as a backup, and the
+    last ten are on disk.</p>
+    <textarea class="field" id="idText" style="min-height:220px;font-family:'IBM Plex Mono',monospace;font-size:12.5px">${esc(r.identity||"")}</textarea>
+    <div class="row" style="margin-top:8px">
+      <button class="btn pri" onclick="saveIdentity()">save identity</button>
+      <span class="muted" style="font-size:12px">${(r.history||[]).length} previous edit(s)</span>
+    </div>
+    <div class="card" style="margin-top:14px"><h3>📌 Owner pins — read first by every agent</h3>
+      <div class="body">
+        <p class="muted" style="font-size:12.5px">Pinned lines are injected at the very top of
+        the commons block for the whole fleet: house rules, hard constraints, the things you
+        should never have to repeat. Keep them few — everything here costs tokens on every task.</p>
+        <textarea class="field" id="pinText" style="min-height:110px;font-family:'IBM Plex Mono',monospace;font-size:12.5px">loading…</textarea>
+        <div class="row" style="margin-top:8px"><button class="btn" onclick="savePins()">save pins</button></div>
+      </div></div>`;
+  const p = await api('/api/commons/pins');
+  const pt = document.getElementById("pinText"); if (pt) pt.value = p.pins||"";
+}
+async function saveIdentity(){
+  const identity = document.getElementById("idText").value;
+  const r = await api('/api/experts/'+S.sel+'/identity',{method:"PUT",body:{identity}});
+  toast(r.error||`identity saved (${r.chars} chars) — previous kept as ${r.backup}`);
+}
+async function savePins(){
+  const pins = document.getElementById("pinText").value;
+  const r = await api('/api/commons/pins',{method:"PUT",body:{pins}});
+  toast(r.error||`pins saved (${r.chars} chars) — every agent reads them next task`);
+}
+function dlgRetire(){
+  showDlg("Retire "+esc(S.sel)+"?", `
+    <p>Retiring <b>stops its compute, not its existence</b>: identity, courses, notes,
+    contexts, logs, competence and failures are all preserved under
+    <span class="mono">retired/</span> — listed in Agents, searchable in Memory, and
+    restorable with one click.</p>
+    <label class="lb">Reason (kept in its record)</label>
+    <input class="field" id="retReason" placeholder="e.g. superseded by v2">`,
+    [["Cancel","closeDlg()","ghost"],["Retire (preserve)","doRetire()","warn"]]);
+}
+async function doRetire(){
+  const reason = encodeURIComponent(document.getElementById("retReason").value.trim());
+  const r = await api('/api/experts/'+S.sel+'?reason='+reason, {method:"DELETE"});
+  closeDlg();
+  toast(r.retired?`${S.sel} retired — world preserved`:(r.error||"failed"));
+  S.map=null; go('agents');
+}
+/* ---------- Overview ---------- */
+function renderOv(b, d){
+  b.innerHTML = `
+  <div class="grid2">
+  <div class="card"><h3>Blocked questions — it's waiting on you</h3><div class="body">
+    ${(d.blocked_items&&d.blocked_items.length)?d.blocked_items.map((q,i)=>`
+      <div style="margin-bottom:12px">
+        <div style="margin-bottom:3px"><span class="pill dim">${esc(q.time||"")}</span>
+          ${q.task_id?`<span class="pill acc mono">task ${esc(q.task_id)}</span>`:""}
+          ${q.course?`<span class="pill dim">${esc(q.course)}</span>`:""}</div>
+        <div style="margin-bottom:5px">${esc(q.question||q.title||"")}</div>
+        <div class="row"><input class="field" id="ans${i}" placeholder="your answer…"
+          style="flex:1;min-width:160px">
+        <button class="btn sm pri" ${q.task_id?"":"disabled"}
+          onclick="sendAnswer(${i},'${esc(q.task_id||"")}')">answer</button></div>
+      </div>`).join("")
+    :`<span class="muted">nothing — it isn't blocked on you</span>`}
+  </div></div>
+  <div class="card"><h3>Courses — mastery, measured</h3><div class="body">
+    ${(d.course_status&&d.course_status.length)?d.course_status.map(c=>{
+      const total=c.spec_total||0, pass=c.spec_pass||0;
+      const pct=total?Math.round(100*pass/total):0;
+      return `<div class="crs">
+        <div class="row" style="justify-content:space-between;margin-bottom:5px">
+          <b class="mono">${esc(c.course||"")}</b>
+          ${c.complete?`<span class="pill ok">MASTERED</span>`
+            :`<span class="pill queued">in training</span>`}</div>
+        <div class="row" style="flex-wrap:nowrap;gap:11px">
+          <div class="bar ${pct===100?"ok":""}"><i style="width:${pct}%"></i></div>
+          <span class="muted num" style="font-size:12px;white-space:nowrap">
+            ${pass}/${total} skills proven</span></div>
+        <div class="row" style="margin-top:5px;gap:6px">
+          ${c.score!=null?`<span class="pill ${c.score>=80?"ok":"queued"}">exam ${c.score}%</span>`
+            :`<span class="pill dim">no exam yet</span>`}
+          ${c.gaps_open?`<span class="pill bad">${c.gaps_open} gaps open → auto-repair queued</span>`
+            :`<span class="pill dim">0 gaps</span>`}
+        </div></div>`;}).join("")
+    :((d.courses&&d.courses.length)
+      ? d.courses.map(c=>`<span class="pill acc">${esc(c)}</span> `).join("")
+      : `<span class="muted">nothing yet — drop material in <b>Teach</b></span>`)}
+    <p class="muted" style="font-size:11.5px;margin:9px 0 0">MASTERED = every spec
+    skill PASS + exam over threshold + zero open gaps. Nothing here is self-graded.</p>
+  </div></div>
+  </div>
+  <div class="card" id="apCard" style="border-color:var(--bad);display:none"><h3 style="color:var(--bad)">✋ Approvals — risky actions paused for you</h3>
+    <div class="body" id="apBody"></div></div>
+  <div class="grid2">
+  <div class="card"><h3>⏰ Intentions — remember to act later
+    <span class="spacer"></span><button class="btn sm pri" onclick="dlgIntention()">＋ arm</button></h3>
+    <div class="body" id="intentBody"><span class="muted">loading…</span></div></div>
+  <div class="card"><h3>🧩 Skills — procedures, graded by outcome</h3>
+    <div class="body" id="skillBody"><span class="muted">loading…</span></div></div>
+  </div>
+  <div class="card"><h3>Recent work<span class="spacer"></span>
+    <button class="btn ghost sm" onclick="S.sub='board';render()">full board →</button></h3>
+    <div class="body tablewrap">${taskTable((d.recent_tasks||[]).slice(0,8))}</div></div>
+  <div class="grid2">
+  <div class="card"><h3>Recent consultations</h3><div class="body">
+    ${(d.consults&&d.consults.length)?d.consults.map(c=>`
+      <div style="margin-bottom:9px"><span class="pill ${c.status==='done'?'ok':(c.status==='failed'?'bad':'queued')}">${c.status==='done'?'answered':esc(c.status||"pending")}</span>
+      ${esc((c.question||"").slice(0,90))}
+      ${c.answer_text?`<button class="btn sm ghost" onclick="openFile('${esc(c.answer)}')">read answer</button>`:""}</div>`).join("")
+    :`<span class="muted">none yet — use <b>Ask</b></span>`}
+  </div></div>
+  <div class="card"><h3>Live log<span class="spacer"></span>
+    <button class="btn ghost sm" onclick="runTool('verify')">verify</button>
+    <button class="btn ghost sm" onclick="runTool('memcheck')">memcheck</button>
+    <button class="btn ghost sm" onclick="runTool('probe')">probe models</button></h3>
+    <div class="body"><pre class="out" style="max-height:230px">${esc(d.log||"(empty)")}</pre>
+    <div id="toolOut"></div></div></div>
+  </div>`;
+  loadIntentions(); loadSkills(); loadApprovals();
+}
+async function loadApprovals(){
+  const card=document.getElementById("apCard"), el=document.getElementById("apBody");
+  if(!card||!el) return;
+  const a=await api('/api/experts/'+S.sel+'/approvals');
+  const pend=(a&&a.pending)||[];
+  card.style.display = pend.length?"block":"none";
+  // an approval CARD, not a dialog: what was already done, what this exact
+  // step would do, and what happens next — then the two buttons
+  el.innerHTML = pend.map(r=>{
+    const b=r.brief||{};
+    return `<div class="msg">
+      <div class="from">${esc(r.server)}.${esc(r.tool)}
+        <span class="pill warn">${esc(r.reason||"guarded action")}</span></div>
+      <div style="font-size:12.5px;margin-top:6px">
+        <b>done so far:</b> ${esc((b.done||[]).slice(-3).join(" · "))||"nothing yet"}<br>
+        <b>this step:</b> <span class="mono">${esc(r.server)}.${esc(r.tool)}</span>
+          <span class="mono muted">${esc(JSON.stringify(r.args||{})).slice(0,160)}</span><br>
+        <b>what comes next:</b> ${esc(b.next||"the task resumes with your decision")}
+      </div>
+      ${r.takeover?`<p class="muted" style="font-size:12px;margin:6px 0 0">${esc(r.takeover)}</p>`:""}
+      ${b.goal?`<p class="muted" style="font-size:12px;margin:4px 0 0">task goal: ${esc(b.goal.slice(0,140))}</p>`:""}
+      <div class="row" style="margin-top:8px;gap:6px">
+        <button class="btn sm pri" onclick="decideApproval('${esc(r.id)}','grant','${esc(r.task)}')">grant — run it once</button>
+        <button class="btn sm warn" onclick="decideApproval('${esc(r.id)}','deny','${esc(r.task)}')">deny</button>
+        ${r.task?`<button class="btn sm ghost" onclick="traceDlg('${esc(r.task)}')">see the whole trace</button>`:""}
+      </div></div>`;}).join("")
+    + `<p class="muted" style="font-size:11.5px;margin:8px 0 0">Destructive tools pause here by policy
+    (MCP annotations + your mcp.json). A grant runs the exact call once; a denial is recorded and the
+    agent is told to find another route.</p>`;
+}
+async function decideApproval(id, op, task){
+  const r=await api('/api/experts/'+S.sel+'/approval',{method:"POST",body:{id,op,task}});
+  toast(r.error|| (r.resumed && String(r.resumed).startsWith("no task")
+      ? `${id} ${r.status} — recorded (no task was waiting on it)`
+      : `${id} ${r.status} — the task resumes with your decision`));
+  loadApprovals(); render();
+}
+async function loadIntentions(){
+  const el=document.getElementById("intentBody"); if(!el) return;
+  const items=await api('/api/experts/'+S.sel+'/prospective');
+  const armed=(Array.isArray(items)?items:[]).filter(x=>x.status==="armed");
+  const fired=(Array.isArray(items)?items:[]).filter(x=>x.status==="fired").length;
+  const when=w=>({at:`at ${w.iso}`,every_days:`every ${w.n} day(s)`,
+    file_exists:`when ${w.path} appears`,file_contains:`when ${w.path} contains “${w.needle}”`,
+    task_done:`after task ${w.task}`,
+    event:`on event '${w.name}'${w.repeat?" (every time)":""}${(w.consumed||[]).length?" · fired "+w.consumed.length+"x":""}`})[w.kind]||w.kind;
+  el.innerHTML = (armed.length?armed.map(x=>`
+    <div class="frow"><span class="fdot info"></span>
+      <span><b>${esc(when(x.when))}</b> → ${esc(x.then.goal.slice(0,80))}</span>
+      <button class="btn sm ghost when" onclick="cancelIntention('${esc(x.id)}')">cancel</button></div>`).join("")
+    :`<span class="muted">nothing armed</span>`)
+    + `<p class="muted" style="font-size:11.5px;margin:8px 0 0">${fired} fired so far. Fired by
+    the scheduler, never by recall — deadlines, recurrences, file watches, task chains.</p>`;
+}
+function dlgIntention(){
+  showDlg("⏰ Arm an intention — when X happens, do Y", `
+    <label class="lb">When</label>
+    <select class="field" id="inKind" onchange="intentFields()">
+      <option value="at">in N days (deadline)</option>
+      <option value="every_days">every N days (recurring)</option>
+      <option value="file_contains">when a file contains a phrase</option>
+      <option value="file_exists">when a file appears</option>
+      <option value="task_done">after a task finishes</option>
+      <option value="event">when an external event arrives (webhook / wake)</option></select>
+    <div id="inFields"></div>
+    <label class="lb">Then queue this work</label>
+    <textarea class="field" id="inGoal" placeholder="e.g. re-run the margin analysis and alert if the gap exceeds 15%"></textarea>
+    <label class="lb">Role</label>
+    <select class="field" id="inRole"><option>practitioner</option><option>consultant</option><option>watcher</option></select>`,
+    [["Cancel","closeDlg()","ghost"],["Arm it","doIntention()","pri"]]);
+  intentFields();
+}
+function intentFields(){
+  const k=document.getElementById("inKind").value, f=document.getElementById("inFields");
+  f.innerHTML = k==="at"?`<label class="lb">Days from now</label><input class="field" id="inN" value="1">`
+    : k==="every_days"?`<label class="lb">Every N days</label><input class="field" id="inN" value="7">`
+    : k==="task_done"?`<label class="lb">Task id</label><input class="field" id="inTask" placeholder="from the Board">`
+    : k==="event"?`<label class="lb">Event name</label><input class="field" id="inEvent" placeholder="price.drop">
+      <label class="lb" style="display:flex;gap:6px;align-items:center;text-transform:none"><input type="checkbox" id="inRepeat"> fire on every arrival (not just once)</label>
+      <p class="muted" style="font-size:11.5px">Deliver it from anywhere:
+      <span class="mono">curl -X POST ${location.origin}/api/experts/${esc(S.sel)}/wake -H "Content-Type: application/json" -d '{"event":"price.drop","payload":{...}}'</span></p>`
+    : `<label class="lb">File (inside this agent)</label><input class="field" id="inPath" placeholder="watch/prices.md">`
+      + (k==="file_contains"?`<label class="lb">Phrase</label><input class="field" id="inNeedle" placeholder="PRICE DROP">`:"");
+}
+async function doIntention(){
+  const k=document.getElementById("inKind").value;
+  const g=document.getElementById("inGoal").value.trim(); if(!g){toast("what should it do?");return;}
+  const v=id=>{const e=document.getElementById(id);return e?e.value.trim():"";};
+  const rep=document.getElementById("inRepeat");
+  const body={kind:k, goal:g, role:document.getElementById("inRole").value,
+    in_days:v("inN"), n:v("inN"), path:v("inPath"), needle:v("inNeedle"), task:v("inTask"),
+    name:v("inEvent"), repeat:!!(rep&&rep.checked)};
+  const r=await api('/api/experts/'+S.sel+'/intention',{method:"POST",body});
+  closeDlg(); toast(r.armed?"armed — the loop fires it when due":(r.error||"failed")); loadIntentions();
+}
+async function cancelIntention(id){
+  await api('/api/experts/'+S.sel+'/intention',{method:"POST",body:{op:"cancel",id}});
+  loadIntentions();
+}
+async function loadSkills(){
+  const el=document.getElementById("skillBody"); if(!el) return;
+  const sgr=await api('/api/experts/'+S.sel+'/skills');
+  const row=(list,cls,label)=>(list||[]).map(x=>`<span class="pill ${cls}"
+      title="${x.distinct_tasks} tasks won (${x.verified_wins} verified), ${x.losses} lost">${esc(x.skill)} · ${label}${
+      x.provenance&&x.provenance!=="own"?" · "+esc(x.provenance):""}</span>${
+      x.provenance==="community"?`<button class="btn sm ghost" title="trust this third-party playbook: its bundled scripts stay disabled until you do"
+        onclick="trustSkill('${esc(x.skill)}')">trust</button>`:""}`).join(" ");
+  const n=(sgr.proven||[]).length+(sgr.candidate||[]).length+(sgr.quarantined||[]).length;
+  el.innerHTML = n? `<div class="row">${row(sgr.proven,"ok","PROVEN")}${row(sgr.candidate,"queued","candidate")}${row(sgr.quarantined,"bad","quarantined")}</div>
+    <p class="muted" style="font-size:11.5px;margin:8px 0 0">PROVEN = 3 distinct gate-verified wins.
+    Quarantined = failed more than it worked (kept, never auto-loaded). Written by the Reflector, graded by outcomes.
+    <b>community</b> skills come from outside: injected with a warning, scripts disabled until you press trust.</p>
+    <div class="row" style="margin-top:8px"><button class="btn sm" onclick="dlgSkillImport()">＋ import a SKILL.md</button></div>`
+   : `<span class="muted">no skills yet — they are written after real work and earn their status</span>
+    <div class="row" style="margin-top:8px"><button class="btn sm" onclick="dlgSkillImport()">＋ import a SKILL.md</button></div>`;
+}
+async function trustSkill(name){
+  const r=await api('/api/experts/'+S.sel+'/skill',{method:"POST",body:{op:"promote",name}});
+  toast(r.error||(name+" is now owner-trusted — its bundled scripts may run"));
+  loadSkills();
+}
+function dlgSkillImport(){
+  showDlg("Import a skill (Agent Skills format)", `
+    <p class="muted" style="font-size:12.5px">Point at a folder containing
+    <span class="mono">SKILL.md</span> (or a single .md playbook) on this machine.
+    It lands as a <b>community</b> skill: injected with a warning, bundled scripts
+    disabled, and it must earn PROVEN status like any other.</p>
+    <label class="lb">Path on this machine</label>
+    <input id="skPath" class="in" placeholder="C:\\skills\\pdf-forms">
+    <label class="lb">Name (optional)</label><input id="skName" class="in">
+    <label class="lb">Trust</label>
+    <select id="skProv" class="in">
+      <option value="community">community — unverified third party (default)</option>
+      <option value="owner">owner — I read it and I vouch for it</option>
+    </select>`,
+    [["Import", "doSkillImport()", "pri"], ["Cancel", "closeDlg()", "ghost"]]);
+}
+async function doSkillImport(){
+  const path=document.getElementById("skPath").value.trim();
+  if(!path) return toast("a path is required");
+  const r=await api('/api/experts/'+S.sel+'/skill',{method:"POST",body:{
+    op:"import", path, name:document.getElementById("skName").value.trim()||null,
+    provenance:document.getElementById("skProv").value}});
+  closeDlg(); toast(r.error||("imported "+r.imported)); loadSkills();
+}
+async function sendAnswer(i, taskId){
+  const v = document.getElementById("ans"+i).value.trim();
+  if (!v || !taskId) return;
+  const r = await api('/api/experts/'+S.sel+'/answer',
+    {method:"POST", body:{task_id:taskId, text:v}});
+  toast(r.error||"answered — the task is unblocked and re-queued");
+  render();
+}
+async function runTool(tool){
+  const el = document.getElementById("toolOut");
+  if (el) el.innerHTML = `<span class="muted">running ${esc(tool)}…</span>`;
+  const body = {};
+  if (tool==="verify"||tool==="memcheck"){
+    const course = prompt("Which course? (blank = all)")||"";
+    if (course) body.course = course;
+  }
+  const r = await api('/api/experts/'+S.sel+'/'+tool, {method:"POST", body});
+  if (el) el.innerHTML =
+    `<span class="pill ${r.exit===0?"ok":"bad"}">${esc(tool)} exit ${r.exit!=null?r.exit:"?"}</span>
+     <pre class="out">${esc(r.out||r.error||JSON.stringify(r))}</pre>`;
+}
+/* ---------- Teach ---------- */
+function renderTeach(b, d){
+  b.innerHTML = `
+  <div class="grid2">
+  <div class="card"><h3>Teach by link</h3><div class="body">
+    <label class="lb">URL — video, playlist, article, docs page…</label>
+    <input class="field" id="tUrl" placeholder="https://…">
+    <label class="lb">Course name (groups lessons)</label>
+    <input class="field" id="tCourse" placeholder="e.g. anatomy-101">
+    <div class="row" style="margin-top:11px">
+      <button class="btn pri" onclick="teachUrl()">add to studies</button>
+      <span class="muted" style="font-size:12px">it fetches, converts, and studies it
+      with citations — watch on the Board</span></div>
+  </div></div>
+  <div class="card"><h3>Teach by files</h3><div class="body">
+    <label class="lb">Any format — video, audio, PDF, epub, slides, images, zip</label>
+    <input type="file" id="tFiles" multiple class="field" style="padding:7px">
+    <div class="row" style="margin-top:11px">
+      <button class="btn pri" onclick="teachFiles()">upload to inbox</button>
+      <button class="btn" onclick="rescan()">↻ re-scan inbox</button></div>
+    <p class="muted" style="font-size:12.5px;margin-top:9px">Files land in
+      <span class="mono">inbox/</span>; the running loop notices and queues study.
+      For a <span class="tag quick">QUICK</span> agent they land in
+      <span class="mono">briefing/</span> and become memory instantly.</p>
+    <div id="teachOut"></div>
+  </div></div>
+  </div>
+  <div class="card"><h3>Prebuilt specialist templates</h3><div class="body">
+    <div class="row"><select class="field" id="tTpl" style="max-width:340px">
+      <option value="">load templates…</option></select>
+      <button class="btn" onclick="useTpl()">use as this agent's charter</button></div>
+    <p class="muted" style="font-size:12.5px">Ten curated role charters (researcher,
+    frontend, analyst…). Applying one rewrites this agent's identity &amp; mission.</p>
+  </div></div>`;
+  api('/api/templates').then(t=>{
+    const sel=document.getElementById("tTpl");
+    if (sel && Array.isArray(t)) sel.innerHTML =
+      `<option value="">pick a template…</option>`+
+      t.map(x=>`<option value="${esc(x.slug)}">${esc(x.name)} — ${esc(x.kind)}: ${esc((x.specialty||"").slice(0,60))}</option>`).join("");
+  });
+}
+async function teachUrl(){
+  const url=document.getElementById("tUrl").value.trim();
+  const course=document.getElementById("tCourse").value.trim();
+  if(!url){toast("paste a link");return;}
+  const r = await api('/api/experts/'+S.sel+'/url',
+    {method:"POST", body:{url, course:course||undefined}});
+  toast(r.task?"queued for study — see the Board":(r.error||"failed"));
+}
+async function teachFiles(){
+  const inp=document.getElementById("tFiles");
+  if(!inp.files.length){toast("choose files first");return;}
+  const out=document.getElementById("teachOut"); let done=0;
+  for (const f of inp.files){
+    const r = await fetch('/api/experts/'+S.sel+'/file?name='+encodeURIComponent(f.name),
+      {method:"PUT", body:f,
+       headers: token()?{"Authorization":"Bearer "+token()}:{}}).then(x=>x.json())
+      .catch(e=>({error:String(e)}));
+    done += r.saved?1:0;
+    if (out) out.innerHTML += `<div class="muted" style="font-size:12px">
+      ${r.saved?"✓":"✗"} ${esc(f.name)} ${r.error?esc(r.error):""}</div>`;
+  }
+  toast(done+"/"+inp.files.length+" uploaded"); rescan(true);
+}
+async function rescan(silent){
+  const r = await api('/api/experts/'+S.sel+'/scan',{method:"POST",body:{}});
+  if(!silent) toast(r.error||"inbox re-scanned — new material queued");
+}
+async function useTpl(){
+  const k=document.getElementById("tTpl").value;
+  if(!k){toast("pick a template");return;}
+  const r=await api('/api/experts/'+S.sel+'/template',{method:"POST",body:{template:k}});
+  toast(r.error||`charter applied — kind ${r.kind}${r.kind==='operator'?', examiner review chained':''}`);
+  render();
+}
+/* ---------- Board ---------- */
+function taskTable(tasks){
+  if (!tasks||!tasks.length) return `<div class="empty">no tasks</div>`;
+  return `<table><thead><tr><th>status</th><th>role</th><th>goal</th>
+    <th>steps</th><th>cost</th><th>when</th></tr></thead><tbody>
+    ${tasks.map(t=>`<tr class="click" onclick='taskDlg(${esc(JSON.stringify(t))})'>
+      <td><span class="pill ${esc(t.status)}">${esc(t.status)}</span>
+        ${t.archived?`<span class="pill dim">archived</span>`:""}</td>
+      <td class="mono">${esc(t.role)}</td>
+      <td>${esc((t.goal||"").slice(0,86))}</td>
+      <td class="num">${t.steps!=null?t.steps:""}</td>
+      <td class="num">${usd(t.cost)}</td>
+      <td class="muted">${ago(t.created)}</td></tr>`).join("")}
+  </tbody></table>`;
+}
+function taskDlg(t){
+  if (typeof t === "string") t = JSON.parse(t);
+  showDlg("Task · "+esc(t.id||""), `
+    <p><span class="pill ${esc(t.status)}">${esc(t.status)}</span>
+      <span class="mono">${esc(t.role)}</span>
+      ${t.course?`· course <span class="mono">${esc(t.course)}</span>`:""}
+      · attempt ${t.attempt||1} · ${usd(t.cost)}</p>
+    ${t.stop?`<div style="margin:4px 0 6px"><span class="pill warn">STOP</span>
+      <span style="font-size:12.5px">${esc([t.stop.criteria?"done when: "+t.stop.criteria:"",
+        t.stop.max_attempts?"max attempts "+t.stop.max_attempts:"",
+        t.stop.deadline?"deadline "+t.stop.deadline:"",
+        t.stop.max_steps?"max steps "+t.stop.max_steps:""].filter(Boolean).join(" · "))}</span></div>`:""}
+    ${t.checkpoint?`<div style="margin:4px 0 6px"><span class="pill ${t.checkpoint.finished?"ok":"running"}">resumable</span>
+      <span class="muted" style="font-size:12px">${t.checkpoint.done} item(s) checkpointed
+      (${esc((t.checkpoint.ops||[]).join(", "))}) — a crash resumes, never restarts</span></div>`:""}
+    ${t.done_check?`<div style="margin:4px 0 8px">
+      <span class="pill acc">GATED</span>
+      <span class="mono" style="font-size:11.5px">${esc(t.done_check)}</span><br>
+      <span class="muted" style="font-size:12px">${t.done_rejects
+        ?`the gate refused ${t.done_rejects} wrong attempt${t.done_rejects>1?"s":""} ${t.status==="done"?"before accepting this work":"so far"}`
+        :"finish is only accepted when this command exits 0"}</span></div>`
+      :``}
+    <label class="lb">Goal</label><pre class="out">${esc(t.goal||"")}</pre>
+    ${(t.cards||[]).length?`<label class="lb">Cards this agent returned</label>
+      ${(t.cards||[]).map(renderCard).join("")}`:""}
+    ${t.summary?`<label class="lb">Summary</label><pre class="out">${esc(t.summary)}</pre>`:""}
+    ${t.error?`<label class="lb">Error</label><pre class="out" style="color:var(--bad)">${esc(t.error)}</pre>`:""}
+    <p><button class="btn sm" onclick="ctxDlg('${esc(t.id)}')">context window</button>
+    <button class="btn sm" onclick="traceDlg('${esc(t.id)}')">trace</button>
+    ${t.status==="done"?`<button class="btn sm" onclick="dlgRoutine('${esc(t.id)}')">save as routine</button>`:""}
+    ${t.context_ref?`<button class="btn sm" onclick="closeDlg();openFile('${esc(t.context_ref)}')">
+      open full transcript (context)</button>`:""}</p>`);
+}
+/* GENERATIVE UI, from a closed catalogue (A2UI's rule): the agent sends DATA
+   and the panel draws it. Every string is escaped; no branch of this function
+   can emit agent-authored markup, links or styles. */
+function renderCard(c){
+  if (!c || !c.type) return "";
+  const title = c.title ? `<h4>${esc(c.title)}</h4>` : "";
+  if (c.type==="table"){
+    const cols=(c.columns||[]).map(x=>`<th>${esc(x)}</th>`).join("");
+    const rows=(c.rows||[]).map(r=>`<tr>${(c.columns||[]).map((_,i)=>
+      `<td>${esc((r||[])[i]==null?"":r[i])}</td>`).join("")}</tr>`).join("");
+    return `<div class="uicard">${title}<div class="tablewrap"><table>
+      <thead><tr>${cols}</tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  }
+  if (c.type==="checklist"){
+    return `<div class="uicard">${title}${(c.items||[]).map(i=>
+      `<div style="font-size:12.5px">${i.done?"☑":"☐"} ${esc(i.text)}</div>`).join("")}</div>`;
+  }
+  if (c.type==="diff"){
+    return `<div class="uicard">${title}
+      ${c.path?`<div class="mono muted" style="font-size:12px">${esc(c.path)}</div>`:""}
+      <pre class="out del">- ${esc(c.before||"")}</pre>
+      <pre class="out ins">+ ${esc(c.after||"")}</pre></div>`;
+  }
+  if (c.type==="metric"){
+    return `<div class="uicard">${title}<div class="mrow">${(c.metrics||[]).map(m=>
+      `<div><b>${esc(m.value)}${esc(m.unit||"")}</b>
+       <span class="muted" style="font-size:12px">${esc(m.label)}</span>
+       ${m.delta?`<span class="pill ${String(m.delta).trim().startsWith("-")?"bad":"ok"}">${esc(m.delta)}</span>`:""}
+      </div>`).join("")}</div></div>`;
+  }
+  return "";   /* unknown types are dropped, never rendered "as best we can" */
+}
+function ctxBar(used, budget){
+  const pct = budget ? Math.min(100, Math.round(100*used/budget)) : 0;
+  const col = pct>90 ? "var(--bad)" : pct>60 ? "var(--warn)" : "var(--acc)";
+  return `<div style="background:var(--line);border-radius:3px;height:6px;width:120px;
+    display:inline-block;vertical-align:middle"><div style="width:${pct}%;height:6px;
+    background:${col};border-radius:3px"></div></div>`;
+}
+async function ctxDlg(taskId){
+  showDlg("Context window · "+esc(taskId), `<p class="muted">loading…</p>`);
+  const m = await api('/api/experts/'+S.sel+'/context?task='+encodeURIComponent(taskId));
+  if (!m || m.error){
+    showDlg("Context window · "+esc(taskId),
+      `<div class="empty">${esc((m&&m.error)||"no compiled window for that task")}
+       <br><span class="muted">windows are compiled from the first model call onward</span></div>`);
+    return;
+  }
+  const src = (m.sources||[]).map(s=>{
+    if (s.excluded_by_router) return `<tr><td class="mono">${esc(s.name)}</td>
+      <td colspan="2"><span class="pill">excluded</span>
+      <span class="muted" style="font-size:12px">${esc(s.excluded_by_router)}</span></td></tr>`;
+    const files = (s.included||[]).map(i=>`<div style="font-size:12px" class="mono">
+      ${esc(i.path)} · ${i.tokens} tok
+      ${i.trimmed?`<span class="pill warn">trimmed</span>
+        <span class="muted">${i.of-i.chars} chars left on disk — read_file for the rest</span>`:""}
+      </div>`).join("");
+    const drop = (s.dropped||[]).map(d=>`<div style="font-size:12px" class="mono">
+      <span class="pill bad">dropped</span> ${esc(d.path)} — ${esc(d.why)}</div>`).join("");
+    return `<tr><td class="mono">${esc(s.name)}</td>
+      <td>${ctxBar(s.used_tokens, s.budget_tokens)}
+        <span class="muted" style="font-size:12px">${s.used_tokens}/${s.budget_tokens} tok</span></td>
+      <td>${files||drop?files+drop:`<span class="muted" style="font-size:12px">nothing to add</span>`}</td></tr>`;
+  }).join("");
+  showDlg("Context window · "+esc(taskId), `
+    <p class="muted" style="font-size:12.5px">Exactly what this task's model was given —
+    compiled from named sources, each with a token budget. Nothing is silently cut:
+    an over-budget file is marked with how to read the rest.</p>
+    <p><span class="pill acc">${m.total_tokens} tok total</span>
+      <span class="pill">${m.system.tokens} tok system prompt</span>
+      ${m.system.variant?`<span class="pill warn">charter variant ${esc(m.system.variant)}</span>`:""}
+      <span class="pill">${m.user_tokens} tok task window</span></p>
+    <p style="font-size:12.5px"><b>identity &amp; rules from</b>
+      <span class="mono">${esc((m.system.files||[]).join(", "))}</span></p>
+    <p style="font-size:12.5px"><b>memory router</b>
+      <span class="mono">${esc(m.router&&m.router.rule||"all")}</span>
+      <span class="muted">${esc(m.router&&m.router.why||"")}</span></p>
+    ${(m.premise||[]).length?`<div style="margin:6px 0"><span class="pill bad">premise</span>
+      ${(m.premise||[]).map(w=>`<div style="font-size:12px">${esc(w.warning||w)}</div>`).join("")}</div>`:""}
+    <div class="tablewrap"><table><thead><tr><th>source</th><th>budget</th>
+      <th>what went in</th></tr></thead><tbody>${src}</tbody></table></div>
+    ${(m.compactions||[]).length?`<p style="font-size:12.5px"><b>compactions</b> ${
+      (m.compactions||[]).map(c=>`${c.turns} turns archived, ${c.cleared||0} tool result(s)
+        cleared to a pointer`).join(" · ")}</p>`:""}
+    <p><button class="btn sm" onclick="closeDlg();taskDlgById('${esc(taskId)}')">back to task</button></p>`);
+}
+async function traceDlg(taskId){
+  showDlg("Trace · "+esc(taskId), `<p class="muted">loading…</p>`);
+  const r = await api('/api/experts/'+S.sel+'/trace?task='+encodeURIComponent(taskId));
+  const tr = r && r.trace, b = r && r.brief;
+  if (!tr){ showDlg("Trace · "+esc(taskId), `<div class="empty">no trace for that task</div>`); return; }
+  const t = tr.totals||{};
+  const rows = (tr.spans||[]).map(sp=>{
+    if (sp.kind==="tool") return `<tr><td class="mono" style="font-size:11.5px">${esc(sp.at||"")}</td>
+      <td><span class="pill ${sp.error?"bad":"dim"}">${esc(sp.name)}</span></td>
+      <td class="num">${sp.ms} ms</td>
+      <td class="mono" style="font-size:11.5px">${esc((sp.args||"").slice(0,90))}</td></tr>`;
+    return `<tr><td class="mono" style="font-size:11.5px">${esc(sp.at||"")}</td>
+      <td><span class="pill warn">${esc(sp.kind)}</span></td><td class="num"></td>
+      <td class="mono" style="font-size:11.5px">${esc(JSON.stringify(sp.detail||{}).slice(0,90))}</td></tr>`;
+  }).join("");
+  showDlg("Trace · "+esc(taskId), `
+    <p class="muted" style="font-size:12.5px">One span per model turn, tool call, gate
+    refusal and compaction — built from the log lines the harness already writes.</p>
+    <p><span class="pill acc">${t.steps||0} steps</span>
+      <span class="pill">${t.tool_ms||0} ms in tools</span>
+      <span class="pill">${usd(t.cost_usd||0)}</span>
+      <span class="pill">${(t.tokens_in||0)}+${(t.tokens_out||0)} tok</span>
+      ${t.gates_refused?`<span class="pill warn">${t.gates_refused} gate refusal(s)</span>`:""}
+      ${t.errors?`<span class="pill bad">${t.errors} tool error(s)</span>`:""}</p>
+    ${b?`<p style="font-size:12.5px"><b>done so far:</b> ${esc((b.done||[]).slice(-3).join(" · "))||"nothing yet"}<br>
+      <b>this step:</b> ${esc(b.this_step||"")}<br><b>next:</b> ${esc(b.next||"")}</p>`:""}
+    <div class="tablewrap"><table><thead><tr><th>at</th><th>span</th><th>ms</th>
+      <th>detail</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <p><button class="btn sm" onclick="closeDlg();ctxDlg('${esc(taskId)}')">context window</button></p>`);
+}
+function dlgRoutine(taskId){
+  showDlg("Save as a routine", `
+    <p class="muted" style="font-size:12.5px">This task worked. Saving it as a routine
+    writes the procedure that worked into a skill and arms a schedule that re-runs it —
+    carrying the <b>same definition of done</b> it just passed.</p>
+    <label class="lb">Name</label><input class="field" id="rtName" placeholder="morning-margin-check">
+    <label class="lb">When</label>
+    <select class="field" id="rtKind" onchange="rtFields()">
+      <option value="every_days">every N days</option>
+      <option value="at">once, at a date/time</option>
+      <option value="event">whenever an event arrives</option>
+    </select>
+    <div id="rtWhen"></div>`,
+    [["Cancel","closeDlg()","ghost"],["Save routine",`doRoutine('${esc(taskId)}')`,"pri"]]);
+  rtFields();
+}
+function rtFields(){
+  const k=document.getElementById("rtKind").value, el=document.getElementById("rtWhen");
+  el.innerHTML = k==="every_days"
+    ? `<label class="lb">Every how many days</label><input class="field" id="rtVal" value="1">`
+    : k==="at"
+    ? `<label class="lb">Date and time (YYYY-MM-DDTHH:MM:SS)</label><input class="field" id="rtVal" placeholder="2026-09-01T07:00:00">`
+    : `<label class="lb">Event name</label><input class="field" id="rtVal" placeholder="price.drop">
+       <p class="muted" style="font-size:12px">Deliver it with a POST to
+       <span class="mono">/api/experts/${esc(S.sel)}/wake</span></p>`;
+}
+async function doRoutine(taskId){
+  const k=document.getElementById("rtKind").value, v=document.getElementById("rtVal").value.trim();
+  const body={task_id:taskId, name:document.getElementById("rtName").value.trim()||null};
+  if(k==="every_days") body.every_days=Number(v||1);
+  else if(k==="at") body.at=v; else body.event=v;
+  const r=await api('/api/experts/'+S.sel+'/routine',{method:"POST",body});
+  closeDlg();
+  toast(r.error||`routine '${r.routine}' saved — ${r.gated?"gated":"UNGATED (add a done-check)"}`);
+}
+async function taskDlgById(id){
+  const tasks = await api('/api/experts/'+S.sel+'/tasks');
+  const t = (Array.isArray(tasks)?tasks:[]).find(x=>x.id===id);
+  if (t) taskDlg(t);
+}
+async function loadCtxWindows(){
+  const el = document.getElementById("ctxwins");
+  if (!el) return;
+  const rows = await api('/api/experts/'+S.sel+'/context');
+  const list = Array.isArray(rows)?rows:[];
+  el.innerHTML = list.length ? `<div class="tablewrap"><table>
+    <thead><tr><th>task</th><th>role</th><th>goal</th><th>tokens</th>
+      <th>sources</th><th></th></tr></thead><tbody>${list.map(r=>`
+      <tr><td class="mono">${esc(r.task)}</td><td>${esc(r.role)}</td>
+        <td>${esc((r.goal||"").slice(0,60))}</td><td>${r.total_tokens}</td>
+        <td style="font-size:12px">${(r.sources||[]).filter(s=>s.used_tokens>0)
+          .map(s=>esc(s.name)+" "+s.used_tokens).join(" · ")}</td>
+        <td><button class="btn sm" onclick="ctxDlg('${esc(r.task)}')">open</button></td></tr>`
+    ).join("")}</tbody></table></div>`
+    : `<span class="muted">no compiled windows yet — run a task</span>`;
+}
+async function renderBoard(b){
+  const tasks = await api('/api/experts/'+S.sel+'/tasks'+(S.hist?'?history=1':''));
+  const list = Array.isArray(tasks)?tasks:[];
+  const counts = {};
+  list.forEach(t=>counts[t.status]=(counts[t.status]||0)+1);
+  b.innerHTML = `
+  <div class="card"><h3>Board — all work
+    <span class="spacer"></span>
+    ${Object.entries(counts).map(([k,v])=>`<span class="pill ${esc(k)}">${v} ${esc(k)}</span>`).join(" ")}
+    <label style="font-weight:400;font-size:12px;display:flex;gap:5px;align-items:center">
+      <input type="checkbox" ${S.hist?"checked":""}
+        onchange="S.hist=this.checked;render()"> include archived history</label>
+    <button class="btn sm pri" onclick="dlgTask()">＋ task</button></h3>
+  <div class="body tablewrap">${taskTable(list)}</div></div>
+  <p class="muted" style="font-size:12.5px">Every task ever run is kept: the hot queue
+  stays small for speed, and the <b>history</b> toggle reads the permanent archive —
+  goals, errors, costs, summaries, transcripts included.</p>`;
+}
+function dlgTask(){
+  showDlg("＋ New task for "+esc(S.sel), `
+    <label class="lb">Role</label>
+    <select class="field" id="ntRole">
+      <option value="practitioner">practitioner — do real work</option>
+      <option value="watcher">watcher — study material</option>
+      <option value="consultant">consultant — answer with citations</option>
+      <option value="librarian">librarian — tidy the notes</option>
+      <option value="examiner">examiner — check the work</option>
+    </select>
+    <label class="lb">Goal</label>
+    <textarea class="field" id="ntGoal" placeholder="what exactly should it do?"></textarea>
+    <label class="lb">Course (optional)</label>
+    <input class="field" id="ntCourse" placeholder="ties the task to one course's memory">
+    <label class="lb">Definition of done (optional but powerful)</label>
+    <input class="field" id="ntCheck" placeholder="a command that must exit 0, e.g. python check.py">
+    <p class="muted" style="font-size:12px">With a done-check, the agent cannot claim
+    finished until the command passes — the single biggest anti-slop lever you have.</p>
+    <label class="lb">Stop condition (every loop is defined by when it stops)</label>
+    <input class="field" id="ntStop" placeholder="done when… e.g. all three files exist and the smoke test prints ok">
+    <div class="row" style="margin-top:6px">
+      <input class="field" id="ntAttempts" placeholder="max attempts" style="max-width:130px">
+      <input class="field" id="ntDeadline" placeholder="deadline in days" style="max-width:150px">
+      <input class="field" id="ntSteps" placeholder="max steps" style="max-width:120px"></div>`,
+    [["Cancel","closeDlg()","ghost"],["Queue it","doTask()","pri"]]);
+}
+function stopFromForm(){
+  const v=id=>{const e=document.getElementById(id);return e?e.value.trim():"";};
+  const days=parseFloat(v("ntDeadline"));
+  const stop={criteria:v("ntStop")||undefined,
+    max_attempts:parseInt(v("ntAttempts"))||undefined,
+    max_steps:parseInt(v("ntSteps"))||undefined,
+    deadline:(!isNaN(days)&&days>0)?new Date(Date.now()+days*86400000).toISOString().slice(0,19):undefined};
+  return Object.values(stop).some(x=>x!==undefined)?stop:undefined;
+}
+async function doTask(){
+  const body = {role:document.getElementById("ntRole").value,
+    goal:document.getElementById("ntGoal").value.trim(),
+    course:document.getElementById("ntCourse").value.trim()||undefined,
+    done_check:document.getElementById("ntCheck").value.trim()||undefined,
+    stop:stopFromForm()};
+  if(!body.goal){toast("write the goal");return;}
+  const r = await api('/api/experts/'+S.sel+'/task',{method:"POST",body});
+  closeDlg(); toast(r.queued?"queued — start the loop if it isn't running":(r.error||"failed"));
+  render();
+}
+/* ---------- Mind (memory browser) ---------- */
+const SHORTCUTS = [["courses","📚 notes"],["skills","🧩 skills"],
+  ["contexts","💬 transcripts"],["contexts/archive","🗄 archived turns"],
+  ["workspace","✏ drafts"],["out","📦 deliverables"],["logs","📜 logs"],
+  ["briefing","⚡ briefing"],["inbox","📥 inbox"]];
+async function renderMind(b){
+  const tree = await api('/api/experts/'+S.sel+'/tree');
+  const items = Array.isArray(tree)?tree:[];
+  const have = new Set(items.map(e=>e.p.split("/")[0]));
+  b.innerHTML = `
+  <div class="card"><h3>Self-model — what it knows about itself
+    <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:12px">
+      measured, never claimed</span></h3>
+  <div class="body" id="selfBody"><span class="muted">loading…</span></div></div>
+  <div class="card"><h3>Knowledge — sources, standards, disagreements
+    <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:12px">
+      who outranks whom when the material fights</span></h3>
+  <div class="body" id="knowBody"><span class="muted">loading…</span></div></div>
+  <div class="card"><h3>Context windows — what the model actually saw
+    <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:12px">
+      compiled per task, budgeted per source</span></h3>
+  <div class="body" id="ctxwins"><span class="muted">loading…</span></div></div>
+  <div class="card"><h3>Mind — everything it knows and everything it did
+    <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:12px">
+      read-only; agents own their files</span></h3>
+  <div class="body">
+    <div class="row" style="margin-bottom:10px">${SHORTCUTS
+      .filter(([p])=>have.has(p.split("/")[0]))
+      .map(([p,l])=>`<button class="btn sm ghost" onclick="jumpTree('${p}')">${l}</button>`).join("")}
+    </div>
+    <div class="mindwrap">
+      <div id="tree">${items.length?items.map(e=> e.dir
+        ? `<div class="t d" data-p="${esc(e.p)}">${"&nbsp;".repeat(2*(e.p.split("/").length-1))}▸ ${esc(e.p.split("/").pop())}/</div>`
+        : `<div class="t" data-p="${esc(e.p)}" onclick="openFile('${esc(e.p)}')">${"&nbsp;".repeat(2*(e.p.split("/").length-1))}${esc(e.p.split("/").pop())}</div>`
+      ).join(""):`<span class="muted">empty mind — teach it something</span>`}</div>
+      <div id="viewer"><div class="empty">pick a file — notes carry [src:] citations;
+        transcripts are complete conversations; nothing here is ever silently deleted</div></div>
+    </div>
+  </div></div>`;
+  loadCtxWindows(); loadSelf(); loadKnowledge();
+  if (S.mindPath) openFile(S.mindPath);
+}
+async function loadSelf(){
+  const el = document.getElementById("selfBody"); if(!el) return;
+  const r = await api('/api/experts/'+S.sel+'/self');
+  if (!r || r.error){ el.innerHTML = `<span class="muted">${esc((r&&r.error)||"unavailable")}</span>`; return; }
+  const m = r.model || {};
+  const studied = (m.studied||[]).map(s=>`<tr>
+    <td class="mono">${esc(s.course)}</td><td>${s.atoms} atoms</td>
+    <td>${s.exam ? (s.exam.score!=null? s.exam.score+"% "+esc(s.exam.verdict||"") : "examined")
+        : `<span class="pill warn">never examined</span>`}</td>
+    <td>${Object.entries(s.sources||{}).map(([t,n])=>esc(n+"x "+t.replace("tier","tier "))).join(", ")||"—"}</td>
+    <td>${s.contested?`<span class="pill bad">${s.contested} contested</span>`:""}</td></tr>`).join("");
+  const comp = Object.entries((m.proven||{}).competence||{}).map(([d,c])=>
+    `<span class="pill ${c.claim==="demonstrated"?"ok":c.claim==="weak"?"bad":"queued"}"
+      title="${c.successes}/${c.attempts} tasks, confidence ${esc(c.confidence)}">${esc(d)}: ${esc(c.claim)}</span>`).join(" ");
+  el.innerHTML = `
+    <p class="muted" style="font-size:12.5px">This is the block the agent reads before every task.
+    Nothing in it is generated: it is read from the ledgers the harness writes, so it cannot flatter itself.</p>
+    ${comp?`<div class="row" style="margin-bottom:8px">${comp}</div>`:""}
+    ${studied?`<div class="tablewrap"><table><thead><tr><th>course</th><th>verified</th>
+      <th>exam</th><th>sources</th><th></th></tr></thead><tbody>${studied}</tbody></table></div>`
+      :`<span class="muted">nothing studied yet</span>`}
+    <pre class="out" style="margin-top:8px">${esc(r.block||"")}</pre>`;
+}
+async function loadKnowledge(){
+  const el = document.getElementById("knowBody"); if(!el) return;
+  const s = await api('/api/experts/'+S.sel+'/knowledge');
+  if (!s || s.error){ el.innerHTML = `<span class="muted">${esc((s&&s.error)||"unavailable")}</span>`; return; }
+  const courses = Object.keys((s.sources||{}).courses||{});
+  if (!courses.length){ el.innerHTML = `<span class="muted">no material ingested yet — teach it something</span>`; return; }
+  const rows = courses.map(c=>{
+    const src = s.sources.courses[c]||{}, cf = (s.conflicts.courses||{})[c]||{},
+          st = (s.standards.courses||{})[c]||{};
+    const tiers = Object.entries(src.by_tier||{}).filter(([,n])=>n)
+      .map(([t,n])=>`<span class="pill ${t==="1"?"ok":t==="4"?"bad":""}">tier ${esc(t)}: ${n}</span>`).join(" ");
+    return `<tr><td class="mono">${esc(c)}</td><td>${src.n||0} ${tiers}</td>
+      <td>${st.n||0}${st.checked?` <span class="pill acc">${st.checked} gate-checked</span>`:""}</td>
+      <td>${cf.n||0}${cf.contested?` <span class="pill bad">${cf.contested} contested</span>`:""}</td>
+      <td><button class="btn sm" onclick="knowDlg('${esc(c)}')">open</button></td></tr>`;
+  }).join("");
+  el.innerHTML = `<div class="tablewrap"><table><thead><tr><th>course</th>
+    <th>sources by authority</th><th>standards</th><th>conflicts</th><th></th></tr></thead>
+    <tbody>${rows}</tbody></table></div>
+    <p class="muted" style="font-size:11.5px;margin:8px 0 0">A tier-1 source (spec, study) outranks a
+    tier-4 one (forum) when they disagree. A <b>contested</b> point has no winner: the gate refuses any
+    answer that states it as settled.</p>`;
+}
+async function knowDlg(course){
+  showDlg("Knowledge · "+esc(course), `<p class="muted">loading…</p>`);
+  const k = await api('/api/experts/'+S.sel+'/knowledge?course='+encodeURIComponent(course));
+  const src = (k.sources||[]).map(x=>`<tr><td class="mono">${esc(x.id)}</td>
+    <td><span class="pill ${x.tier===1?"ok":x.tier===4?"bad":""}">tier ${x.tier} ${esc(x.tier_name)}</span></td>
+    <td>${esc((x.title||"").slice(0,60))}</td>
+    <td class="muted" style="font-size:12px">${esc(x.why||"")}${x.override?" (owner)":""}</td></tr>`).join("");
+  const cf = (k.conflicts||[]).map(c=>`<div style="margin:6px 0;padding:6px;border-left:3px solid var(--line)">
+    <span class="pill ${c.verdict==="contested"?"bad":c.verdict==="context"?"":"ok"}">${esc(c.verdict)}</span>
+    <span class="mono" style="font-size:12px">${esc(c.a.id)} vs ${esc(c.b.id)}</span>
+    <div style="font-size:12.5px;margin-top:3px">${esc(c.ruling||"")}</div>
+    <div class="muted" style="font-size:12px">${esc(c.a.text.slice(0,90))} — tier ${c.a.tier}</div>
+    <div class="muted" style="font-size:12px">${esc(c.b.text.slice(0,90))} — tier ${c.b.tier}</div></div>`).join("");
+  const st = (k.standards||[]).map(r=>`<li style="font-size:12.5px">
+    <span class="mono">${esc(r.id)}</span> <span class="pill">tier ${r.tier}</span> ${esc(r.text)}
+    ${r.check?`<span class="pill acc">gate: ${esc(r.check.key)}=${esc(r.check.value)}</span>`:""}</li>`).join("");
+  showDlg("Knowledge · "+esc(course), `
+    <label class="lb">Standards — the bar this work must clear</label>
+    ${st?`<ul style="margin:4px 0 10px 18px">${st}</ul>`
+      :`<p class="muted">none extracted yet — <span class="mono">python standards.py --root &lt;expert&gt; --course ${esc(course)} --extract</span></p>`}
+    <label class="lb">Conflicts — where the material disagrees with itself</label>
+    ${cf||`<p class="muted">no contradictions found</p>`}
+    <label class="lb">Sources — and what each is worth</label>
+    <div class="tablewrap"><table><tbody>${src||""}</tbody></table></div>`);
+}
+function jumpTree(prefix){
+  const el=[...document.querySelectorAll('#tree .t')]
+    .find(x=>x.dataset.p===prefix||x.dataset.p.startsWith(prefix+"/"));
+  if(el){el.scrollIntoView({block:"start"});el.style.background="var(--accbg)";
+    setTimeout(()=>el.style.background="",900);}
+}
+async function openFile(rel){
+  S.mindPath = rel;
+  if (S.sub!=="mind"){ S.sub="mind"; await render(); return; }
+  const v=document.getElementById("viewer");
+  if(!v) return;
+  v.innerHTML=`<span class="muted">loading ${esc(rel)}…</span>`;
+  const r = await api('/api/experts/'+S.sel+'/file?path='+encodeURIComponent(rel));
+  document.querySelectorAll('#tree .t').forEach(x=>
+    x.classList.toggle("on", x.dataset.p===rel));
+  v.innerHTML = r.error
+    ? `<div class="empty">${esc(r.error)}</div>`
+    : `<div class="row" style="justify-content:space-between">
+         <b class="mono" style="font-size:12.5px">${esc(rel)}</b>
+         <span class="muted" style="font-size:12px">${r.size} bytes${r.truncated?" · truncated":""}</span></div>
+       <pre class="out" style="max-height:520px">${esc(r.content||"(empty)")}</pre>`;
+}
+/* ---------- Ask (consult) ---------- */
+function renderAsk(b, d){
+  b.innerHTML = `
+  <div class="card"><h3>Ask ${esc(S.sel)} — citation-gated consultation</h3><div class="body">
+    <textarea class="field" id="qQ" placeholder="Ask anything inside its specialty…"></textarea>
+    <div class="row" style="margin-top:10px">
+      <button class="btn pri" onclick="doConsult()">ask</button>
+      <span class="muted" style="font-size:12.5px">Every claim must cite an atom that
+      exists in its notes; outside them it must answer <b>NOT IN MY TRAINING</b>. A made-up
+      citation is mechanically rejected before you ever see it.</span></div>
+    <div id="askOut" style="margin-top:12px">
+      ${(d.consults&&d.consults.length)?`<label class="lb">Past consultations</label>`+
+        d.consults.map(c=>`<div style="margin-bottom:7px">
+          <span class="pill ${c.status==='done'?'ok':(c.status==='failed'?'bad':'queued')}">${c.status==='done'?'answered':esc(c.status||"pending")}</span>
+          ${esc((c.question||"").slice(0,110))}
+          ${c.answer_text?`<pre class="out" style="max-height:220px;margin-top:5px">${esc(c.answer_text)}</pre>`:""}
+        </div>`).join(""):""}
+    </div>
+  </div></div>`;
+}
+async function doConsult(){
+  const q=document.getElementById("qQ").value.trim();
+  if(!q){toast("type the question");return;}
+  const out=document.getElementById("askOut");
+  out.innerHTML=`<span class="muted">queued — the loop drafts, the gate checks citations…</span>`;
+  const r = await api('/api/experts/'+S.sel+'/consult',{method:"POST",body:{question:q}});
+  if (r.error){ out.innerHTML=`<span class="pill bad">failed</span> ${esc(r.error)}`; return; }
+  toast("consultation queued — make sure the loop is running");
+  out.innerHTML=`<span class="pill queued">working</span>
+    ${esc(q.slice(0,90))} — the answer appears here and in Overview when the citation
+    gate passes.`;
+}
+/* ---------- Wiring (models & settings) ---------- */
+async function renderWiring(b){
+  const st = await api('/api/experts/'+S.sel+'/settings');
+  const provs = st.providers||{}; const roles = st.roles||{};
+  b.innerHTML = `
+  <div class="grid2">
+  <div class="card"><h3>Providers — where its models come from
+    <span class="spacer"></span>
+    <button class="btn sm pri" onclick="dlgProvider()">＋ provider</button></h3>
+  <div class="body tablewrap">
+    ${Object.keys(provs).length?`<table><thead><tr><th>name</th><th>endpoint</th>
+      <th>key</th></tr></thead><tbody>
+      ${Object.entries(provs).map(([n,p])=>`<tr>
+        <td class="mono">${esc(n)}${p.mock?` <span class="pill dim">mock</span>`:""}</td>
+        <td class="muted" style="font-size:12px">${esc(p.base_url||"")}</td>
+        <td>${p.mock?"—":(p.key_present
+            ?`<span class="pill ok">set</span>`
+            :`<span class="pill bad">missing</span> <span class="muted mono" style="font-size:11px">${esc(p.key_env||"")}</span>`)}</td>
+      </tr>`).join("")}</tbody></table>`:`<span class="muted">none yet</span>`}
+    <p class="muted" style="font-size:12px;margin-top:9px">Keys live in
+      <span class="mono">agent.env</span> beside the code — this panel only ever shows
+      the env <i>name</i>. <button class="btn sm ghost" onclick="runTool('probe')">probe all</button></p>
+    <div id="toolOut"></div>
+  </div></div>
+  <div class="card"><h3>Roles — which model does which job</h3><div class="body tablewrap">
+    ${Object.keys(roles).length?`<table><thead><tr><th>role</th><th>provider</th>
+      <th>model</th><th></th></tr></thead><tbody>
+      ${Object.entries(roles).map(([n,r])=>`<tr>
+        <td class="mono">${esc(n)}</td><td class="mono">${esc(r.provider||"")}</td>
+        <td class="mono" style="font-size:12px">${esc(r.model||"")}</td>
+        <td><button class="btn sm ghost" onclick="dlgRole('${esc(n)}')">change</button></td>
+      </tr>`).join("")}</tbody></table>`:`<span class="muted">defaults</span>`}
+    <p class="muted" style="font-size:12px;margin-top:8px">Cheap model for routine roles,
+    strong one for practitioner/examiner; the loop escalates automatically on repeated
+    errors. Swapping a model never touches memory or identity.</p>
+  </div></div>
+  </div>
+  <div class="card"><h3>🧬 Evolution — charter variants, promoted on evidence only
+    <span class="spacer"></span><button class="btn sm pri" onclick="dlgVariant()">＋ spawn variant</button></h3>
+    <div class="body" id="varBody"><span class="muted">loading…</span></div></div>
+  <div class="card"><h3>Model catalog — live from the provider</h3><div class="body">
+    <div class="row"><select class="field" id="catProv" style="max-width:220px">
+      ${Object.keys(provs).filter(n=>!provs[n].mock).map(n=>`<option>${esc(n)}</option>`).join("")||"<option value=''>no live providers</option>"}
+    </select>
+    <input class="field" id="catFilter" placeholder="filter, e.g. free / llama / claude" style="max-width:220px">
+    <button class="btn" onclick="loadCatalog()">browse models</button></div>
+    <div id="catOut" style="margin-top:10px"></div>
+  </div></div>`;
+  loadVariants();
+}
+async function loadVariants(){
+  const el=document.getElementById("varBody"); if(!el) return;
+  const m=await api('/api/experts/'+S.sel+'/variants');
+  const rows=Object.values(m||{}).filter(x=>x&&x.id);
+  el.innerHTML = rows.length? `<div class="tablewrap"><table><thead><tr><th>variant</th><th>roles</th>
+    <th>status</th><th>trial</th><th></th></tr></thead><tbody>${rows.map(v=>{
+      const tr=v.trials||null;
+      const pc=v.prediction_check||null;
+      const pred=v.prediction?`<br><span class="pill ${pc?(pc.held?"ok":"bad"):"dim"}">predicted ${
+        esc(v.prediction.metric)} ${v.prediction.expected_delta>=0?"+":""}${v.prediction.expected_delta}${
+        pc?` · observed ${pc.observed_delta>=0?"+":""}${pc.observed_delta} · ${pc.held?"held":"DID NOT HOLD"}`:" · not trialed yet"}</span>`:"";
+      const score=(tr?`base ${tr.base.passes}/${tr.base.tasks} · variant ${tr.variant.passes}/${tr.variant.tasks}`:"—")+pred;
+      const cls=v.status==='promoted'?'ok':(v.status==='trialing'?'running':(String(v.status).startsWith('trial failed')?'bad':'dim'));
+      return `<tr><td class="mono">${esc(v.id)}</td><td class="mono">${esc((v.roles||[]).join(","))}</td>
+        <td><span class="pill ${cls}">${esc(v.status)}</span></td><td class="num">${score}</td>
+        <td class="row" style="gap:4px">
+          ${v.status!=='trialing'?`<button class="btn sm" onclick="varOp('trial','${esc(v.id)}')">trial</button>`:""}
+          ${tr&&v.status!=='promoted'?`<button class="btn sm pri" onclick="varOp('promote','${esc(v.id)}')">promote</button>`:""}
+          ${v.status==='promoted'?`<button class="btn sm warn" onclick="varOp('rollback','${esc(v.id)}')">rollback</button>`:""}
+        </td></tr>`;}).join("")}</tbody></table></div>
+    <p class="muted" style="font-size:11.5px;margin:8px 0 0">A trial runs the same gated battery
+    under both charters (the loop is paused first). Promotion is refused unless the variant
+    strictly wins; rollback restores the exact previous charter.</p>`
+   : `<span class="muted">no variants — spawn one to evolve a role's charter under evidence</span>`;
+}
+function dlgVariant(){
+  showDlg("🧬 Spawn a charter variant", `
+    <label class="lb">Variant id</label><input class="field" id="vId" placeholder="v2">
+    <label class="lb">Role</label>
+    <select class="field" id="vRole"><option>practitioner</option><option>consultant</option>
+      <option>watcher</option><option>examiner</option></select>
+    <label class="lb">The new role prompt (full text)</label>
+    <textarea class="field" id="vPrompt" style="min-height:140px" placeholder="# ROLE: practitioner — …"></textarea>
+    <label class="lb">Note</label><input class="field" id="vNote" placeholder="what this variant tries">
+    <label class="lb">Prediction — what should this improve, and by how much?</label>
+    <div class="row">
+      <select class="field" id="vPredM" style="max-width:220px">
+        <option value="passes">more gated passes</option>
+        <option value="gate_rejects">fewer gate refusals</option>
+      </select>
+      <input class="field" id="vPredD" style="max-width:120px" placeholder="e.g. 2 or -3">
+    </div>
+    <p class="muted" style="font-size:12px">Optional but strongly advised: a charter
+    change that cannot say what it should improve is a preference, not an experiment.
+    If you declare one, promotion is <b>refused</b> when the trial does not deliver it —
+    even if the numbers happen to look better.</p>`,
+    [["Cancel","closeDlg()","ghost"],["Spawn","doVariant()","pri"]]);
+}
+async function doVariant(){
+  const id=document.getElementById("vId").value.trim(), prompt=document.getElementById("vPrompt").value;
+  if(!id||!prompt.trim()){toast("id and prompt required");return;}
+  const pd=document.getElementById("vPredD").value.trim();
+  const body={op:"spawn",id,role:document.getElementById("vRole").value,prompt,
+    note:document.getElementById("vNote").value};
+  if(pd) body.prediction={metric:document.getElementById("vPredM").value,expected_delta:Number(pd)};
+  const r=await api('/api/experts/'+S.sel+'/variant',{method:"POST",body});
+  closeDlg(); toast(r.spawned?("variant spawned"+(r.prediction?" with a prediction on record":"")+" — run a trial"):(r.error||"failed")); loadVariants();
+}
+async function varOp(op,id){
+  const r=await api('/api/experts/'+S.sel+'/variant',{method:"POST",body:{op,id}});
+  toast(r.error||(op==='trial'?`trial running on ${r.battery} gated tasks — refresh in a minute`:JSON.stringify(r)));
+  setTimeout(loadVariants,800);
+}
+function dlgProvider(){
+  showDlg("＋ Provider", `
+    <label class="lb">Known rail (fastest)</label>
+    <select class="field" id="pRail">
+      <option value="">— custom URL below —</option>
+      ${["openrouter","tokenrouter","nvidia","huggingface","groq","deepseek","together","fireworks","mistral","cerebras","openai"]
+        .map(x=>`<option>${x}</option>`).join("")}
+    </select>
+    <label class="lb">Or any OpenAI-compatible base URL</label>
+    <input class="field" id="pUrl" placeholder="https://my-gateway.example/v1">
+    <label class="lb">Name (for a custom URL)</label>
+    <input class="field" id="pName" placeholder="mygateway">
+    <label class="lb">Key env-var name (never the key itself)</label>
+    <input class="field" id="pEnv" placeholder="MYGATEWAY_API_KEY">
+    <p class="muted" style="font-size:12px">Then put the actual key in
+    <span class="mono">agent.env</span> and hit <b>probe</b>.</p>`,
+    [["Cancel","closeDlg()","ghost"],["Add","doProvider()","pri"]]);
+}
+async function doProvider(){
+  const rail=document.getElementById("pRail").value;
+  const body = rail ? {name:rail}
+    : {name:document.getElementById("pName").value.trim(),
+       base_url:document.getElementById("pUrl").value.trim(),
+       key_env:document.getElementById("pEnv").value.trim()||undefined};
+  if(!body.name){toast("pick a rail or name the custom one");return;}
+  const r=await api('/api/experts/'+S.sel+'/provider',{method:"POST",body});
+  closeDlg(); toast(r.error||"provider added — key goes in agent.env"); render();
+}
+function dlgRole(role){
+  showDlg("Point role · "+esc(role), `
+    <label class="lb">Provider</label><input class="field" id="rProv" placeholder="openrouter">
+    <label class="lb">Model id</label><input class="field" id="rModel"
+      placeholder="e.g. anthropic/claude-sonnet-4.5">`,
+    [["Cancel","closeDlg()","ghost"],["Save","doRole('"+esc(role)+"')","pri"]]);
+}
+async function doRole(role){
+  const r=await api('/api/experts/'+S.sel+'/role',{method:"POST",
+    body:{role, provider:document.getElementById("rProv").value.trim(),
+          model:document.getElementById("rModel").value.trim()}});
+  closeDlg(); toast(r.error||"role re-pointed"); render();
+}
+async function loadCatalog(){
+  const prov=document.getElementById("catProv").value;
+  const f=document.getElementById("catFilter").value.trim();
+  const out=document.getElementById("catOut");
+  if(!prov){out.innerHTML=`<span class="muted">add a live provider first</span>`;return;}
+  out.innerHTML=`<span class="muted">fetching /models from ${esc(prov)}…</span>`;
+  const r = await api('/api/experts/'+S.sel+'/models?provider='+encodeURIComponent(prov)
+    +(f?'&filter='+encodeURIComponent(f):''));
+  const models = r.models||r;
+  out.innerHTML = (Array.isArray(models)&&models.length)
+    ? `<div class="tablewrap" style="max-height:300px;overflow:auto"><table>
+       <thead><tr><th>model</th><th>ctx</th><th>$/Mtok in</th></tr></thead><tbody>
+       ${models.slice(0,200).map(x=>`<tr><td class="mono" style="font-size:12px">${esc(x.id)}</td>
+       <td class="num">${x.context?Math.round(x.context/1000)+"k":""}</td>
+       <td class="num">${x.prompt_price!=null?x.prompt_price:(x.free?"free":"")}</td></tr>`).join("")}
+       </tbody></table></div>`
+    : `<span class="muted">${esc(r.error||"nothing returned — is the key set?")}</span>`;
+}
+/* =================================================================
+   WORK — goals, teams, fleet-wide consult
+================================================================= */
+async function renderWork(m){
+  const [goals, teams, sys] = await Promise.all(
+    [api('/api/goals'), api('/api/team'), refreshSys()]);
+  const experts = ((sys&&sys.experts)||[]).map(e=>e.name);
+  m.innerHTML = `
+  <div class="pagehead"><h1>Work</h1>
+    <span class="sub">goals pursued to completion · teams of specialists</span></div>
+  <div class="grid2">
+  <div class="card"><h3>🎯 New goal — pursued until achieved</h3><div class="body">
+    <label class="lb">Which agent</label>
+    <select class="field" id="gExp">${experts.map(e=>`<option>${esc(e)}</option>`).join("")}</select>
+    <label class="lb">The goal</label>
+    <textarea class="field" id="gGoal" placeholder="e.g. Learn WCAG 2.2 AA and rebuild pricing.html to pass it — or: learn everything in course X to mastery"></textarea>
+    <div class="row" style="margin-top:10px">
+      <button class="btn pri" onclick="startGoal()">pursue it</button>
+      <span class="muted" style="font-size:12px">plan → gated work → independent judge →
+      judge re-checked (liars overruled) → re-plan, until every check passes</span></div>
+  </div></div>
+  <div class="card"><h3>🤝 New team — chosen specialists together</h3><div class="body">
+    <label class="lb">Pick 2–4 agents</label>
+    <div class="row" id="tmPick">${experts.map(e=>`<label class="kchip" style="cursor:pointer">
+      <input type="checkbox" value="${esc(e)}"> ${esc(e)}</label>`).join("")||"<span class='muted'>need agents first</span>"}</div>
+    <label class="lb">Lead (splits &amp; synthesizes)</label>
+    <select class="field" id="tmLead">${experts.map(e=>`<option>${esc(e)}</option>`).join("")}</select>
+    <label class="lb">Team goal</label>
+    <textarea class="field" id="tmGoal" placeholder="e.g. Ship a landing page: research the audience, write the copy, build it accessible"></textarea>
+    <div class="row" style="margin-top:10px"><button class="btn pri" onclick="startTeam()">run the team</button>
+      <span class="muted" style="font-size:12px">each works in its own memory; handoffs
+      are files; dropped constraints are detected by digest</span></div>
+  </div></div>
+  </div>
+  <div class="card"><h3>🧵 Workflows — fixed stages with gates (predictable before autonomous)
+    <span class="spacer"></span><button class="btn sm pri" onclick="dlgWorkflow()">＋ run workflow</button></h3>
+    <div class="body" id="wfBody"><span class="muted">pick an agent above to see its workflows</span></div></div>
+  <div class="card"><h3>Goal runs</h3><div class="body tablewrap">
+    ${(Array.isArray(goals)&&goals.length)?`<table><thead><tr><th>status</th><th>agent</th>
+      <th>goal</th><th>milestones</th><th>id</th></tr></thead><tbody>
+      ${goals.map(g=>{
+        const last=(g.cycles||[]).slice(-1)[0]; const ms=(last&&last.milestones)||[];
+        const done=ms.filter(x=>x.status==='done').length;
+        const st=String(g.status||"?");
+        const cls=st==='achieved'?'ok':((st==='failed'||st==='exhausted')?'bad':'running');
+        return `<tr>
+        <td><span class="pill ${cls}">${esc(st)}</span></td>
+        <td class="mono">${esc(g.expert||"")}</td>
+        <td>${esc((g.goal||"").slice(0,80))}${g.verdict?`<br><span class="muted" style="font-size:11.5px">judge: ${esc(String(g.verdict).slice(0,90))}</span>`:""}</td>
+        <td class="num">${ms.length?`${done}/${ms.length} <span class="muted">(cycle ${last.n})</span>
+          <button class="btn sm ghost" onclick="planDlg('${esc(g.id||"")}')">plan</button>`:"—"}</td>
+        <td class="mono" style="font-size:11.5px">${esc(g.id||"")}</td></tr>`;}).join("")}
+      </tbody></table>`:`<div class="empty">no goals yet — launch the first above</div>`}
+  </div></div>
+  <div class="card"><h3>Team runs — read them as conversations</h3><div class="body">
+    ${(Array.isArray(teams)&&teams.length)?teams.map(t=>`
+      <div style="border-bottom:1px solid var(--line);padding:9px 0">
+        <div class="row"><span class="pill ${t.driving?"running":(t.status==='done'?'ok':'dim')}">${t.driving?"driving":esc(t.status||"idle")}</span>
+          <b class="mono">${esc(t.id||"")}</b>
+          <span class="muted">${(t.experts||[]).map(esc).join(" + ")}</span>
+          <span class="spacer"></span>
+          <button class="btn sm" onclick="threadDlg('${esc(t.id||"")}')">open thread</button></div>
+        <div class="muted" style="font-size:12.5px;margin:3px 0">${esc((t.goal||"").slice(0,120))}</div>
+        ${t.result_text?`<pre class="out" style="max-height:130px">${esc(t.result_text)}</pre>`:""}
+      </div>`).join(""):`<div class="empty">no team runs yet</div>`}
+  </div></div>`;
+  loadWorkflows();
+}
+/* PLANNING VISIBILITY: the plan is shown BEFORE the work is judged, with the
+   exact command that decides each milestone. */
+async function planDlg(goalId){
+  showDlg("Plan · "+esc(goalId), `<p class="muted">loading…</p>`);
+  const goals = await api('/api/goals');
+  const g = (Array.isArray(goals)?goals:[]).find(x=>x.id===goalId);
+  if (!g){ showDlg("Plan · "+esc(goalId), `<div class="empty">no such goal run</div>`); return; }
+  const cycles = (g.cycles||[]).slice().reverse();
+  showDlg("Plan · "+esc(goalId), `
+    <p><span class="pill ${g.status==='achieved'?'ok':(g.status==='failed'?'bad':'running')}">${esc(g.status||"")}</span>
+      <span class="mono">${esc(g.expert||"")}</span></p>
+    <pre class="out">${esc(g.goal||"")}</pre>
+    ${cycles.map(c=>`<div class="msg"><div class="from">cycle ${c.n}</div>
+      ${(c.milestones||[]).map(ms=>`<div style="font-size:12.5px;margin:4px 0">
+        <span class="pill ${ms.status==='done'?'ok':(ms.status==='failed'?'bad':'dim')}">${esc(ms.status||"planned")}</span>
+        ${esc(ms.goal||ms.text||"")}
+        ${ms.check?`<br><span class="mono muted" style="font-size:11.5px">CHECK ${esc(String(ms.check).slice(0,120))}</span>`:""}
+      </div>`).join("")}
+      ${c.verdict?`<p style="font-size:12.5px"><b>judge:</b> ${esc(String(c.verdict).slice(0,300))}</p>`:""}
+      ${c.overruled?`<p><span class="pill bad">judge overruled</span> <span class="muted" style="font-size:12px">${esc(String(c.overruled).slice(0,200))}</span></p>`:""}
+    </div>`).join("")||`<div class="empty">no cycles yet</div>`}`);
+}
+/* TEAM RUNS AS THREADS: the handoff files ARE the messages. */
+async function threadDlg(runId){
+  showDlg("Team thread · "+esc(runId), `<p class="muted">loading…</p>`);
+  const r = await api('/api/team?run='+encodeURIComponent(runId)+'&files=1');
+  if (!r || r.error){ showDlg("Team thread · "+esc(runId),
+    `<div class="empty">${esc((r&&r.error)||"no such run")}</div>`); return; }
+  const run = r.run||{};
+  showDlg("Team thread · "+esc(runId), `
+    <p><span class="pill ${run.status==='done'?'ok':'dim'}">${esc(run.status||"")}</span>
+      <span class="muted">${(run.experts||[]).map(esc).join(" + ")}</span>
+      ${run.lead?`<span class="pill acc">lead ${esc(run.lead)}</span>`:""}</p>
+    ${(r.messages||[]).map(msg=>`<div class="msg">
+      <div class="from">${esc(msg.from||"")} · ${esc(msg.kind||"")}
+        ${msg.status?`<span class="pill ${msg.status==='done'?'ok':'bad'}">${esc(msg.status)}</span>`:""}
+        <span class="muted" style="font-size:11px">${esc(msg.file||"")}</span></div>
+      <pre>${esc((msg.text||"").slice(0,2500))}</pre></div>`).join("")
+      || `<div class="empty">this run has no files yet</div>`}
+    <p class="muted" style="font-size:12px">Every message here is a file on disk written by
+    the agent that sent it — a team run is a conversation you can audit line by line.</p>`);
+}
+const WF_EXAMPLE = JSON.stringify({name:"draft-review-revise", stages:[
+  {role:"practitioner", goal:"Draft the document on {topic}"},
+  {role:"consultant", goal:"Review the draft: list every factual or structural defect with evidence"},
+  {role:"practitioner", goal:"Revise the draft fixing every listed defect"}]}, null, 1);
+function dlgWorkflow(){
+  const experts=((S.sys&&S.sys.experts)||[]).map(e=>e.name);
+  showDlg("🧵 Run a workflow", `
+    <label class="lb">Agent</label>
+    <select class="field" id="wfExp">${experts.map(e=>`<option>${esc(e)}</option>`).join("")}</select>
+    <label class="lb">Stages (JSON — each stage is a gated task; stage N+1 fires only when N is done)</label>
+    <textarea class="field" id="wfSpec" style="min-height:170px;font-family:IBM Plex Mono,monospace;font-size:12px">${esc(WF_EXAMPLE)}</textarea>
+    <label class="lb">Variables (key=value per line, e.g. topic=pricing)</label>
+    <textarea class="field" id="wfVars" placeholder="topic=our pricing page"></textarea>`,
+    [["Cancel","closeDlg()","ghost"],["Run","doWorkflow()","pri"]]);
+}
+async function doWorkflow(){
+  let spec; try{ spec=JSON.parse(document.getElementById("wfSpec").value); }catch(e){ toast("stages must be valid JSON"); return; }
+  const vars={}; document.getElementById("wfVars").value.split(/\n/).forEach(l=>{const i=l.indexOf("="); if(i>0) vars[l.slice(0,i).trim()]=l.slice(i+1).trim();});
+  const exp=document.getElementById("wfExp").value;
+  const r=await api('/api/experts/'+exp+'/workflow',{method:"POST",body:{spec,vars}});
+  closeDlg(); toast(r.workflow?`workflow ${r.workflow}: ${r.stages} stages armed`:(r.error||"failed"));
+  loadWorkflows(exp);
+}
+async function loadWorkflows(exp){
+  const el=document.getElementById("wfBody"); if(!el) return;
+  exp = exp || ((S.sys&&S.sys.experts&&S.sys.experts[0])||{}).name; if(!exp) return;
+  const list=await api('/api/experts/'+exp+'/workflows');
+  // a workflow is drawn as the PIPELINE it is: each stage a box, the gate
+  // that must pass before the next one is armed shown between them
+  el.innerHTML = (Array.isArray(list)&&list.length)? list.map(w=>`
+    <div style="border-bottom:1px solid var(--line);padding:8px 0">
+      <div class="row"><span class="pill ${w.status==='complete'?'ok':(w.status==='failed'?'bad':'running')}">${esc(w.status)}</span>
+        <b class="mono">${esc(w.id)}</b><span class="when mono">${esc(exp)}</span></div>
+      <div class="row" style="gap:4px;margin-top:6px;flex-wrap:wrap">
+        ${w.stages.map((s,i)=>`${i?`<span class="muted">→</span>`:""}
+          <span class="pill ${s.status==='done'?'ok':(s.status==='failed'?'bad':(s.status==='running'?'running':'dim'))}"
+            title="${esc(s.goal||"")}">${s.n}. ${esc(s.role||"")} · ${esc(s.status)}${
+            s.done_check?" 🔒":""}</span>`).join("")}
+      </div></div>`).join("")
+   : `<span class="muted">no workflows yet on ${esc(exp)} — run one: draft → review → revise is the classic</span>`;
+}
+async function startGoal(){
+  const expert=document.getElementById("gExp").value;
+  const goalTxt=document.getElementById("gGoal").value.trim();
+  if(!goalTxt){toast("write the goal");return;}
+  const r=await api('/api/experts/'+expert+'/goal',{method:"POST",body:{goal:goalTxt}});
+  toast(r.error||"goal engine started — progress appears below");
+  setTimeout(render, 800);
+}
+async function startTeam(){
+  const picks=[...document.querySelectorAll('#tmPick input:checked')].map(x=>x.value);
+  const goalTxt=document.getElementById("tmGoal").value.trim();
+  if(picks.length<2){toast("pick at least two agents");return;}
+  if(!goalTxt){toast("write the team goal");return;}
+  const r=await api('/api/team',{method:"POST",
+    body:{experts:picks, lead:document.getElementById("tmLead").value, goal:goalTxt}});
+  toast(r.run?"team is running — result lands below":(r.error||"failed"));
+  setTimeout(render, 800);
+}
+/* =================================================================
+   MEMORY — the institution: map, search, failures, competence, commons
+================================================================= */
+async function renderMemory(m){
+  const [map, commons] = await Promise.all(
+    [api('/api/memory?view=map'), api('/api/commons')]);
+  S.map = map;
+  const rows = (map&&map.active)?[...map.active,...map.retired]:[];
+  m.innerHTML = `
+  <div class="pagehead"><h1>Memory</h1>
+    <span class="sub">what the whole fleet knows, has done, got right, and got wrong —
+      living and retired alike</span></div>
+  <div class="card"><h3>🔍 Search every mind</h3><div class="body">
+    <div class="row">
+      <input class="field" id="memQ" placeholder="e.g. pricing page · backoff · stale data…"
+        style="flex:1;min-width:200px" onkeydown="if(event.key==='Enter')memSearch()">
+      <select class="field" id="memKind" style="max-width:150px">
+        <option value="">everything</option><option value="knowledge">knowledge</option>
+        <option value="failures">failures</option></select>
+      <button class="btn pri" onclick="memSearch()">search</button></div>
+    <div id="memHits" style="margin-top:10px"></div>
+  </div></div>
+  <div class="card"><h3>🗺 Fleet map — who knows what, proven</h3><div class="body tablewrap">
+    ${rows.length?`<table><thead><tr><th></th><th>agent</th><th>courses</th>
+      <th>demonstrably good at</th><th>failures</th></tr></thead><tbody>
+      ${rows.map(a=>{
+        const best=Object.entries(a.competence||{}).sort((x,y)=>y[1].score-x[1].score).slice(0,3);
+        const f=a.failures||{}; const worst=Object.entries(f.by_category||{}).sort((x,y)=>y[1]-x[1])[0];
+        return `<tr>
+        <td><span class="pill ${a.status==='active'?'running':'dim'}">${a.status}</span></td>
+        <td class="mono">${esc(a.expert)}</td>
+        <td class="num">${(a.courses||[]).length}</td>
+        <td>${best.length?best.map(([dm,bb])=>{
+            const pc=Math.round(bb.score*100);
+            return `<div class="row" style="flex-wrap:nowrap;gap:8px;margin:2px 0">
+              <span style="min-width:92px;font-size:12px">${esc(dm)}</span>
+              <div class="bar ${pc>=80?"ok":""}" style="max-width:110px"><i style="width:${pc}%"></i></div>
+              <span class="num" style="font-size:12px"><b>${pc}%</b></span>
+              <span class="muted" style="font-size:11px;white-space:nowrap">${bb.attempts} verified · ${esc(bb.claim)}</span>
+            </div>`;}).join("")
+          :`<span class="muted">no verified record yet</span>`}</td>
+        <td class="num">${f.total||0}${worst?` <span class="muted">(${esc(worst[0])})</span>`:""}</td>
+        </tr>`;}).join("")}</tbody></table>`
+    :`<div class="empty">the map fills in as agents finish verified work</div>`}
+    <p class="muted" style="font-size:12px;margin-top:8px">Competence is computed from
+    verified outcomes only — never self-reported. Small samples say so.</p>
+  </div></div>
+  <div class="grid2">
+  <div class="card"><h3>❌ Failure ledger — mistakes, kept forever</h3>
+    <div class="body" id="failBody"><span class="muted">loading…</span></div></div>
+  <div class="card"><h3>🌐 Commons — shared fleet knowledge</h3><div class="body">
+    <pre class="out" style="max-height:330px">${esc((commons&&commons.digest)||"(empty — it fills as agents learn lessons and corroborate each other)")}</pre>
+    <p class="muted" style="font-size:12px">An uncited claim stays a <i>candidate</i>
+    until a different agent corroborates it; withdrawals are struck through, never
+    deleted.</p>
+  </div></div>
+  </div>
+  <div class="card"><h3>🗄 Archives — why nothing is ever lost</h3><div class="body">
+    <p style="font-size:13.5px">Three layers under every agent, all browsable in its
+    <b>Mind</b> tab: <span class="mono">contexts/</span> (every conversation),
+    <span class="mono">contexts/archive/</span> (verbatim turns older compaction removed —
+    the never-lose-context tier), and the task archive behind each Board's <b>history</b>
+    toggle. Retired agents keep all three under <span class="mono">retired/</span>.</p>
+  </div></div>`;
+  api('/api/memory?view=failures').then(f=>{
+    const el=document.getElementById("failBody"); if(!el) return;
+    const s=(f&&f.summary)||{}; const rec=(f&&f.recent)||[];
+    el.innerHTML = (s.total?`
+      <div class="row" style="margin-bottom:8px">${Object.entries(s.by_category||{})
+        .sort((a,b)=>b[1]-a[1]).map(([c,n])=>`<span class="pill bad">${esc(c)} ${n}</span>`).join(" ")}</div>
+      <div class="tablewrap"><table><thead><tr><th>agent</th><th>category</th>
+        <th>what happened</th><th>×</th></tr></thead><tbody>
+        ${rec.slice(0,10).map(r=>`<tr><td class="mono">${esc(r.expert)}</td>
+        <td>${esc(r.category)}</td>
+        <td class="muted" style="font-size:12px">${esc((r.cause||"").slice(0,80))}</td>
+        <td class="num">${r.recurrence>1?"×"+r.recurrence:""}</td></tr>`).join("")}
+      </tbody></table></div>
+      <p class="muted" style="font-size:12px">Categories come from the harness's own
+      errors — no model guesses. Records survive the fix so mistakes are never
+      rediscovered.</p>`
+    :`<span class="muted">no failures on record yet — they'll be logged, categorized,
+      and counted here automatically</span>`);
+  });
+}
+async function memSearch(){
+  const q=document.getElementById("memQ").value.trim();
+  if(!q) return;
+  const kind=document.getElementById("memKind").value;
+  const out=document.getElementById("memHits");
+  out.innerHTML=`<span class="muted">searching every mind…</span>`;
+  const r=await api('/api/memory?view=search&q='+encodeURIComponent(q)
+    +(kind?'&kind='+encodeURIComponent(kind):''));
+  const hits=(r&&r.hits)||[];
+  out.innerHTML = hits.length?`<div class="tablewrap"><table><thead><tr>
+    <th>kind</th><th>agent</th><th>match</th></tr></thead><tbody>
+    ${hits.map(h=>`<tr><td><span class="pill ${h.kind==='failure'?'bad':'acc'}">${esc(h.kind)}</span></td>
+    <td class="mono">${esc(h.expert||"—")}</td>
+    <td class="muted" style="font-size:12.5px">${esc((h.text||"").slice(0,130))}
+      ${h.recurrence>1?`<span class="pill bad">×${h.recurrence}</span>`:""}</td></tr>`).join("")}
+    </tbody></table></div>`:`<div class="empty">nothing matched "${esc(q)}"</div>`;
+}
+/* =================================================================
+   MODELS & TOOLS (fleet level)
+================================================================= */
+async function renderModels(m){
+  const sys = await refreshSys();
+  const experts=((sys&&sys.experts)||[]).map(e=>e.name);
+  m.innerHTML = `
+  <div class="pagehead"><h1>Models &amp; Tools</h1>
+    <span class="sub">plug any model from any platform · give agents any tool</span></div>
+  <div class="card"><h3>Model wiring per agent</h3><div class="body">
+    <div class="row"><select class="field" id="mwExp" style="max-width:260px">
+      ${experts.map(e=>`<option>${esc(e)}</option>`).join("")||"<option value=''>no agents yet</option>"}</select>
+      <button class="btn pri" onclick="openAgent(document.getElementById('mwExp').value,'wiring')">open its wiring</button></div>
+    <p class="muted" style="font-size:13px;margin-top:9px">Each agent routes each
+    <b>role</b> to its own provider+model: cheap for studying, strong for building and
+    judging, automatic escalation on repeated errors. Known rails: OpenRouter · TokenRouter · NVIDIA ·
+    Hugging Face · Groq · DeepSeek · Together · Fireworks · Mistral · Cerebras · OpenAI —
+    or any OpenAI-compatible URL. Keys only ever live in <span class="mono">agent.env</span>.</p>
+  </div></div>
+  <div class="card"><h3>Toolbox — what this machine can actually do
+    <span class="spacer"></span><button class="btn sm" onclick="loadToolbox()">scan now</button></h3>
+    <div class="body" id="tbOut"><span class="muted">Press scan — checks binaries
+    (ffmpeg, yt-dlp, git…), Python modules, keys, and your custom tools; agents receive
+    this same list so they use what exists and ask for what doesn't.</span></div></div>
+  <div class="card"><h3>Your own tools</h3><div class="body">
+    <p style="font-size:13.5px">Drop a <span class="mono">tools.json</span> at the fleet
+    home (or inside one agent) — every entry becomes a capability with the exact command:</p>
+    <pre class="out">[{"name":"my_api","cmd":"python tools/my_api.py --json",
+  "desc":"our internal API","ready_check":"python -c \\"import requests\\""}]</pre>
+    <p class="muted" style="font-size:12.5px">A failing <span class="mono">ready_check</span>
+    files it under MISSING so agents never assume a broken tool works.</p>
+    <p style="font-size:13.5px;margin-top:11px"><b>Plug any MCP server</b> — thousands of
+    published tool servers (filesystems, browsers, databases, SaaS) speak the Model
+    Context Protocol. Declare them in <span class="mono">mcp.json</span>:</p>
+    <pre class="out">{"servers": {"files": {"cmd": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-filesystem", "C:/data"]}}}</pre>
+    <p class="muted" style="font-size:12.5px"><span class="mono">python mcp.py catalog</span>
+    lists 8 vetted open-source servers (filesystem, git, fetch, memory, time, sqlite,
+    playwright browser, github) — <span class="mono">python mcp.py enable &lt;name&gt;</span>
+    wires one in after checking its runtime. Every tool call passes the owner&#39;s
+    per-role allowlist and the <b>effects ledger</b>: a retried task never repeats a
+    side effect (one email, not three).</p>
+    <p class="muted" style="font-size:12.5px">Agents discover them in their toolbox note
+    and call them via <span class="mono">python mcp.py call &lt;server&gt; &lt;tool&gt;</span>.
+    Every result comes back fenced as DATA under the grounding contract — a poisoned
+    page fetched through a tool cannot steer the agent. The fleet is also discoverable
+    by other ecosystems via an <b>A2A v1.0</b> agent card at
+    <span class="mono">/.well-known/agent-card.json</span> (Federation).</p>
+  </div></div>`;
+}
+async function loadToolbox(){
+  const el=document.getElementById("tbOut");
+  el.innerHTML=`<span class="muted">scanning…</span>`;
+  const r=await api('/api/toolbox');
+  const caps=r.capabilities||{};
+  const ready=Object.entries(caps).filter(([,c])=>c.ready);
+  const miss=Object.entries(caps).filter(([,c])=>!c.ready);
+  el.innerHTML = `
+    ${ready.length?`<label class="lb">Ready</label><div class="row">
+      ${ready.map(([n,c])=>`<span class="pill ok" title="${esc(c.how||"")}">${esc(n)}</span>`).join(" ")}</div>`:""}
+    ${miss.length?`<label class="lb">Missing (agents will ask instead of pretending)</label>
+      <div class="row">${miss.map(([n])=>`<span class="pill dim">${esc(n)}</span>`).join(" ")}</div>`:""}
+    ${(!ready.length&&!miss.length)?`<pre class="out">${esc(JSON.stringify(r,null,2).slice(0,3000))}</pre>`:""}`;
+}
+/* =================================================================
+   SYSTEM — health, pulses, spend, remote
+================================================================= */
+async function renderSystem(m){
+  const d = await refreshSys();
+  m.innerHTML = `
+  <div class="pagehead"><h1>System</h1>
+    <span class="sub">health, heartbeats, budgets, and keeping it alive 24/7</span></div>
+  <div class="card"><h3>🩺 Doctor — one verdict for the whole platform
+    <span class="spacer"></span><button class="btn sm pri" onclick="runDoctor(this)">run doctor</button></h3>
+    <div class="body" id="sysDoc"><span class="muted">Checks runtime, anatomy, every
+    agent's settings and memory integrity, provider keys, wedged loops, oversized state.
+    Run it whenever anything feels off.</span></div></div>
+  <div class="card"><h3>💓 Pulses — is every loop truly alive?</h3><div class="body tablewrap">
+    ${d&&d.experts.length?`<table><thead><tr><th>agent</th><th>pulse</th><th>doing</th>
+      <th>today</th><th></th></tr></thead><tbody>
+      ${d.experts.map(e=>`<tr>
+        <td class="mono">${esc(e.name)}</td>
+        <td>${hb(e.heartbeat,e.running)}</td>
+        <td class="muted" style="font-size:12px">${e.heartbeat&&e.heartbeat.task
+          ?esc((e.heartbeat.role||"")+" · "+e.heartbeat.task):(e.running?"idle":"—")}</td>
+        <td class="num">${usd(e.spend_today_usd)}</td>
+        <td><button class="btn sm" onclick="toggleRun('${esc(e.name)}',${e.running})">${e.running?"stop":"start"}</button></td>
+      </tr>`).join("")}</tbody></table>
+      <p class="muted" style="font-size:12px"><b>alive</b> = pulsed &lt;90s ago ·
+      <b>stalled</b> = claims to run but the pulse is old (restart it) ·
+      <b>off</b> = not running. Budgets: every task has a dollar ceiling and a daily
+      breaker; a stopped agent costs $0.</p>`
+    :`<div class="empty">no agents yet</div>`}
+  </div></div>
+  <div class="card"><h3>🌐 Federation — other owners' fleets, zero implicit trust
+    <span class="spacer"></span><button class="btn sm pri" onclick="dlgPublish()">publish card</button></h3>
+    <div class="body" id="fedBody"><span class="muted">loading…</span></div></div>
+  <div class="grid2">
+  <div class="card"><h3>📱 From your phone / always-on</h3><div class="body">
+    <p style="font-size:13px"><b>Anywhere access:</b>
+      <span class="mono">python ui.py --host 0.0.0.0 --token YOURTOKEN</span> behind
+      Tailscale (<span class="mono">setup-remote.sh</span>) → this exact panel, private
+      HTTPS, no open ports. The panel asks for the token once and remembers it.</p>
+    <p style="font-size:13px"><b>24/7:</b> <span class="mono">setup-vps.sh</span> installs
+    systemd units so loops and this panel restart on boot and after crashes; state
+    survives kill −9 with at most one step lost.</p>
+  </div></div>
+  <div class="card"><h3>🧰 Harness manifest — the engine as an inspectable object
+    <span class="spacer"></span><button class="btn sm" onclick="loadHarness()">inspect</button></h3>
+    <div class="body" id="harnessBody"><span class="muted">Every component read from
+    the code and settings that actually run: tools and who may hold them, the gates,
+    the policies, memory tiers, budgets, loop events, and file hashes. Nothing
+    inferred by a model.</span></div></div>
+  <div class="card"><h3>🔧 Tool health — which tool is actually failing
+    <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:12px">
+      error rates per tool, fleet-wide</span></h3>
+    <div class="body" id="toolStats"><span class="muted">loading…</span></div></div>
+  <div class="card"><h3>⏰ Routines — tasks that worked, now standing arrangements
+    <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:12px">
+      saved from a finished task, gate included</span></h3>
+    <div class="body" id="routineBody"><span class="muted">loading…</span></div></div>
+  <div class="card"><h3>⚙ Facts</h3><div class="body">
+    <table>
+      <tr><td class="muted">fleet home</td><td class="mono" style="font-size:12px">${esc(d?d.root:"")}</td></tr>
+      <tr><td class="muted">python</td><td class="mono">${esc(d?d.python:"")}</td></tr>
+      <tr><td class="muted">spend today</td><td class="num">${usd(d?d.spend_today_usd:0)}</td></tr>
+      <tr><td class="muted">tasks total</td><td class="num">${d?Object.values(d.totals).reduce((a,b)=>a+b,0):0}
+        <span class="muted">(done ${d?d.totals.done:0} · failed ${d?d.totals.failed:0})</span></td></tr>
+    </table>
+    <p class="muted" style="font-size:12px;margin-top:8px">Finished work is archived, not
+    deleted — the hot queue stays fast forever and each Board's <b>history</b> toggle
+    reads everything back.</p>
+  </div></div>
+  </div>`;
+  loadFederation();
+  loadToolStats(d);
+  loadRoutines();
+}
+async function loadToolStats(d){
+  const el=document.getElementById("toolStats"); if(!el) return;
+  const rows=(d&&d.tool_stats)||[];
+  el.innerHTML = rows.length ? `<div class="tablewrap"><table>
+    <thead><tr><th>tool</th><th>calls</th><th>errors</th><th>error rate</th><th>cost</th></tr></thead>
+    <tbody>${rows.map(r=>`<tr><td class="mono">${esc(r.tool)}</td><td class="num">${r.calls}</td>
+      <td class="num">${r.errors}</td>
+      <td class="num"><span class="pill ${r.error_rate>0.25?"bad":(r.error_rate>0.05?"warn":"ok")}">${
+        (r.error_rate*100).toFixed(1)}%</span></td>
+      <td class="num">${usd(r.cost_usd)}</td></tr>`).join("")}</tbody></table></div>
+    <p class="muted" style="font-size:11.5px;margin:8px 0 0">Tool errors are counted apart from
+    model errors on purpose: "the agent is flaky" is nearly always "one tool is flaky".</p>`
+    : `<span class="muted">no tool calls logged yet</span>`;
+}
+async function loadRoutines(){
+  const el=document.getElementById("routineBody"); if(!el) return;
+  // System is a fleet-level view: fall back to the first agent rather than
+  // showing an empty card that blames the reader
+  const who = S.sel || ((S.sys&&S.sys.experts&&S.sys.experts[0])||{}).name;
+  if(!who){ el.innerHTML=`<span class="muted">no agents yet</span>`; return; }
+  S.routineFor = who;
+  const rows=await api('/api/experts/'+who+'/routines');
+  const list=Array.isArray(rows)?rows:[];
+  el.innerHTML = list.length ? `<div class="tablewrap"><table>
+    <thead><tr><th>routine</th><th>when</th><th>state</th><th>gate</th><th></th></tr></thead>
+    <tbody>${list.map(r=>`<tr><td class="mono">${esc(r.name)}</td>
+      <td>${esc(r.when&&r.when.kind||"")} ${esc(String(r.when&&(r.when.n||r.when.iso||r.when.name)||""))}</td>
+      <td><span class="pill ${r.status==="armed"?"ok":"dim"}">${esc(r.status)}</span></td>
+      <td>${r.done_check?`<span class="pill acc">gated</span>`:`<span class="pill bad">no gate</span>`}</td>
+      <td><button class="btn sm warn" onclick="cancelRoutine('${esc(r.name)}')">cancel</button></td></tr>`).join("")}
+    </tbody></table></div>
+    <p class="muted" style="font-size:11.5px;margin:8px 0 0">showing
+      <b class="mono">${esc(who)}</b>. Each routine is a skill written from the run
+      that worked plus the schedule that repeats it, carrying the same gate.</p>`
+    : `<span class="muted">no routines on <b class="mono">${esc(who)}</b> yet — finish a
+       task, open it on the Board and press <b>save as routine</b></span>`;
+}
+async function cancelRoutine(name){
+  const who = S.routineFor || S.sel;
+  const r=await api('/api/experts/'+who+'/routine',{method:"POST",body:{op:"cancel",name}});
+  toast(r.error||("routine "+name+" cancelled")); loadRoutines();
+}
+async function loadHarness(){
+  const el=document.getElementById("harnessBody"); if(!el) return;
+  el.innerHTML=`<span class="muted">reading the harness…</span>`;
+  const h=await api('/api/harness'); if(!h||h.error){el.innerHTML=`<span class="muted">unavailable</span>`;return;}
+  const m=h.manifest||{}; const probs=h.contracts||[]; const rd=h.readiness||{items:[]};
+  const sec=(title,body)=>`<details style="margin:6px 0"><summary style="cursor:pointer;font-weight:600">${title}</summary><div style="margin:6px 0 4px 12px">${body}</div></details>`;
+  el.innerHTML = `<div class="row" style="margin-bottom:8px">
+      <span class="pill ${probs.length?"bad":"ok"}">${probs.length?probs.length+" contract problem(s)":"contracts hold"}</span>
+      <span class="pill ${rd.ready?"ok":"warn"}">${rd.ready?"ready to run":"not ready"}</span>
+      <span class="pill dim">harness ${esc(m.harness_version||"")}</span></div>
+    ${probs.length?`<pre class="out">${esc(probs.join("\\n"))}</pre>`:""}
+    ${sec(`Tools (${(m.tools||[]).length})`, (m.tools||[]).map(t=>`<div><b class="mono">${esc(t.name)}</b>
+      <span class="muted" style="font-size:12px">${esc(t.description)}</span>
+      ${t.denied_roles&&t.denied_roles.length?`<span class="pill dim">denied: ${esc(t.denied_roles.join(", "))}</span>`:""}</div>`).join(""))}
+    ${sec(`Gates (${(m.gates||[]).length})`, (m.gates||[]).map(g=>`<div><b>${esc(g.name)}</b> — <span class="muted" style="font-size:12px">${esc(g.what)}</span> <span class="pill dim">${esc(g.limit)}</span></div>`).join(""))}
+    ${sec("Policies", `<div>shell deny rules: ${(m.policies||{}).shell_deny_rules?m.policies.shell_deny_rules.length:0} · owner deny rules: ${(m.policies||{}).owner_deny_rules||0} · sandbox: <b class="mono">${esc((m.policies||{}).sandbox||"host")}</b></div>
+      <div>protected charters: ${((m.policies||{}).protected_charters||[]).map(x=>`<span class="pill dim">${esc(x)}</span>`).join(" ")}</div>
+      <div>MCP servers: ${Object.keys((m.policies||{}).mcp_servers||{}).map(x=>`<span class="pill acc">${esc(x)}</span>`).join(" ")||"<span class='muted'>none</span>"}</div>`)}
+    ${sec(`Memory tiers (${(m.memory_tiers||[]).length})`, (m.memory_tiers||[]).map(t=>`<div><b>${esc(t.tier)}</b> <span class="mono muted" style="font-size:11.5px">${esc(t.where)}</span></div>`).join(""))}
+    ${sec("Budgets", `<table>${Object.entries(m.budgets||{}).map(([k,v])=>`<tr><td class="mono">${esc(k)}</td><td class="num">${esc(String(v))}</td></tr>`).join("")}</table>`)}
+    ${sec(`Loop events (${(m.loop_events||[]).length})`, `<div class="mono" style="font-size:11.5px">${esc((m.loop_events||[]).join(" · "))}</div>`)}
+    ${sec("Versions", `<div class="mono" style="font-size:11.5px">${Object.entries((m.versions||{}).code||{}).map(([f,h])=>`${esc(f)} ${esc(h)}`).join(" · ")}</div>`)}`;
+}
+async function loadFederation(){
+  const el=document.getElementById("fedBody"); if(!el) return;
+  const f=await api('/api/federation'); if(!f||f.error){el.innerHTML=`<span class="muted">unavailable</span>`;return;}
+  const peers=Object.entries(f.peers||{});
+  el.innerHTML = `<div class="row" style="margin-bottom:8px">
+      <span class="kchip"><b class="mono" style="font-size:12px">${esc(f.fleet_id)}</b>fleet id</span>
+      <span class="kchip"><b class="mono" style="font-size:12px">${esc(f.fingerprint)}</b>key fingerprint (never the secret)</span></div>
+    <p style="font-size:13px"><b>Published card:</b> ${f.card?
+      (f.card.skills||[]).map(sk=>`<span class="pill acc">${esc(sk.expert)}</span>`).join(" ")+
+      ` <span class="muted">→ discoverable by any A2A v1.0 client at <span class="mono">${esc(f.well_known)}</span></span>`
+      :`<span class="muted">none — nothing is exposed until you publish</span>`}</p>
+    <p style="font-size:13px"><b>Trusted peers:</b> ${peers.length?peers.map(([id,p])=>
+      `<span class="pill dim">${esc(p.name||id)} · ${(p.skills||[]).length} expert(s)</span>`).join(" ")
+      :`<span class="muted">none — trust a peer's card with <span class="mono">python federation.py trust card.json</span></span>`}</p>
+    <p class="muted" style="font-size:11.5px">Unknown fleets, forged signatures, and unexposed experts are
+    refused before any model call; peer answers are filed as UNTRUSTED EVIDENCE.</p>`;
+}
+function dlgPublish(){
+  const names=((S.sys&&S.sys.experts)||[]).map(e=>e.name);
+  showDlg("🌐 Publish this fleet's Agent Card", `
+    <label class="lb">Expose these experts (others may ask them; answers stay citation-gated)</label>
+    <div class="row" id="pubPick">${names.map(n=>`<label class="kchip" style="cursor:pointer">
+      <input type="checkbox" value="${esc(n)}"> ${esc(n)}</label>`).join("")||"<span class='muted'>no agents yet</span>"}</div>
+    <label class="lb">Fleet name</label><input class="field" id="pubName" placeholder="e.g. Reda's Fleet">
+    <label class="lb">Public endpoint (your federation server URL)</label>
+    <input class="field" id="pubEp" placeholder="https://fleet.example.com:7900">`,
+    [["Cancel","closeDlg()","ghost"],["Publish","doPublish()","pri"]]);
+}
+async function doPublish(){
+  const expose=[...document.querySelectorAll('#pubPick input:checked')].map(x=>x.value);
+  const r=await api('/api/federation',{method:"POST",body:{expose,
+    name:document.getElementById("pubName").value.trim(),
+    endpoint:document.getElementById("pubEp").value.trim()}});
+  closeDlg(); toast(r.published?`card published exposing ${r.published.length} expert(s)`:(r.error||"failed"));
+  loadFederation();
+}
+/* =================================================================
+   BOOT + auto-refresh
+================================================================= */
+/* LIVE EVENTS (AG-UI style): the panel stops asking "anything new?" every six
+   seconds and simply watches. Each line an agent writes arrives here as an
+   event; the pulse grows in place. Polling stays as the fallback for browsers
+   or proxies that will not keep a stream open. */
+const EV_KINDS = ["task_start","tool_call","task_end","done_refused",
+  "approval_required","prospective_fired","escalated","retry_queued",
+  "premise_warning","model_routed","ui_card","health_ritual","stop_condition",
+  "gotcha_filed","failure_recurred","skill_status","budget_exceeded"];
+function connectEvents(){
+  if (!window.EventSource || S.es) return;
+  const t = token();
+  let url = '/api/events'; if (t) url += '?token='+encodeURIComponent(t);
+  let es;
+  try { es = new EventSource(url); } catch(e){ return; }
+  S.es = es;
+  S.live = [];
+  const push = (ev)=>{
+    try { const row = JSON.parse(ev.data); S.live.unshift(row);
+      S.live = S.live.slice(0,60); S.streamed = true; paintLive(row);
+    } catch(e){}
+  };
+  EV_KINDS.forEach(k=>es.addEventListener(k, push));
+  es.addEventListener("ready", ()=>{ S.streamOn = true; paintLive(null); });
+  es.onerror = ()=>{ S.streamOn = false; try{es.close();}catch(e){} S.es=null;
+    setTimeout(connectEvents, 5000); };
+}
+function feedRowHtml(r){
+  return `<div class="frow"><span class="fdot ${esc(r.severity||"info")}"></span>
+    <span class="who">${esc(r.expert||"")}</span>
+    <span>${esc(r.text||"")}${r.detail&&r.detail.times?` (×${r.detail.times})`:""}</span>
+    <span class="when">${ago(r.at)}</span></div>`;
+}
+function paintLive(row){
+  const dot = document.getElementById("liveDot");
+  if (dot){ dot.className = "pill " + (S.streamOn ? "ok" : "dim");
+    dot.textContent = S.streamOn ? "live" : "polling"; }
+  const el = document.getElementById("pulse");
+  if (!el || !S.live.length) return;
+  el.innerHTML = S.live.slice(0,40).map(feedRowHtml).join("");
+  if (row && row.event==="approval_required" && S.view!=="home"){
+    toast(row.expert + " needs your sign-off");
+  }
+}
+(function boot(){
+  const h = new URLSearchParams(location.hash.slice(1));
+  if (h.get("t")) { localStorage.setItem("fleet_token", h.get("t"));
+    history.replaceState(null,"",location.pathname); }
+  render();
+  connectEvents();
+  S.timer = setInterval(()=>{
+    if (document.hidden || typing()) return;
+    if (document.getElementById("ovl").classList.contains("show")) return;
+    // while the stream is open, Home and the Board repaint from events, so
+    // the poll only refreshes the heavier views
+    if (S.streamOn && !S.sel && (S.view==="home")) { refreshSys(); return; }
+    render();
+  }, 6000);
+})();
+</script>
+</body>
+</html>

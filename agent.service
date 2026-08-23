@@ -1,0 +1,34 @@
+# systemd unit for the 24/7 agent. Install on the VPS:
+#   sudo cp agent.service /etc/systemd/system/agent.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now agent
+#
+# Assumes a dedicated unprivileged user "agent" with the repo at
+# /home/agent/agent and API keys in /home/agent/agent.env (chmod 600):
+#   DEEPSEEK_API_KEY=...
+#   GROQ_API_KEY=...
+#   OPENROUTER_API_KEY=...
+
+[Unit]
+Description=24/7 learning and execution agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=agent
+Group=agent
+WorkingDirectory=/home/agent/agent
+EnvironmentFile=/home/agent/agent.env
+ExecStart=/usr/bin/python3 /home/agent/agent/loop.py run --root /home/agent/agent
+Restart=always
+RestartSec=5
+
+# hardening — the worst case should stay "wasted credits", not worse
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/agent/agent
+
+[Install]
+WantedBy=multi-user.target

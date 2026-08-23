@@ -1,0 +1,45 @@
+# ---- credentials: never versioned -----------------------------------------
+agent.env
+ui-token.txt
+cookies.txt
+bootstrap.json
+federation/identity.json
+keys/
+.keys/
+secrets/
+*.key
+*.pem
+*.p12
+*.pfx
+
+# ---- per-expert state and memory ------------------------------------------
+# The CODE is versioned; the MINDS are not. An expert's world is its own
+# history — back it up with backup.py, which excludes credentials properly.
+experts/
+retired/
+teamwork/
+demo-run*/
+backups/
+commons/
+
+# ---- generated at runtime --------------------------------------------------
+logs/
+contexts/
+checkpoints/
+events/
+approvals/
+consults/
+goals/
+inbox/
+state.json
+state.json.corrupt-*
+spend-*.json
+briefing.md
+commons-digest.md
+
+# ---- python / os -----------------------------------------------------------
+__pycache__/
+*.pyc
+*.tmp
+tests/tmp/
+.DS_Store

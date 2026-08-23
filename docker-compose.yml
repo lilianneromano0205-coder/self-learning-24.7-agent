@@ -1,0 +1,24 @@
+# docker compose up -d   — the whole system, sandboxed, on any machine.
+# Put your keys in agent.env first (see agent.env.example).
+services:
+  fleet:
+    build: .
+    container_name: expert-fleet
+    restart: always
+    env_file: [agent.env]
+    ports:
+      - "127.0.0.1:7777:7777"   # localhost only; publish via Tailscale
+    volumes:
+      - fleet-experts:/home/agent/agent/experts
+    # resource brakes: a runaway agent cannot take the host with it
+    mem_limit: 2g
+    pids_limit: 512
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request;urllib.request.urlopen('http://127.0.0.1:7777/api/system',timeout=5)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+volumes:
+  fleet-experts:

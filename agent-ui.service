@@ -1,0 +1,33 @@
+# The Expert Fleet control panel as a service. Install:
+#   sudo cp agent-ui.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now agent-ui
+#
+# Bound to localhost by default — reach it from anywhere via Tailscale
+# (recommended: install tailscale on the VPS and your phone/laptop, then
+# `tailscale serve 7777` gives you a private HTTPS URL) or via an HTTPS
+# reverse proxy (Caddy). To bind directly on a private tailnet instead, add
+# `--host 0.0.0.0` (token auth switches on automatically; the token is
+# printed and saved to ui-token.txt).
+
+[Unit]
+Description=Expert Fleet control panel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=agent
+Group=agent
+WorkingDirectory=/home/agent/agent
+EnvironmentFile=/home/agent/agent.env
+ExecStart=/usr/bin/python3 /home/agent/agent/ui.py --home /home/agent/agent --port 7777
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/agent/agent
+
+[Install]
+WantedBy=multi-user.target

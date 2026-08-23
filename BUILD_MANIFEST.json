@@ -1,0 +1,4183 @@
+{
+ "audit": {
+  "generated": "2026-08-22T19:16:09",
+  "auditor": "forensic read-only pass",
+  "repository_path": "C:\\Users\\redab\\OneDrive\\Bureau\\self learning 24.7 agent\\agent",
+  "version_control": "NONE - not a git repository (git rev-parse failed)",
+  "platform_version_constant": "harness.HARNESS_VERSION",
+  "python_runtime_used": "3.14.0",
+  "passes": [
+   {
+    "pass": 1,
+    "depth": "hub modules read fully; remainder by AST/interface/tests",
+    "outcome": "5 P1, 3 P2, 2 P3; ended stating not every component was inspected"
+   },
+   {
+    "pass": 2,
+    "depth": "all 31 remaining modules + all 2698 lines of ui.html read line-by-line",
+    "outcome": "2 P0, 7 further P1, plus P2/P3; recurring secondary-path pattern confirmed in 9 subsystems"
+   }
+  ],
+  "non_python_read_fully": [
+   "ui.html (2698 lines)",
+   "settings.toml",
+   "prompts/*.md (10 files)"
+  ],
+  "product_modified": false,
+  "integrity_recheck": "all 58 module sha256_12 values re-verified unchanged after every reproduction",
+  "reproductions": [
+   {
+    "id": "P0-1",
+    "claim": "panel has no CSRF protection",
+    "result": "REPRODUCED",
+    "evidence": "cross-origin text/plain POSTs created an expert, queued a task, started a loop, shut down the panel"
+   },
+   {
+    "id": "P0-2",
+    "claim": "CSRF escalates to arbitrary command execution",
+    "result": "REPRODUCED",
+    "evidence": "done_check from request body executed on host; marker file written"
+   },
+   {
+    "id": "P1-1",
+    "claim": "gate executes shell outside policy/sandbox with full env",
+    "result": "REPRODUCED",
+    "evidence": "gate saw planted env marker; run_command saw ABSENT"
+   },
+   {
+    "id": "P1-5",
+    "claim": "backups archive credentials in plaintext",
+    "result": "REPRODUCED",
+    "evidence": "keys/openai.key archived while reporting '2 credential file(s) deliberately excluded'"
+   },
+   {
+    "id": "P1-6",
+    "claim": "write_file reaches settings/prompts/ledgers",
+    "result": "REPRODUCED",
+    "evidence": "settings.toml, prompts/*.md, prospective.json, approvals/*.json all writable"
+   },
+   {
+    "id": "P1-7",
+    "claim": "ingestion reads local files via file://",
+    "result": "REPRODUCED",
+    "evidence": "file:///secret.txt content written into a lesson file"
+   },
+   {
+    "id": "P1-8",
+    "claim": "unsanitised course escapes the expert root",
+    "result": "REPRODUCED",
+    "evidence": "gotchas wrote courses/../../ESCAPED/gotchas.md outside the root"
+   },
+   {
+    "id": "P1-12",
+    "claim": "a skill file can declare itself trusted",
+    "result": "REPRODUCED",
+    "evidence": "provenance: own with no graph entry -> script_guard returned None"
+   },
+   {
+    "id": "NEG-1",
+    "claim": "zip-slip in unpack_archive",
+    "result": "DID NOT REPRODUCE",
+    "evidence": "4 traversal members all refused; only the legitimate member extracted"
+   },
+   {
+    "id": "NEG-2",
+    "claim": "upload path traversal",
+    "result": "DID NOT REPRODUCE",
+    "evidence": "9 vectors incl. Windows drive letters all contained"
+   },
+   {
+    "id": "NEG-3",
+    "claim": "XSS in ui.html",
+    "result": "DID NOT REPRODUCE",
+    "evidence": "esc() applied at every insertion point; renderCard escapes all model fields"
+   },
+   {
+    "id": "NEG-4",
+    "claim": "keys stored in settings.toml",
+    "result": "DID NOT REPRODUCE",
+    "evidence": "only api_key_env names; the documented model is sound"
+   },
+   {
+    "id": "NEG-5",
+    "claim": "model can poison the commons",
+    "result": "DID NOT REPRODUCE",
+    "evidence": "note() has no product caller; commons lives outside _safe_path's root"
+   }
+  ],
+  "invariant_coverage": {
+   "total": 20,
+   "hold": 4,
+   "hold_with_limits": 3,
+   "prompt_or_config_enforced_only": 2,
+   "broken_on_at_least_one_path": 11,
+   "note": "in 10 of 11 broken cases the primary path is defended and an alternate path is not"
+  },
+  "untested_modules": [
+   "locks.py",
+   "evidence.py",
+   "package.py"
+  ],
+  "secondary_path_bypasses": {
+   "command_execution": {
+    "guarded": 1,
+    "unguarded": 5
+   },
+   "filesystem_writes": {
+    "guarded": 1,
+    "unguarded": 5
+   },
+   "credential_resolution": {
+    "sources": 4,
+    "subsystems": 6,
+    "agreeing": 0
+   },
+   "spend_accounting": {
+    "counted": 1,
+    "uncounted": 3
+   }
+  },
+  "coverage_statement": "All 58 top-level modules read line-by-line, plus ui.html (2698 lines), settings.toml and the 10 prompt files. No module remains structurally-inventoried only."
+ },
+ "totals": {
+  "modules": 58,
+  "module_lines": 19762,
+  "tests": 81,
+  "test_lines": 10642,
+  "test_assertions": 1466,
+  "test_section_markers": 316
+ },
+ "dependency_model": {
+  "third_party_required": [],
+  "third_party_optional": [
+   "pymupdf (fitz)",
+   "docling",
+   "markitdown"
+  ],
+  "external_binaries_optional": [
+   "ffmpeg",
+   "pandoc",
+   "yt-dlp",
+   "docker",
+   "node"
+  ],
+  "note": "core + full test suite run on stdlib only; optional packages gate specific ingestion paths and exit with an install hint"
+ },
+ "modules": [
+  {
+   "file": "approvals.py",
+   "sha256_12": "2b7cfeb60868",
+   "lines": 147,
+   "subsystem": "governance",
+   "purpose": "Approval-gated side effects \u2014 the human in the loop, as a mechanism.",
+   "entry_point": true,
+   "cli_subcommands": [
+    "deny",
+    "grant",
+    "list"
+   ],
+   "public_functions": [
+    "_dir",
+    "approval_id",
+    "_path",
+    "load",
+    "request",
+    "decide",
+    "status_of",
+    "pending",
+    "history",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "locks"
+   ],
+   "imported_by": [
+    "chief",
+    "mcp",
+    "preflight",
+    "ui"
+   ],
+   "writes_state": false,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": true,
+   "emits_events": [],
+   "tested_by": [
+    "test_approvals.py",
+    "test_faults.py",
+    "test_panel_v2.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "backup.py",
+   "sha256_12": "b3c0dd9bfdad",
+   "lines": 321,
+   "subsystem": "control-plane",
+   "purpose": "BACKUP AND RESTORE \u2014 the fleet's memory is the asset, so it is portable.",
+   "entry_point": true,
+   "cli_subcommands": [
+    "create",
+    "list",
+    "restore",
+    "verify"
+   ],
+   "public_functions": [
+    "_version",
+    "_sha",
+    "_walk",
+    "create",
+    "read_manifest",
+    "verify",
+    "_verify_inner",
+    "restore",
+    "backups",
+    "latest",
+    "age_days",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "harness"
+   ],
+   "imported_by": [
+    "preflight",
+    "ui"
+   ],
+   "writes_state": true,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": true,
+   "emits_events": [],
+   "tested_by": [
+    "test_backup.py",
+    "test_preflight.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "benchmark.py",
+   "sha256_12": "fab17d4ddd64",
+   "lines": 284,
+   "subsystem": "governance",
+   "purpose": "Lift benchmark \u2014 what does the harness actually add to the rented model?",
+   "entry_point": true,
+   "cli_subcommands": [
+    "run",
+    "suite"
+   ],
+   "public_functions": [
+    "check_cmd",
+    "run_check",
+    "clean",
+    "bare_arm",
+    "constraints_kept",
+    "harness_arm",
+    "summarize",
+    "report",
+    "run",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "loop"
+   ],
+   "imported_by": [
+    "ui"
+   ],
+   "writes_state": false,
+   "executes_commands": true,
+   "network": false,
+   "reads_env": true,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_benchmark.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "bootstrap.py",
+   "sha256_12": "9e9a9e713b6a",
+   "lines": 293,
+   "subsystem": "control-plane",
+   "purpose": "ONE COMMAND TO RUN THE PLATFORM TODAY.",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "_env_path",
+    "ensure_env",
+    "load_env",
+    "seed_home",
+    "first_expert",
+    "probe",
+    "teach",
+    "start_panel",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "doctor",
+    "fleet",
+    "ingest",
+    "loop"
+   ],
+   "imported_by": [],
+   "writes_state": true,
+   "executes_commands": true,
+   "network": true,
+   "reads_env": true,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [],
+   "read_line_by_line": true
+  },
+  {
+   "file": "candidates.py",
+   "sha256_12": "87dd248a6874",
+   "lines": 385,
+   "subsystem": "governance",
+   "purpose": "TEST-TIME COMPUTE \u2014 spend thinking, not parameters, and keep the best.",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "written_paths",
+    "_wants_citations",
+    "_grounding",
+    "_honesty",
+    "_interface",
+    "_spec",
+    "score",
+    "rank",
+    "_dir",
+    "snapshot",
+    "restore",
+    "stash",
+    "promote",
+    "attempts_for",
+    "history",
+    "explain",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "citecheck",
+    "conflicts",
+    "designcheck",
+    "loop"
+   ],
+   "imported_by": [
+    "confidence"
+   ],
+   "writes_state": true,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_candidates.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "cases.py",
+   "sha256_12": "2a53d5842aaa",
+   "lines": 252,
+   "subsystem": "memory",
+   "purpose": "THE CASE LEDGER \u2014 did the fix actually work?",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "_path",
+    "words",
+    "_read",
+    "_append",
+    "load",
+    "case_id",
+    "open_case",
+    "record_fix",
+    "matching",
+    "render",
+    "stats",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [],
+   "imported_by": [
+    "context",
+    "loop"
+   ],
+   "writes_state": true,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": false,
+   "emits_events": [
+    "fixed",
+    "opened",
+    "recurred"
+   ],
+   "tested_by": [
+    "test_cases.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "checkpoint.py",
+   "sha256_12": "aa1438cc8942",
+   "lines": 135,
+   "subsystem": "harness-loop",
+   "purpose": "Fiber-style checkpoints for long tool work \u2014 recover, don't restart.",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "key_for",
+    "_atomic_write",
+    "list_checkpoints"
+   ],
+   "classes": [
+    "Checkpoint"
+   ],
+   "local_imports": [],
+   "imported_by": [
+    "ingest",
+    "ui"
+   ],
+   "writes_state": true,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": true,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_checkpoint.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "chief.py",
+   "sha256_12": "7bfc4cfe4f42",
+   "lines": 301,
+   "subsystem": "control-plane",
+   "purpose": "Chief of Staff \u2014 the Personal Strategic Operator.",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "_load_json",
+    "_tail",
+    "briefing",
+    "render_markdown",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "approvals",
+    "fleet",
+    "goal",
+    "loop",
+    "memory",
+    "prospective",
+    "skills"
+   ],
+   "imported_by": [
+    "doctor",
+    "ui"
+   ],
+   "writes_state": true,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": true,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_approvals.py",
+    "test_chief.py",
+    "test_ecosystem.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "citecheck.py",
+   "sha256_12": "dcbd80578923",
+   "lines": 86,
+   "subsystem": "governance",
+   "purpose": "Citation gate for consultations \u2014 zero room for hallucinated authority.",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "known_atoms",
+    "check",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [],
+   "imported_by": [
+    "candidates",
+    "confidence",
+    "premise",
+    "research"
+   ],
+   "writes_state": false,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_consult.py",
+    "test_faults.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "commons.py",
+   "sha256_12": "3c9c923b063a",
+   "lines": 404,
+   "subsystem": "memory",
+   "purpose": "The Commons \u2014 shared memory for the whole fleet, plus peer consultation.",
+   "entry_point": true,
+   "cli_subcommands": [
+    "ask",
+    "learn",
+    "note",
+    "show"
+   ],
+   "public_functions": [
+    "commons_dir",
+    "_append",
+    "learn",
+    "note",
+    "quarantine",
+    "refresh_directory",
+    "_lesson_entries",
+    "_shape",
+    "curate",
+    "digest",
+    "write_digest",
+    "ask",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "consult",
+    "fleet"
+   ],
+   "imported_by": [
+    "goal",
+    "ui"
+   ],
+   "writes_state": true,
+   "executes_commands": true,
+   "network": false,
+   "reads_env": true,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_federation.py",
+    "test_goal.py",
+    "test_memory_kinds.py",
+    "test_panel_v2.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "confidence.py",
+   "sha256_12": "0d660ed48bc7",
+   "lines": 281,
+   "subsystem": "governance",
+   "purpose": "CONFIDENCE \u2014 spend compute in proportion to doubt, not in proportion to habit.",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "_competence",
+    "_experience",
+    "_wants_citations",
+    "_grounding",
+    "_evidence",
+    "_contested",
+    "_premise",
+    "_friction",
+    "score",
+    "render",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "candidates",
+    "citecheck",
+    "conflicts",
+    "gotchas",
+    "loop",
+    "memory",
+    "premise",
+    "skills"
+   ],
+   "imported_by": [
+    "loop"
+   ],
+   "writes_state": false,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_cases.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "conflicts.py",
+   "sha256_12": "d3a016839f11",
+   "lines": 467,
+   "subsystem": "memory",
+   "purpose": "CONTRADICTION CONTROL \u2014 what to believe when the material disagrees.",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "words",
+    "atoms",
+    "_index",
+    "_polarity",
+    "_antonym_hit",
+    "_numbers",
+    "_numeric_hit",
+    "_qualifiers",
+    "_date_of",
+    "_tier",
+    "scan",
+    "_classify",
+    "write",
+    "refresh",
+    "load",
+    "matching",
+    "render",
+    "check",
+    "summary",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "sources"
+   ],
+   "imported_by": [
+    "candidates",
+    "confidence",
+    "context",
+    "selfmodel",
+    "standards",
+    "ui"
+   ],
+   "writes_state": true,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_candidates.py",
+    "test_conflicts.py",
+    "test_design.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "consult.py",
+   "sha256_12": "193ff29a986b",
+   "lines": 171,
+   "subsystem": "work-systems",
+   "purpose": "Consult an expert \u2014 the mode for fields an agent cannot execute.",
+   "entry_point": true,
+   "cli_subcommands": [
+    "ask",
+    "list"
+   ],
+   "public_functions": [
+    "start_consult",
+    "list_consults",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "loop",
+    "recall",
+    "research"
+   ],
+   "imported_by": [
+    "commons",
+    "federation",
+    "ui"
+   ],
+   "writes_state": false,
+   "executes_commands": true,
+   "network": false,
+   "reads_env": true,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_consult.py",
+    "test_research.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "context.py",
+   "sha256_12": "a9df9c12393d",
+   "lines": 537,
+   "subsystem": "harness-loop",
+   "purpose": "The context compiler \u2014 what the model sees is a COMPILED VIEW, not a pile.",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "est_tokens",
+    "budgets",
+    "fence",
+    "_read",
+    "compile",
+    "skill_index",
+    "manifest_path",
+    "save_manifest",
+    "load_manifest",
+    "note_compaction",
+    "recent",
+    "render",
+    "main"
+   ],
+   "classes": [
+    "_Source"
+   ],
+   "local_imports": [
+    "cases",
+    "conflicts",
+    "gotchas",
+    "loop",
+    "memrouter",
+    "premise",
+    "selfmodel",
+    "skills",
+    "sources",
+    "standards"
+   ],
+   "imported_by": [
+    "harness",
+    "loop",
+    "ui"
+   ],
+   "writes_state": true,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": false,
+   "emits_events": [
+    "premise_warning"
+   ],
+   "tested_by": [
+    "test_awareness.py",
+    "test_cases.py",
+    "test_chaos.py",
+    "test_conflicts.py",
+    "test_context.py",
+    "test_memory_kinds.py",
+    "test_panel_v2.py",
+    "test_routines.py",
+    "test_skillmd.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "curriculum.py",
+   "sha256_12": "14252eec8420",
+   "lines": 405,
+   "subsystem": "memory",
+   "purpose": "CURRICULUM \u2014 study in a considered order, not the order things arrived.",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "words",
+    "shingles",
+    "jaccard",
+    "similarity",
+    "covers_mission",
+    "covers_same_ground",
+    "_read",
+    "lessons",
+    "_title",
+    "_source_of",
+    "_mission",
+    "_defines_cited_atoms",
+    "plan",
+    "save",
+    "load",
+    "apply",
+    "coverage",
+    "render",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "loop",
+    "sources"
+   ],
+   "imported_by": [
+    "ui"
+   ],
+   "writes_state": true,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_curriculum.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "demo.py",
+   "sha256_12": "27020d4350db",
+   "lines": 184,
+   "subsystem": "support",
+   "purpose": "No-keys demo: watch the entire ecosystem run on your machine, right now.",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "run",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [],
+   "imported_by": [],
+   "writes_state": false,
+   "executes_commands": true,
+   "network": false,
+   "reads_env": true,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [],
+   "read_line_by_line": true
+  },
+  {
+   "file": "designcheck.py",
+   "sha256_12": "312a8098dc9f",
+   "lines": 373,
+   "subsystem": "governance",
+   "purpose": "THE DESIGN GATE \u2014 mechanical checks a produced interface must survive.",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "_srgb",
+    "luminance",
+    "contrast",
+    "parse_color",
+    "_finding",
+    "_blocks",
+    "check_text",
+    "check_file",
+    "check_path",
+    "thresholds_for",
+    "report",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "standards"
+   ],
+   "imported_by": [
+    "candidates"
+   ],
+   "writes_state": false,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_design.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "doctor.py",
+   "sha256_12": "ee108b479b8c",
+   "lines": 382,
+   "subsystem": "control-plane",
+   "purpose": "Doctor \u2014 one command that tells you whether the whole platform is healthy.",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "check_runtime",
+    "check_anatomy",
+    "check_toolbox",
+    "check_fleet",
+    "check_chief",
+    "check_keys",
+    "readiness",
+    "print_readiness",
+    "main"
+   ],
+   "classes": [
+    "Report"
+   ],
+   "local_imports": [
+    "chief",
+    "fleet",
+    "loop",
+    "memcheck",
+    "toolbox"
+   ],
+   "imported_by": [
+    "bootstrap",
+    "harness",
+    "ui"
+   ],
+   "writes_state": true,
+   "executes_commands": true,
+   "network": false,
+   "reads_env": true,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_doctor.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "effects.py",
+   "sha256_12": "eec5caf3cb96",
+   "lines": 102,
+   "subsystem": "harness-loop",
+   "purpose": "Effects ledger \u2014 exactly-once side effects across retries.",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "key_of",
+    "_path",
+    "lookup",
+    "record",
+    "history"
+   ],
+   "classes": [],
+   "local_imports": [
+    "locks"
+   ],
+   "imported_by": [
+    "mcp"
+   ],
+   "writes_state": false,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": true,
+   "emits_events": [],
+   "tested_by": [
+    "test_effects.py",
+    "test_faults.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "evidence.py",
+   "sha256_12": "5a4b37b74bfe",
+   "lines": 308,
+   "subsystem": "governance",
+   "purpose": "EVIDENCE \u2014 why we believe each system works, and where belief runs out.",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "registered_tests",
+    "run_suite",
+    "parse",
+    "build",
+    "render",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [],
+   "imported_by": [],
+   "writes_state": true,
+   "executes_commands": true,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [],
+   "read_line_by_line": true
+  },
+  {
+   "file": "federation.py",
+   "sha256_12": "08065e130163",
+   "lines": 449,
+   "subsystem": "control-plane",
+   "purpose": "Federation \u2014 let another owner's agents work with yours, without trust.",
+   "entry_point": true,
+   "cli_subcommands": [
+    "ask",
+    "card",
+    "peers",
+    "serve",
+    "trust"
+   ],
+   "public_functions": [
+    "canonical",
+    "sign",
+    "verify",
+    "fingerprint",
+    "fed_dir",
+    "_load",
+    "_save",
+    "identity",
+    "make_card",
+    "trust",
+    "peers",
+    "handle_ask",
+    "handle_fetch",
+    "a2a_card",
+    "ask_peer",
+    "_post",
+    "record_evidence",
+    "main"
+   ],
+   "classes": [
+    "Handler"
+   ],
+   "local_imports": [
+    "consult",
+    "fleet",
+    "loop"
+   ],
+   "imported_by": [
+    "ui"
+   ],
+   "writes_state": false,
+   "executes_commands": false,
+   "network": true,
+   "reads_env": false,
+   "security_sensitive": true,
+   "emits_events": [],
+   "tested_by": [
+    "test_federation.py",
+    "test_lanes.py",
+    "test_mcp.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "fleet.py",
+   "sha256_12": "3309e0fc6bec",
+   "lines": 191,
+   "subsystem": "fleet-lanes",
+   "purpose": "Fleet manager: mint and inspect expert agents.",
+   "entry_point": true,
+   "cli_subcommands": [
+    "create",
+    "delete",
+    "list"
+   ],
+   "public_functions": [
+    "slugify",
+    "expert_dir",
+    "create",
+    "_create_inner",
+    "today_spend",
+    "describe",
+    "list_experts",
+    "delete_expert",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "memory"
+   ],
+   "imported_by": [
+    "bootstrap",
+    "chief",
+    "commons",
+    "doctor",
+    "federation",
+    "memory",
+    "quick",
+    "team",
+    "ui"
+   ],
+   "writes_state": false,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_approvals.py",
+    "test_audit.py",
+    "test_awareness.py",
+    "test_backup.py",
+    "test_benchmark.py",
+    "test_cases.py",
+    "test_chief.py",
+    "test_context.py",
+    "test_decisions.py",
+    "test_doctor.py",
+    "test_ecosystem.py",
+    "test_events.py",
+    "test_faults.py",
+    "test_federation.py",
+    "test_fleet.py",
+    "test_goal.py",
+    "test_harness.py",
+    "test_mcp.py",
+    "test_memory.py",
+    "test_memory_kinds.py",
+    "test_modelrouter.py",
+    "test_panel_v2.py",
+    "test_preflight.py",
+    "test_providers.py",
+    "test_retention.py",
+    "test_routines.py",
+    "test_skillmd.py",
+    "test_stop.py",
+    "test_team.py",
+    "test_trace.py",
+    "test_uicards.py",
+    "test_wake.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "goal.py",
+   "sha256_12": "bdf95071842c",
+   "lines": 363,
+   "subsystem": "work-systems",
+   "purpose": "Goal pursuit \u2014 state what you want; the system pursues it until it is",
+   "entry_point": true,
+   "cli_subcommands": [
+    "list",
+    "pursue",
+    "show"
+   ],
+   "public_functions": [
+    "_goal_dir",
+    "_record",
+    "_is_learning",
+    "_wait",
+    "_exists_check",
+    "pursue",
+    "list_goals",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "commons",
+    "loop",
+    "toolbox"
+   ],
+   "imported_by": [
+    "chief",
+    "ui"
+   ],
+   "writes_state": true,
+   "executes_commands": true,
+   "network": false,
+   "reads_env": true,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_goal.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "gotchas.py",
+   "sha256_12": "04c109587ba6",
+   "lines": 270,
+   "subsystem": "memory",
+   "purpose": "ENVIRONMENT GOTCHAS \u2014 the failures this expert already paid for.",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "words",
+    "_scopes",
+    "_trigger_words",
+    "entry_line",
+    "_read",
+    "_write",
+    "from_failure",
+    "load",
+    "matching",
+    "render",
+    "summary",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [],
+   "imported_by": [
+    "confidence",
+    "context",
+    "loop",
+    "selfmodel"
+   ],
+   "writes_state": true,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_memory_kinds.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "harness.py",
+   "sha256_12": "ac1ab05055b8",
+   "lines": 473,
+   "subsystem": "harness-loop",
+   "purpose": "The harness, as an inspectable object.",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "_sha",
+    "_settings",
+    "loop_events",
+    "_context_budgets",
+    "_sandbox_state",
+    "manifest",
+    "check_contracts",
+    "integrity",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "context",
+    "doctor",
+    "loop",
+    "memory",
+    "policy",
+    "sandbox",
+    "skills",
+    "ui",
+    "variants"
+   ],
+   "imported_by": [
+    "backup",
+    "loop",
+    "preflight",
+    "ui"
+   ],
+   "writes_state": true,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_harness.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "ingest.py",
+   "sha256_12": "6193a3c5eaf0",
+   "lines": 985,
+   "subsystem": "ingestion",
+   "purpose": "Ingestion pipeline (Part 4): every input type, exact path. Stdlib-only;",
+   "entry_point": true,
+   "cli_subcommands": [
+    "add-folder",
+    "add-url",
+    "fetch",
+    "frames",
+    "scan-inbox",
+    "subs",
+    "vision",
+    "youtube"
+   ],
+   "public_functions": [
+    "classify",
+    "slugify",
+    "need",
+    "fmt_ts",
+    "try_rich_convert",
+    "pdf_text",
+    "pdf_pages",
+    "docx_convert",
+    "chunk_audio",
+    "multipart_body",
+    "transcribe_chunk",
+    "transcribe",
+    "frames",
+    "vision",
+    "html_to_text",
+    "is_youtube",
+    "is_video_url",
+    "is_playlist_url",
+    "subs_to_text",
+    "youtube_subs",
+    "playlist_entries",
+    "same_site_links",
+    "fetch_url",
+    "youtube_audio",
+    "_course_for_url",
+    "_rate",
+    "_queue_watcher",
+    "add_url",
+    "ingest_folder",
+    "unpack_archive",
+    "next_lesson_dir",
+    "route_file",
+    "scan_inbox",
+    "main"
+   ],
+   "classes": [
+    "_TextExtractor",
+    "_LinkFinder"
+   ],
+   "local_imports": [
+    "checkpoint",
+    "loop",
+    "sources"
+   ],
+   "imported_by": [
+    "bootstrap",
+    "loop",
+    "quick",
+    "ui"
+   ],
+   "writes_state": true,
+   "executes_commands": true,
+   "network": true,
+   "reads_env": true,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_audit.py",
+    "test_checkpoint.py",
+    "test_url.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "locks.py",
+   "sha256_12": "0f83e78392e1",
+   "lines": 50,
+   "subsystem": "harness-loop",
+   "purpose": "One cross-process lock primitive for every mutating ledger.",
+   "entry_point": false,
+   "cli_subcommands": [],
+   "public_functions": [
+    "holding"
+   ],
+   "classes": [],
+   "local_imports": [],
+   "imported_by": [
+    "approvals",
+    "effects",
+    "prospective",
+    "skills"
+   ],
+   "writes_state": false,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": true,
+   "emits_events": [],
+   "tested_by": [],
+   "read_line_by_line": true
+  },
+  {
+   "file": "loop.py",
+   "sha256_12": "f13e41d60eaf",
+   "lines": 2080,
+   "subsystem": "harness-loop",
+   "purpose": "Persistent autonomous agent loop (v4 master build document, Part 5).",
+   "entry_point": true,
+   "cli_subcommands": [
+    "add",
+    "answer",
+    "check",
+    "course",
+    "run",
+    "status"
+   ],
+   "public_functions": [
+    "stop_text",
+    "atomic_write_json",
+    "load_json",
+    "est_tokens",
+    "truncate",
+    "parse_content_tool_call",
+    "permanent_net_error",
+    "n_steps",
+    "main"
+   ],
+   "classes": [
+    "Agent"
+   ],
+   "local_imports": [
+    "cases",
+    "confidence",
+    "context",
+    "gotchas",
+    "harness",
+    "ingest",
+    "memory",
+    "modelrouter",
+    "policy",
+    "prospective",
+    "sandbox",
+    "skills",
+    "uicards"
+   ],
+   "imported_by": [
+    "benchmark",
+    "bootstrap",
+    "candidates",
+    "chief",
+    "confidence",
+    "consult",
+    "context",
+    "curriculum",
+    "doctor",
+    "federation",
+    "goal",
+    "harness",
+    "ingest",
+    "modelrouter",
+    "providers",
+    "quick",
+    "replay",
+    "selfmodel",
+    "team",
+    "ui",
+    "variants",
+    "workflows"
+   ],
+   "writes_state": true,
+   "executes_commands": true,
+   "network": true,
+   "reads_env": true,
+   "security_sensitive": true,
+   "emits_events": [
+    "agent_start",
+    "approval_required",
+    "archive_failed",
+    "budget_exceeded",
+    "case_failed",
+    "case_fixed",
+    "case_recurred",
+    "chain_queued",
+    "command_refused",
+    "compaction_incomplete",
+    "confidence_failed",
+    "done_refused",
+    "drain_budget_stop",
+    "drain_complete",
+    "escalated",
+    "exam_dispatched",
+    "failure_recurred",
+    "gaps_queued",
+    "gotcha_failed",
+    "gotcha_filed",
+    "harness_manifest_failed",
+    "health_ritual",
+    "health_ritual_failed",
+    "inbox_scanned",
+    "lock_break",
+    "low_confidence",
+    "memory_file_failed",
+    "model_routed",
+    "prospective_check_failed",
+    "provider_failure",
+    "provider_unreachable",
+    "reexam_queued",
+    "reexam_scheduled",
+    "reflection_queued",
+    "retries_exhausted",
+    "retry_queued",
+    "route_record_failed",
+    "skill_record_failed",
+    "skill_status",
+    "state_corrupt",
+    "state_trimmed",
+    "step_crash",
+    "stop_condition",
+    "task_cost_ceiling",
+    "task_end",
+    "task_start",
+    "task_unblocked",
+    "tool_error",
+    "tool_results_cleared",
+    "ui_card",
+    "ui_card_invalid"
+   ],
+   "tested_by": [
+    "test_approvals.py",
+    "test_audit.py",
+    "test_awareness.py",
+    "test_benchmark.py",
+    "test_candidates.py",
+    "test_cases.py",
+    "test_chaos.py",
+    "test_compaction.py",
+    "test_conflicts.py",
+    "test_context.py",
+    "test_course.py",
+    "test_curriculum.py",
+    "test_e2e.py",
+    "test_e2e_crash.py",
+    "test_ecosystem.py",
+    "test_events.py",
+    "test_faults.py",
+    "test_fleet.py",
+    "test_goal.py",
+    "test_governance.py",
+    "test_guardrails.py",
+    "test_harness.py",
+    "test_layers.py",
+    "test_local.py",
+    "test_lock.py",
+    "test_memory.py",
+    "test_memory_kinds.py",
+    "test_modelrouter.py",
+    "test_panel_v2.py",
+    "test_prospective.py",
+    "test_providers.py",
+    "test_recall.py",
+    "test_reliability.py",
+    "test_retention.py",
+    "test_routines.py",
+    "test_sandbox.py",
+    "test_secrets.py",
+    "test_skillmd.py",
+    "test_stop.py",
+    "test_trace.py",
+    "test_uicards.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "mcp.py",
+   "sha256_12": "18334dd96a19",
+   "lines": 454,
+   "subsystem": "control-plane",
+   "purpose": "MCP client \u2014 plug ANY Model Context Protocol tool server into the fleet.",
+   "entry_point": true,
+   "cli_subcommands": [
+    "call",
+    "catalog",
+    "enable",
+    "list",
+    "tools"
+   ],
+   "public_functions": [
+    "find_config",
+    "load_servers",
+    "enable",
+    "_role_allowed",
+    "_tool_allowed",
+    "connect",
+    "classify",
+    "needs_approval",
+    "guarded_call",
+    "render_result",
+    "main"
+   ],
+   "classes": [
+    "Server"
+   ],
+   "local_imports": [
+    "approvals",
+    "effects"
+   ],
+   "imported_by": [
+    "toolbox"
+   ],
+   "writes_state": true,
+   "executes_commands": true,
+   "network": false,
+   "reads_env": true,
+   "security_sensitive": true,
+   "emits_events": [],
+   "tested_by": [
+    "test_approvals.py",
+    "test_effects.py",
+    "test_faults.py",
+    "test_mcp.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "memcheck.py",
+   "sha256_12": "ea2fa84d9acd",
+   "lines": 119,
+   "subsystem": "governance",
+   "purpose": "Memory integrity checker \u2014 makes the grounding rule mechanically checkable.",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "read",
+    "resolve_citation",
+    "check",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [],
+   "imported_by": [
+    "doctor"
+   ],
+   "writes_state": false,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [],
+   "read_line_by_line": true
+  },
+  {
+   "file": "memory.py",
+   "sha256_12": "8d9d575339ec",
+   "lines": 485,
+   "subsystem": "memory",
+   "purpose": "The fleet's memory institution \u2014 the categories that outlive every model,",
+   "entry_point": true,
+   "cli_subcommands": [
+    "competence",
+    "failures",
+    "map",
+    "restore",
+    "retire",
+    "search"
+   ],
+   "public_functions": [
+    "classify",
+    "mem_dir",
+    "retired_dir",
+    "_append_jsonl",
+    "_read_jsonl",
+    "record_failure",
+    "failures",
+    "failure_summary",
+    "record_outcome",
+    "competence",
+    "best_for",
+    "retire",
+    "restore",
+    "retired",
+    "fleet_map",
+    "search",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "fleet",
+    "recall"
+   ],
+   "imported_by": [
+    "chief",
+    "confidence",
+    "fleet",
+    "harness",
+    "loop",
+    "selfmodel",
+    "ui"
+   ],
+   "writes_state": true,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_awareness.py",
+    "test_ecosystem.py",
+    "test_faults.py",
+    "test_memory.py",
+    "test_stop.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "memrouter.py",
+   "sha256_12": "e215542e8602",
+   "lines": 129,
+   "subsystem": "harness-loop",
+   "purpose": "THE MEMORY ROUTER \u2014 which kinds of memory this task is allowed to see.",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "decide",
+    "explain",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [],
+   "imported_by": [
+    "context"
+   ],
+   "writes_state": false,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_memory_kinds.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "modelrouter.py",
+   "sha256_12": "3b8a5a6a6044",
+   "lines": 238,
+   "subsystem": "control-plane",
+   "purpose": "CAPABILITY ROUTING \u2014 pick the model from measured outcomes, not vibes.",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "_path",
+    "record",
+    "outcomes",
+    "_replay_agreement",
+    "profiles",
+    "_price",
+    "candidates",
+    "choose",
+    "explain",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "loop"
+   ],
+   "imported_by": [
+    "loop",
+    "ui"
+   ],
+   "writes_state": true,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_modelrouter.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "package.py",
+   "sha256_12": "2593ad52ddd1",
+   "lines": 66,
+   "subsystem": "support",
+   "purpose": "Build the distributable archive.",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "should_skip",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [],
+   "imported_by": [],
+   "writes_state": false,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [],
+   "read_line_by_line": true
+  },
+  {
+   "file": "policy.py",
+   "sha256_12": "08d8f3e686bc",
+   "lines": 87,
+   "subsystem": "harness-loop",
+   "purpose": "Command policy \u2014 a deterministic guard between the model and the shell.",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "load_policy",
+    "check"
+   ],
+   "classes": [],
+   "local_imports": [],
+   "imported_by": [
+    "harness",
+    "loop"
+   ],
+   "writes_state": false,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": true,
+   "emits_events": [],
+   "tested_by": [
+    "test_effects.py",
+    "test_faults.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "preflight.py",
+   "sha256_12": "3e80fd4f0e65",
+   "lines": 427,
+   "subsystem": "control-plane",
+   "purpose": "PRODUCTION PREFLIGHT \u2014 is this fleet fit to run someone's business on?",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "_load_cfg",
+    "_experts",
+    "_finding",
+    "check_spend",
+    "check_secrets",
+    "check_exposure",
+    "check_backups",
+    "check_disk",
+    "check_resilience",
+    "check_critic",
+    "check_verification",
+    "check_governance",
+    "run",
+    "render",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "approvals",
+    "backup",
+    "harness"
+   ],
+   "imported_by": [
+    "ui"
+   ],
+   "writes_state": false,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": true,
+   "security_sensitive": true,
+   "emits_events": [],
+   "tested_by": [
+    "test_preflight.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "premise.py",
+   "sha256_12": "9a14e81f48c7",
+   "lines": 190,
+   "subsystem": "memory",
+   "purpose": "PREMISE AWARENESS \u2014 refuse to build on something already known false.",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "words",
+    "_read",
+    "_home",
+    "retractions",
+    "quarantined",
+    "check",
+    "render",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "citecheck"
+   ],
+   "imported_by": [
+    "confidence",
+    "context"
+   ],
+   "writes_state": false,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_memory_kinds.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "prospective.py",
+   "sha256_12": "9870d2b6f3ad",
+   "lines": 325,
+   "subsystem": "work-systems",
+   "purpose": "Prospective memory \u2014 remembering to ACT, not just remembering facts.",
+   "entry_point": true,
+   "cli_subcommands": [
+    "add",
+    "cancel",
+    "check",
+    "list"
+   ],
+   "public_functions": [
+    "_path",
+    "load",
+    "save",
+    "_contained",
+    "add",
+    "cancel",
+    "_due",
+    "_unconsumed_events",
+    "check",
+    "_check_locked",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "locks"
+   ],
+   "imported_by": [
+    "chief",
+    "loop",
+    "routines",
+    "ui",
+    "workflows"
+   ],
+   "writes_state": true,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": false,
+   "emits_events": [
+    "prospective_fired"
+   ],
+   "tested_by": [
+    "test_chief.py",
+    "test_ecosystem.py",
+    "test_prospective.py",
+    "test_routines.py",
+    "test_wake.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "providers.py",
+   "sha256_12": "5fbe71a99d4d",
+   "lines": 274,
+   "subsystem": "control-plane",
+   "purpose": "Plug in any model, from anywhere \u2014 and point any role at it.",
+   "entry_point": true,
+   "cli_subcommands": [
+    "add",
+    "list",
+    "models",
+    "set-role",
+    "test"
+   ],
+   "public_functions": [
+    "_fmt",
+    "load",
+    "save",
+    "add",
+    "catalog",
+    "set_role",
+    "summary",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "loop"
+   ],
+   "imported_by": [
+    "ui"
+   ],
+   "writes_state": true,
+   "executes_commands": false,
+   "network": true,
+   "reads_env": true,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_providers.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "quick.py",
+   "sha256_12": "02eacaed6ba5",
+   "lines": 273,
+   "subsystem": "fleet-lanes",
+   "purpose": "Quick Specialists \u2014 spin up a working expert in seconds, not study-days.",
+   "entry_point": true,
+   "cli_subcommands": [
+    "spin",
+    "templates"
+   ],
+   "public_functions": [
+    "classify",
+    "create",
+    "_enable_review_chain",
+    "ingest_briefing",
+    "_queue_ripper",
+    "launch",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "fleet",
+    "ingest",
+    "loop",
+    "templates",
+    "toolbox"
+   ],
+   "imported_by": [
+    "ui"
+   ],
+   "writes_state": true,
+   "executes_commands": true,
+   "network": false,
+   "reads_env": true,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_design.py",
+    "test_quick.py",
+    "test_toolbox.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "recall.py",
+   "sha256_12": "945142a552aa",
+   "lines": 194,
+   "subsystem": "memory",
+   "purpose": "Recall \u2014 search an expert's ENTIRE mind, including what compaction paged",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "tokenize",
+    "score_line",
+    "iter_text_files",
+    "search",
+    "_associative",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [],
+   "imported_by": [
+    "consult",
+    "memory",
+    "research"
+   ],
+   "writes_state": false,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_associative.py",
+    "test_ecosystem.py",
+    "test_recall.py",
+    "test_retention.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "replay.py",
+   "sha256_12": "89e919849349",
+   "lines": 172,
+   "subsystem": "governance",
+   "purpose": "Trajectory replay \u2014 measure a model (or charter) against recorded",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "_args_equivalent",
+    "decision_points",
+    "replay_task",
+    "replay",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "loop"
+   ],
+   "imported_by": [],
+   "writes_state": false,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_replay.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "research.py",
+   "sha256_12": "bb1e56f50b86",
+   "lines": 189,
+   "subsystem": "work-systems",
+   "purpose": "AGENTIC RETRIEVAL \u2014 establish the facts before answering the question.",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "terms",
+    "facts_needed",
+    "investigate",
+    "render",
+    "save",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "citecheck",
+    "recall"
+   ],
+   "imported_by": [
+    "consult"
+   ],
+   "writes_state": false,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_research.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "routines.py",
+   "sha256_12": "c80a6262f45b",
+   "lines": 224,
+   "subsystem": "work-systems",
+   "purpose": "ROUTINES \u2014 show the work once, then have it done forever.",
+   "entry_point": true,
+   "cli_subcommands": [
+    "cancel",
+    "list",
+    "save"
+   ],
+   "public_functions": [
+    "_slug",
+    "_dir",
+    "_find_task",
+    "skill_from_task",
+    "save",
+    "load",
+    "status",
+    "cancel",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "prospective"
+   ],
+   "imported_by": [
+    "ui"
+   ],
+   "writes_state": true,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_routines.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "sandbox.py",
+   "sha256_12": "1c29962efe58",
+   "lines": 286,
+   "subsystem": "harness-loop",
+   "purpose": "WHERE model-written commands actually run \u2014 a swappable execution backend.",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "granted_for",
+    "scrub_env",
+    "_cfg",
+    "backend_name",
+    "available",
+    "_agent_env",
+    "_host",
+    "_timeout_result",
+    "_docker",
+    "_hosted",
+    "run",
+    "_looks_for_secrets",
+    "describe",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [],
+   "imported_by": [
+    "harness",
+    "loop",
+    "selfmodel"
+   ],
+   "writes_state": false,
+   "executes_commands": true,
+   "network": true,
+   "reads_env": true,
+   "security_sensitive": true,
+   "emits_events": [],
+   "tested_by": [
+    "test_sandbox.py",
+    "test_secrets.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "selfmodel.py",
+   "sha256_12": "348665060a7f",
+   "lines": 305,
+   "subsystem": "memory",
+   "purpose": "THE SELF-MODEL \u2014 the agent works from facts about itself, not a persona.",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "_home_slug",
+    "_read",
+    "_courses",
+    "_atoms_in",
+    "_exam",
+    "_gaps",
+    "study",
+    "proven",
+    "scars",
+    "now",
+    "build",
+    "render",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "conflicts",
+    "gotchas",
+    "loop",
+    "memory",
+    "sandbox",
+    "skills",
+    "sources"
+   ],
+   "imported_by": [
+    "context",
+    "ui"
+   ],
+   "writes_state": false,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_awareness.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "skills.py",
+   "sha256_12": "d4519e4b1428",
+   "lines": 535,
+   "subsystem": "memory",
+   "purpose": "Skill Graph \u2014 procedural memory as a validated, composable graph.",
+   "entry_point": true,
+   "cli_subcommands": [
+    "export",
+    "import",
+    "list",
+    "promote",
+    "status"
+   ],
+   "public_functions": [
+    "_dir",
+    "_graph_path",
+    "load_graph",
+    "save_graph",
+    "_stem",
+    "entry",
+    "status_of",
+    "record_use",
+    "_record_locked",
+    "links_of",
+    "select",
+    "annotate",
+    "parse_frontmatter",
+    "_header_hints",
+    "read_skill",
+    "discover",
+    "provenance_of",
+    "set_provenance",
+    "banner",
+    "script_guard",
+    "export_skill",
+    "import_skill",
+    "summary",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "locks"
+   ],
+   "imported_by": [
+    "chief",
+    "confidence",
+    "context",
+    "harness",
+    "loop",
+    "selfmodel",
+    "ui"
+   ],
+   "writes_state": true,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": true,
+   "emits_events": [],
+   "tested_by": [
+    "test_awareness.py",
+    "test_chief.py",
+    "test_ecosystem.py",
+    "test_skillgraph.py",
+    "test_skillmd.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "sources.py",
+   "sha256_12": "76e1a0aa9506",
+   "lines": 321,
+   "subsystem": "memory",
+   "purpose": "THE SOURCE LEDGER \u2014 every claim knows where it came from, and what that",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "_dir",
+    "path",
+    "load",
+    "save",
+    "classify",
+    "_kind",
+    "record",
+    "set_tier",
+    "by_ref",
+    "tier_of",
+    "courses",
+    "summary",
+    "render",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [],
+   "imported_by": [
+    "conflicts",
+    "context",
+    "curriculum",
+    "ingest",
+    "selfmodel",
+    "standards",
+    "ui"
+   ],
+   "writes_state": true,
+   "executes_commands": false,
+   "network": true,
+   "reads_env": false,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_awareness.py",
+    "test_candidates.py",
+    "test_conflicts.py",
+    "test_curriculum.py",
+    "test_design.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "standards.py",
+   "sha256_12": "aa0c01dc65f5",
+   "lines": 277,
+   "subsystem": "memory",
+   "purpose": "STANDARDS \u2014 the bar, extracted from the material and made checkable.",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "path",
+    "load",
+    "_shape",
+    "_next_id",
+    "_check_for",
+    "_append",
+    "add",
+    "extract",
+    "render",
+    "summary",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "conflicts",
+    "sources"
+   ],
+   "imported_by": [
+    "context",
+    "designcheck",
+    "ui"
+   ],
+   "writes_state": true,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_design.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "team.py",
+   "sha256_12": "1eec8aa3b928",
+   "lines": 361,
+   "subsystem": "fleet-lanes",
+   "purpose": "Teams: chosen specialists collaborating on one piece of work.",
+   "entry_point": true,
+   "cli_subcommands": [
+    "list",
+    "result",
+    "run"
+   ],
+   "public_functions": [
+    "constraints_of",
+    "digest_of",
+    "constraint_block",
+    "_expert_root",
+    "_exists_check",
+    "_push",
+    "_pull",
+    "_wait_task",
+    "_record",
+    "run_team",
+    "list_runs",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "fleet",
+    "loop"
+   ],
+   "imported_by": [
+    "ui"
+   ],
+   "writes_state": false,
+   "executes_commands": true,
+   "network": false,
+   "reads_env": true,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_federation.py",
+    "test_team.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "templates.py",
+   "sha256_12": "50a9d66c203b",
+   "lines": 309,
+   "subsystem": "fleet-lanes",
+   "purpose": "Pre-built specialists \u2014 a curated gallery of quick agents that spin up in",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "all_templates",
+    "get"
+   ],
+   "classes": [],
+   "local_imports": [],
+   "imported_by": [
+    "quick",
+    "ui"
+   ],
+   "writes_state": false,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_chief.py",
+    "test_toolbox.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "toolbox.py",
+   "sha256_12": "76a6e1b1881a",
+   "lines": 190,
+   "subsystem": "control-plane",
+   "purpose": "Toolbox \u2014 live capability scan of this machine, for humans and agents.",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "_env_with_file",
+    "custom_tools",
+    "scan",
+    "capability_note",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "mcp"
+   ],
+   "imported_by": [
+    "doctor",
+    "goal",
+    "quick",
+    "ui"
+   ],
+   "writes_state": true,
+   "executes_commands": true,
+   "network": false,
+   "reads_env": true,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_mcp.py",
+    "test_providers.py",
+    "test_toolbox.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "trace.py",
+   "sha256_12": "3efdc2fdcbd4",
+   "lines": 282,
+   "subsystem": "control-plane",
+   "purpose": "ONE TRACE PER TASK \u2014 spans, costs, gates, and per-tool error rates.",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "_log_path",
+    "_lines",
+    "_parse",
+    "_secs",
+    "_task",
+    "build",
+    "_is_error",
+    "tool_stats",
+    "fleet_tool_stats",
+    "brief",
+    "render",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [],
+   "imported_by": [
+    "ui"
+   ],
+   "writes_state": false,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_trace.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "ui.py",
+   "sha256_12": "825d6040a5ca",
+   "lines": 1572,
+   "subsystem": "control-plane",
+   "purpose": "Expert Fleet control panel \u2014 mission control for the whole system.",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "expert_root",
+    "is_running",
+    "start_expert",
+    "stop_expert",
+    "shutdown_children",
+    "tail",
+    "read_expert_file",
+    "expert_tree",
+    "expert_tasks",
+    "_checkpoint_progress",
+    "settings_summary",
+    "parse_blocked",
+    "detail",
+    "systems_map",
+    "system_overview",
+    "_fleet_tool_stats",
+    "fleet_feed",
+    "feed_row",
+    "parse_log_line",
+    "apply_template",
+    "start_goal",
+    "run_sub",
+    "ui_html",
+    "main"
+   ],
+   "classes": [
+    "Handler"
+   ],
+   "local_imports": [
+    "approvals",
+    "backup",
+    "benchmark",
+    "checkpoint",
+    "chief",
+    "commons",
+    "conflicts",
+    "consult",
+    "context",
+    "curriculum",
+    "doctor",
+    "federation",
+    "fleet",
+    "goal",
+    "harness",
+    "ingest",
+    "loop",
+    "memory",
+    "modelrouter",
+    "preflight",
+    "prospective",
+    "providers",
+    "quick",
+    "routines",
+    "selfmodel",
+    "skills",
+    "sources",
+    "standards",
+    "team",
+    "templates",
+    "toolbox",
+    "trace",
+    "variants",
+    "workflows"
+   ],
+   "imported_by": [
+    "harness"
+   ],
+   "writes_state": true,
+   "executes_commands": true,
+   "network": true,
+   "reads_env": true,
+   "security_sensitive": true,
+   "emits_events": [
+    "__step__",
+    "tool_call"
+   ],
+   "tested_by": [],
+   "read_line_by_line": true
+  },
+  {
+   "file": "uicards.py",
+   "sha256_12": "776c06d18605",
+   "lines": 184,
+   "subsystem": "control-plane",
+   "purpose": "GENERATIVE UI, SAFELY \u2014 agents return structured cards, not markup.",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "_s",
+    "validate",
+    "parse",
+    "strip",
+    "render_text",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [],
+   "imported_by": [
+    "loop"
+   ],
+   "writes_state": false,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_uicards.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "variants.py",
+   "sha256_12": "a7654408768c",
+   "lines": 329,
+   "subsystem": "governance",
+   "purpose": "Charter evolution \u2014 the Agent Selection Farm idea, governed.",
+   "entry_point": true,
+   "cli_subcommands": [
+    "list",
+    "spawn",
+    "trial"
+   ],
+   "public_functions": [
+    "_dir",
+    "_manifest_path",
+    "load_manifest",
+    "save_manifest",
+    "spawn",
+    "_drain",
+    "trial",
+    "promote",
+    "rollback",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "loop"
+   ],
+   "imported_by": [
+    "harness",
+    "ui"
+   ],
+   "writes_state": true,
+   "executes_commands": true,
+   "network": false,
+   "reads_env": true,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_decisions.py",
+    "test_ecosystem.py",
+    "test_governance.py",
+    "test_variants.py"
+   ],
+   "read_line_by_line": true
+  },
+  {
+   "file": "verify.py",
+   "sha256_12": "9e98ec3df010",
+   "lines": 119,
+   "subsystem": "governance",
+   "purpose": "Mechanical spec verification \u2014 layer 1 of the hierarchy (Part 8).",
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [
+    "parse_spec",
+    "run_checks",
+    "write_results",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [],
+   "imported_by": [],
+   "writes_state": true,
+   "executes_commands": true,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": true,
+   "emits_events": [],
+   "tested_by": [],
+   "read_line_by_line": true
+  },
+  {
+   "file": "workflows.py",
+   "sha256_12": "6dd1f85b403d",
+   "lines": 167,
+   "subsystem": "work-systems",
+   "purpose": "Deterministic workflows \u2014 fixed stages with gates, before autonomy.",
+   "entry_point": true,
+   "cli_subcommands": [
+    "list",
+    "run"
+   ],
+   "public_functions": [
+    "_stage_goal",
+    "run",
+    "status",
+    "list_workflows",
+    "main"
+   ],
+   "classes": [],
+   "local_imports": [
+    "loop",
+    "prospective"
+   ],
+   "imported_by": [
+    "ui"
+   ],
+   "writes_state": true,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "security_sensitive": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_workflows.py"
+   ],
+   "read_line_by_line": true
+  }
+ ],
+ "tests": [
+  {
+   "file": "tests/test_approvals.py",
+   "lines": 142,
+   "claim": "Approval-gated side effects, end to end through the real loop.",
+   "sections": [
+    "pause",
+    "chief",
+    "grant",
+    "policy"
+   ],
+   "assertions": 21,
+   "modules_exercised": [
+    "approvals",
+    "chief",
+    "fleet",
+    "loop",
+    "mcp"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_associative.py",
+   "lines": 82,
+   "claim": "Associative memory expansion in recall (RippleMem/CABLE, 2026-08).",
+   "sections": [
+    "chain",
+    "empty"
+   ],
+   "assertions": 8,
+   "modules_exercised": [
+    "recall"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_audit.py",
+   "lines": 115,
+   "claim": "Adversarial audit findings, kept as permanent regression tests.",
+   "sections": [
+    "two-loops",
+    "lost-update",
+    "unicode"
+   ],
+   "assertions": 13,
+   "modules_exercised": [
+    "fleet",
+    "ingest",
+    "loop"
+   ],
+   "uses_subprocess": true
+  },
+  {
+   "file": "tests/test_awareness.py",
+   "lines": 144,
+   "claim": "The agent works from an accurate model of ITSELF (M9).",
+   "sections": [
+    "fresh",
+    "studied",
+    "evidence",
+    "now",
+    "window"
+   ],
+   "assertions": 25,
+   "modules_exercised": [
+    "context",
+    "fleet",
+    "loop",
+    "memory",
+    "selfmodel",
+    "skills",
+    "sources"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_backup.py",
+   "lines": 152,
+   "claim": "A platform without a tested restore has hopes, not backups (M11).",
+   "sections": [
+    "contents",
+    "opt-in",
+    "integrity",
+    "restore",
+    "traversal",
+    "freshness"
+   ],
+   "assertions": 23,
+   "modules_exercised": [
+    "backup",
+    "fleet"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_benchmark.py",
+   "lines": 148,
+   "claim": "The lift benchmark: measuring what the harness adds, instead of asserting it.",
+   "sections": [
+    "bare",
+    "harness",
+    "honest"
+   ],
+   "assertions": 12,
+   "modules_exercised": [
+    "benchmark",
+    "fleet",
+    "loop"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_blocked.py",
+   "lines": 55,
+   "claim": "Blocked-task resume (ask_human round trip).",
+   "sections": [
+    "blocked"
+   ],
+   "assertions": 9,
+   "modules_exercised": [],
+   "uses_subprocess": true
+  },
+  {
+   "file": "tests/test_bootstrap.py",
+   "lines": 130,
+   "claim": "ONE COMMAND, AND IT RUNS (M8).",
+   "sections": [
+    "first-run",
+    "idempotent",
+    "secrets",
+    "blocked",
+    "teach"
+   ],
+   "assertions": 29,
+   "modules_exercised": [],
+   "uses_subprocess": true
+  },
+  {
+   "file": "tests/test_candidates.py",
+   "lines": 180,
+   "claim": "TEST-TIME COMPUTE: make several, keep the best, and say why (P1).",
+   "sections": [
+    "artifacts",
+    "gate",
+    "interface",
+    "applies",
+    "isolation",
+    "promote",
+    "adaptive",
+    "explain"
+   ],
+   "assertions": 23,
+   "modules_exercised": [
+    "candidates",
+    "conflicts",
+    "loop",
+    "sources"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_cases.py",
+   "lines": 152,
+   "claim": "Did the fix actually WORK? \u2014 the half a failure log never records.",
+   "sections": [
+    "open",
+    "fixed",
+    "recurred",
+    "recall",
+    "confidence",
+    "ledger"
+   ],
+   "assertions": 28,
+   "modules_exercised": [
+    "cases",
+    "confidence",
+    "context",
+    "fleet",
+    "loop"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_chaos.py",
+   "lines": 228,
+   "claim": "CHAOS: attack the platform on purpose and watch what survives (P0).",
+   "sections": [
+    "kill",
+    "ledgers",
+    "provider",
+    "race",
+    "disk",
+    "size",
+    "clock"
+   ],
+   "assertions": 26,
+   "modules_exercised": [
+    "context",
+    "loop"
+   ],
+   "uses_subprocess": true
+  },
+  {
+   "file": "tests/test_check.py",
+   "lines": 54,
+   "claim": "Provider connectivity check (`loop.py check`).",
+   "sections": [
+    "healthy",
+    "broken"
+   ],
+   "assertions": 6,
+   "modules_exercised": [],
+   "uses_subprocess": true
+  },
+  {
+   "file": "tests/test_checkpoint.py",
+   "lines": 123,
+   "claim": "Fiber-style checkpoints (M2-L2): long tool work recovers, never restarts.",
+   "sections": [
+    "primitive",
+    "transcribe",
+    "folder"
+   ],
+   "assertions": 15,
+   "modules_exercised": [
+    "checkpoint",
+    "ingest"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_chief.py",
+   "lines": 135,
+   "claim": "The Chief of Staff briefing: \"what should I do today?\" answered from the",
+   "sections": [
+    "quiet",
+    "ranked",
+    "archetypes"
+   ],
+   "assertions": 17,
+   "modules_exercised": [
+    "chief",
+    "fleet",
+    "prospective",
+    "skills",
+    "templates"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_compaction.py",
+   "lines": 42,
+   "claim": "Context compaction slicing sanity check (Part 5 B3).",
+   "sections": [],
+   "assertions": 4,
+   "modules_exercised": [
+    "loop"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_conflicts.py",
+   "lines": 176,
+   "claim": "When the material disagrees with itself, the harness rules on it (M9).",
+   "sections": [
+    "ledger",
+    "verdicts",
+    "ledger",
+    "context",
+    "gate"
+   ],
+   "assertions": 31,
+   "modules_exercised": [
+    "conflicts",
+    "context",
+    "loop",
+    "sources"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_consult.py",
+   "lines": 109,
+   "claim": "Consultant mode: the expert for fields no agent can execute.",
+   "sections": [
+    "gate",
+    "flow"
+   ],
+   "assertions": 13,
+   "modules_exercised": [
+    "citecheck",
+    "consult"
+   ],
+   "uses_subprocess": true
+  },
+  {
+   "file": "tests/test_context.py",
+   "lines": 188,
+   "claim": "The context window is COMPILED, budgeted and inspectable (M3).",
+   "sections": [
+    "manifest",
+    "disclosure",
+    "budget",
+    "clearing",
+    "panel"
+   ],
+   "assertions": 35,
+   "modules_exercised": [
+    "context",
+    "fleet",
+    "loop"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_course.py",
+   "lines": 84,
+   "claim": "Exit criterion + spaced re-exams (Part 8).",
+   "sections": [
+    "re-exam"
+   ],
+   "assertions": 12,
+   "modules_exercised": [
+    "loop"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_curriculum.py",
+   "lines": 168,
+   "claim": "Study in a considered order, not the order things arrived (P2).",
+   "sections": [
+    "authority",
+    "duplicate",
+    "relevance",
+    "why",
+    "prerequisite",
+    "apply",
+    "coverage"
+   ],
+   "assertions": 22,
+   "modules_exercised": [
+    "curriculum",
+    "loop",
+    "sources"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_decisions.py",
+   "lines": 153,
+   "claim": "DECISION OBSERVABILITY: a charter change must predict its own effect (M6).",
+   "sections": [
+    "declare",
+    "refused",
+    "held",
+    "stale",
+    "panel"
+   ],
+   "assertions": 15,
+   "modules_exercised": [
+    "fleet",
+    "variants"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_design.py",
+   "lines": 206,
+   "claim": "Taste is not enforceable; SPECIFICS are (M10).",
+   "sections": [
+    "catches",
+    "fair",
+    "standards",
+    "owner-bar",
+    "lane"
+   ],
+   "assertions": 25,
+   "modules_exercised": [
+    "conflicts",
+    "designcheck",
+    "quick",
+    "sources",
+    "standards"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_doctor.py",
+   "lines": 116,
+   "claim": "The platform health check, and creation that never leaves a half-expert.",
+   "sections": [
+    "healthy",
+    "damage",
+    "rollback",
+    "elsewhere"
+   ],
+   "assertions": 13,
+   "modules_exercised": [
+    "doctor",
+    "fleet"
+   ],
+   "uses_subprocess": true
+  },
+  {
+   "file": "tests/test_e2e.py",
+   "lines": 164,
+   "claim": "End-to-end lifecycle: the whole choreography, no human in the middle.",
+   "sections": [
+    "pipeline",
+    "verification",
+    "memory"
+   ],
+   "assertions": 9,
+   "modules_exercised": [
+    "loop"
+   ],
+   "uses_subprocess": true
+  },
+  {
+   "file": "tests/test_e2e_crash.py",
+   "lines": 86,
+   "claim": "The hardest reliability claim: kill -9 in the MIDDLE of the full lifecycle,",
+   "sections": [],
+   "assertions": 8,
+   "modules_exercised": [
+    "loop"
+   ],
+   "uses_subprocess": true
+  },
+  {
+   "file": "tests/test_ecosystem.py",
+   "lines": 220,
+   "claim": "THE BEAST TEST \u2014 every subsystem, one organism, cross-checked.",
+   "sections": [
+    "organism",
+    "prospective",
+    "race",
+    "writers",
+    "recall",
+    "variants",
+    "chief",
+    "retire",
+    "doctor"
+   ],
+   "assertions": 24,
+   "modules_exercised": [
+    "chief",
+    "fleet",
+    "loop",
+    "memory",
+    "prospective",
+    "recall",
+    "skills",
+    "variants"
+   ],
+   "uses_subprocess": true
+  },
+  {
+   "file": "tests/test_effects.py",
+   "lines": 206,
+   "claim": "Side effects, governed: exactly-once across retries, policy before the",
+   "sections": [
+    "exactly-once",
+    "fresh",
+    "policy",
+    "governance"
+   ],
+   "assertions": 26,
+   "modules_exercised": [
+    "effects",
+    "mcp",
+    "policy"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_events.py",
+   "lines": 211,
+   "claim": "The panel WATCHES instead of asking (M7): a live SSE event stream.",
+   "sections": [
+    "replay",
+    "live",
+    "robust",
+    "auth"
+   ],
+   "assertions": 16,
+   "modules_exercised": [
+    "fleet",
+    "loop"
+   ],
+   "uses_subprocess": true
+  },
+  {
+   "file": "tests/test_exam.py",
+   "lines": 121,
+   "claim": "Hidden exams as machinery (Part 8 layer 3).",
+   "sections": [
+    "closed-book",
+    "dispatch",
+    "re-dispatch"
+   ],
+   "assertions": 16,
+   "modules_exercised": [],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_faults.py",
+   "lines": 182,
+   "claim": "Fault injection: break every contract on purpose and prove the validator",
+   "sections": [],
+   "assertions": 22,
+   "modules_exercised": [
+    "approvals",
+    "citecheck",
+    "effects",
+    "fleet",
+    "loop",
+    "mcp",
+    "memory",
+    "policy"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_federation.py",
+   "lines": 259,
+   "claim": "The three ideas worth taking from the EDEN corpus, implemented and proven.",
+   "sections": [
+    "card",
+    "trust",
+    "ask",
+    "fetch",
+    "evidence",
+    "promotion",
+    "digest"
+   ],
+   "assertions": 37,
+   "modules_exercised": [
+    "commons",
+    "federation",
+    "fleet",
+    "team"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_fleet.py",
+   "lines": 72,
+   "claim": "The expert fleet: one-command duplication, private identity, isolated memory.",
+   "sections": [
+    "identity",
+    "isolation",
+    "fleet"
+   ],
+   "assertions": 11,
+   "modules_exercised": [
+    "fleet",
+    "loop"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_frontend.py",
+   "lines": 170,
+   "claim": "The frontend itself: the page is served from ui.html, wires every tab to a",
+   "sections": [
+    "syntax",
+    "page",
+    "serve",
+    "fresh",
+    "live"
+   ],
+   "assertions": 15,
+   "modules_exercised": [],
+   "uses_subprocess": true
+  },
+  {
+   "file": "tests/test_goal.py",
+   "lines": 204,
+   "claim": "Goal pursuit + the commons: the smart loop that will not stop early.",
+   "sections": [
+    "judge",
+    "replan",
+    "shape",
+    "commons",
+    "share",
+    "peer"
+   ],
+   "assertions": 24,
+   "modules_exercised": [
+    "commons",
+    "fleet",
+    "goal",
+    "loop"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_governance.py",
+   "lines": 96,
+   "claim": "Governance of the learner, and compaction as a contract.",
+   "sections": [
+    "boundary",
+    "contract",
+    "trigger"
+   ],
+   "assertions": 11,
+   "modules_exercised": [
+    "loop",
+    "variants"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_guardrails.py",
+   "lines": 158,
+   "claim": "Community-researched guardrails: the failure modes agent builders report",
+   "sections": [
+    "budget",
+    "repetition",
+    "rule-of-two",
+    "marking",
+    "secrets"
+   ],
+   "assertions": 20,
+   "modules_exercised": [
+    "loop"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_harness.py",
+   "lines": 137,
+   "claim": "The harness as an inspectable, self-auditing object (M1).",
+   "sections": [
+    "manifest",
+    "contracts",
+    "ritual",
+    "panel"
+   ],
+   "assertions": 27,
+   "modules_exercised": [
+    "fleet",
+    "harness",
+    "loop"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_inbox.py",
+   "lines": 115,
+   "claim": "Inbox scanner + real extraction (Part 4 ingestion, offline parts).",
+   "sections": [
+    "text",
+    "pdf",
+    "pdf",
+    "audio",
+    "audio",
+    "unknown"
+   ],
+   "assertions": 15,
+   "modules_exercised": [],
+   "uses_subprocess": true
+  },
+  {
+   "file": "tests/test_json_toolcall.py",
+   "lines": 43,
+   "claim": "Inline-JSON tool calls (the grounding-header format).",
+   "sections": [],
+   "assertions": 4,
+   "modules_exercised": [],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_lanes.py",
+   "lines": 220,
+   "claim": "The five agent-creation lanes \u2014 and every framework behind the panel \u2014",
+   "sections": [
+    "teach",
+    "intentions",
+    "federation",
+    "shapes"
+   ],
+   "assertions": 30,
+   "modules_exercised": [
+    "federation"
+   ],
+   "uses_subprocess": true
+  },
+  {
+   "file": "tests/test_layers.py",
+   "lines": 166,
+   "claim": "The seven-layer agent contract, enforced as constraints rather than prompts.",
+   "sections": [],
+   "assertions": 23,
+   "modules_exercised": [
+    "loop"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_local.py",
+   "lines": 64,
+   "claim": "Local-testing ecosystem: agent.env auto-loading, the daemon scanning its",
+   "sections": [
+    "env",
+    "inbox",
+    "demo"
+   ],
+   "assertions": 10,
+   "modules_exercised": [
+    "loop"
+   ],
+   "uses_subprocess": true
+  },
+  {
+   "file": "tests/test_lock.py",
+   "lines": 84,
+   "claim": "Single-writer course lock (Part 5 B7).",
+   "sections": [
+    "unit",
+    "integration"
+   ],
+   "assertions": 10,
+   "modules_exercised": [
+    "loop"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_material.py",
+   "lines": 0,
+   "claim": "",
+   "sections": [
+    "hosts",
+    "subs",
+    "folder",
+    "zip",
+    "formats",
+    "crawl"
+   ],
+   "assertions": 26,
+   "modules_exercised": [],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_mcp.py",
+   "lines": 138,
+   "claim": "Plug ANY MCP tool server into the fleet \u2014 proven against a faithful",
+   "sections": [
+    "handshake",
+    "fence",
+    "bounded",
+    "toolbox",
+    "a2a"
+   ],
+   "assertions": 19,
+   "modules_exercised": [
+    "federation",
+    "fleet",
+    "mcp",
+    "toolbox"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_memcheck.py",
+   "lines": 75,
+   "claim": "Memory integrity (memcheck.py).",
+   "sections": [
+    "broken",
+    "repaired"
+   ],
+   "assertions": 4,
+   "modules_exercised": [],
+   "uses_subprocess": true
+  },
+  {
+   "file": "tests/test_memory.py",
+   "lines": 186,
+   "claim": "The memory institution: the categories that outlive models and agents.",
+   "sections": [
+    "classify",
+    "failures",
+    "competence",
+    "retired",
+    "preserve",
+    "automatic"
+   ],
+   "assertions": 34,
+   "modules_exercised": [
+    "fleet",
+    "loop",
+    "memory"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_memory_kinds.py",
+   "lines": 204,
+   "claim": "Memory has KINDS, and the harness routes between them (M4).",
+   "sections": [
+    "file",
+    "recall",
+    "scope",
+    "premise",
+    "router",
+    "curation"
+   ],
+   "assertions": 38,
+   "modules_exercised": [
+    "commons",
+    "context",
+    "fleet",
+    "gotchas",
+    "loop",
+    "memrouter",
+    "premise"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_modelrouter.py",
+   "lines": 148,
+   "claim": "Model routing is EARNED, not declared (M6).",
+   "sections": [
+    "unproven",
+    "earned",
+    "demoted",
+    "fallback",
+    "loop",
+    "panel"
+   ],
+   "assertions": 19,
+   "modules_exercised": [
+    "fleet",
+    "loop",
+    "modelrouter"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_panel_v2.py",
+   "lines": 175,
+   "claim": "The control plane's second half (M7): edit what the agent IS, read what",
+   "sections": [
+    "identity",
+    "pins",
+    "thread",
+    "approval",
+    "home"
+   ],
+   "assertions": 34,
+   "modules_exercised": [
+    "approvals",
+    "commons",
+    "context",
+    "fleet",
+    "loop"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_paths.py",
+   "lines": 46,
+   "claim": "Path containment (constitution rule 3, mechanically enforced).",
+   "sections": [],
+   "assertions": 6,
+   "modules_exercised": [],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_preflight.py",
+   "lines": 189,
+   "claim": "The production audit tells the truth about THIS installation (M11).",
+   "sections": [
+    "blocker",
+    "cleared",
+    "cost",
+    "integrity",
+    "access",
+    "verdict",
+    "critic",
+    "robust"
+   ],
+   "assertions": 28,
+   "modules_exercised": [
+    "backup",
+    "fleet",
+    "preflight"
+   ],
+   "uses_subprocess": true
+  },
+  {
+   "file": "tests/test_prospective.py",
+   "lines": 138,
+   "claim": "Prospective memory: remembering to ACT later, executed by the scheduler \u2014",
+   "sections": [
+    "deadline",
+    "watch",
+    "chain",
+    "recur",
+    "safety",
+    "loop"
+   ],
+   "assertions": 21,
+   "modules_exercised": [
+    "loop",
+    "prospective"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_providers.py",
+   "lines": 170,
+   "claim": "Plug in any model, from any platform \u2014 and any tool you provide.",
+   "sections": [
+    "add",
+    "roles",
+    "catalog",
+    "custom",
+    "fleet-tools"
+   ],
+   "assertions": 26,
+   "modules_exercised": [
+    "fleet",
+    "loop",
+    "providers",
+    "toolbox"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_quick.py",
+   "lines": 197,
+   "claim": "Quick Specialists: spun up in seconds, still caged by every gate.",
+   "sections": [
+    "kind",
+    "briefing",
+    "operator",
+    "advisor"
+   ],
+   "assertions": 24,
+   "modules_exercised": [
+    "quick"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_recall.py",
+   "lines": 92,
+   "claim": "The three-tier memory contract (MemGPT/Letta pattern): context that leaves",
+   "sections": [
+    "archive",
+    "recall"
+   ],
+   "assertions": 9,
+   "modules_exercised": [
+    "loop",
+    "recall"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_reflector.py",
+   "lines": 48,
+   "claim": "Reflection chain (Part 9 mechanism 2).",
+   "sections": [],
+   "assertions": 4,
+   "modules_exercised": [],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_reliability.py",
+   "lines": 45,
+   "claim": "Corrupt-state quarantine.",
+   "sections": [],
+   "assertions": 5,
+   "modules_exercised": [
+    "loop"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_remote.py",
+   "lines": 95,
+   "claim": "Remote access: token auth on the control panel.",
+   "sections": [
+    "deny",
+    "allow",
+    "writes"
+   ],
+   "assertions": 7,
+   "modules_exercised": [],
+   "uses_subprocess": true
+  },
+  {
+   "file": "tests/test_replay.py",
+   "lines": 70,
+   "claim": "Trajectory replay \u2014 a number for \"how much does this model agree with our",
+   "sections": [
+    "same",
+    "swap"
+   ],
+   "assertions": 10,
+   "modules_exercised": [
+    "replay"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_research.py",
+   "lines": 115,
+   "claim": "Establish the facts BEFORE answering the question (P3).",
+   "sections": [
+    "decompose",
+    "retrieve",
+    "brief",
+    "handoff",
+    "deterministic"
+   ],
+   "assertions": 20,
+   "modules_exercised": [
+    "consult",
+    "research"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_resume.py",
+   "lines": 96,
+   "claim": "Acceptance test B (Part 12): kill-and-resume.",
+   "sections": [
+    "setup"
+   ],
+   "assertions": 9,
+   "modules_exercised": [],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_retention.py",
+   "lines": 155,
+   "claim": "Durability under months of operation \u2014 the hardening that keeps a 24/7",
+   "sections": [
+    "bounded",
+    "lossless",
+    "flat",
+    "context",
+    "heartbeat"
+   ],
+   "assertions": 19,
+   "modules_exercised": [
+    "fleet",
+    "loop",
+    "recall"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_retry.py",
+   "lines": 63,
+   "claim": "Failure retries (the endurance promise).",
+   "sections": [],
+   "assertions": 13,
+   "modules_exercised": [],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_routines.py",
+   "lines": 147,
+   "claim": "ROUTINES: show the work once, then it is a standing arrangement (M6).",
+   "sections": [
+    "save",
+    "refuse",
+    "fire",
+    "panel"
+   ],
+   "assertions": 24,
+   "modules_exercised": [
+    "context",
+    "fleet",
+    "loop",
+    "prospective",
+    "routines"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_sandbox.py",
+   "lines": 131,
+   "claim": "WHERE commands run is a setting, and it FAILS CLOSED (M5).",
+   "sections": [
+    "host",
+    "closed",
+    "loop",
+    "order",
+    "docker",
+    "docker",
+    "docker"
+   ],
+   "assertions": 17,
+   "modules_exercised": [
+    "loop",
+    "sandbox"
+   ],
+   "uses_subprocess": true
+  },
+  {
+   "file": "tests/test_secrets.py",
+   "lines": 122,
+   "claim": "A model-written command NEVER sees the harness's credentials (M9).",
+   "sections": [
+    "scrub",
+    "scoped",
+    "owner",
+    "e2e",
+    "timeout"
+   ],
+   "assertions": 23,
+   "modules_exercised": [
+    "loop",
+    "sandbox"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_skillgraph.py",
+   "lines": 141,
+   "claim": "The Skill Graph: procedural memory with a promotion gate (HyperSkill +",
+   "sections": [
+    "gate",
+    "quarantine",
+    "select",
+    "banner",
+    "loop"
+   ],
+   "assertions": 20,
+   "modules_exercised": [
+    "skills"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_skillmd.py",
+   "lines": 190,
+   "claim": "Skills as folders (the Agent Skills standard) with PROVENANCE (M5).",
+   "sections": [
+    "discover",
+    "disclosure",
+    "mediation",
+    "trust",
+    "supply"
+   ],
+   "assertions": 36,
+   "modules_exercised": [
+    "context",
+    "fleet",
+    "loop",
+    "skills"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_skills.py",
+   "lines": 68,
+   "claim": "Acceptance test F analog (Part 12): skills compounding, the plumbing half.",
+   "sections": [],
+   "assertions": 5,
+   "modules_exercised": [],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_stop.py",
+   "lines": 138,
+   "claim": "Every loop is defined by its STOP CONDITION (M2-L1): declared on the",
+   "sections": [
+    "deadline",
+    "attempts",
+    "steps",
+    "context",
+    "surface"
+   ],
+   "assertions": 17,
+   "modules_exercised": [
+    "fleet",
+    "loop",
+    "memory"
+   ],
+   "uses_subprocess": true
+  },
+  {
+   "file": "tests/test_team.py",
+   "lines": 130,
+   "claim": "Teams: chosen specialists collaborate \u2014 lead decomposes, workers run",
+   "sections": [
+    "flow",
+    "handoff",
+    "isolation",
+    "result"
+   ],
+   "assertions": 13,
+   "modules_exercised": [
+    "fleet",
+    "team"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_toolbox.py",
+   "lines": 86,
+   "claim": "Toolbox + pre-built specialists: agents are TOLD what tools exist, and the",
+   "sections": [
+    "scan",
+    "gallery",
+    "quick"
+   ],
+   "assertions": 15,
+   "modules_exercised": [
+    "quick",
+    "templates",
+    "toolbox"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_trace.py",
+   "lines": 114,
+   "claim": "ONE TRACE PER TASK, and tool errors counted apart from model errors (M6).",
+   "sections": [
+    "spans",
+    "tools",
+    "brief",
+    "robust",
+    "panel"
+   ],
+   "assertions": 24,
+   "modules_exercised": [
+    "fleet",
+    "loop",
+    "trace"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_ui.py",
+   "lines": 187,
+   "claim": "The control panel: create an expert with one click, teach it a link and a",
+   "sections": [
+    "up",
+    "create",
+    "teach",
+    "safety",
+    "system",
+    "board",
+    "memory",
+    "tools",
+    "tools",
+    "tools",
+    "tools",
+    "danger"
+   ],
+   "assertions": 28,
+   "modules_exercised": [],
+   "uses_subprocess": true
+  },
+  {
+   "file": "tests/test_uicards.py",
+   "lines": 180,
+   "claim": "GENERATIVE UI FROM A CLOSED CATALOGUE (M7).",
+   "sections": [
+    "catalogue",
+    "closed",
+    "inert",
+    "loop",
+    "client",
+    "client"
+   ],
+   "assertions": 25,
+   "modules_exercised": [
+    "fleet",
+    "loop",
+    "uicards"
+   ],
+   "uses_subprocess": true
+  },
+  {
+   "file": "tests/test_url.py",
+   "lines": 80,
+   "claim": "Any-link learning.",
+   "sections": [
+    "extract",
+    "page",
+    "youtube"
+   ],
+   "assertions": 10,
+   "modules_exercised": [
+    "ingest"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_variants.py",
+   "lines": 130,
+   "claim": "Charter evolution with a promotion gate \u2014 the Agent Selection Farm idea,",
+   "sections": [
+    "guards",
+    "trial",
+    "promote",
+    "tie",
+    "rollback"
+   ],
+   "assertions": 14,
+   "modules_exercised": [
+    "variants"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_verify.py",
+   "lines": 66,
+   "claim": "Mechanical spec verification (Part 8 layer 1).",
+   "sections": [],
+   "assertions": 7,
+   "modules_exercised": [],
+   "uses_subprocess": true
+  },
+  {
+   "file": "tests/test_wake.py",
+   "lines": 119,
+   "claim": "Wake-on-event (M2-L3): an external system delivers an event and the",
+   "sections": [
+    "wake",
+    "repeat",
+    "direct",
+    "run"
+   ],
+   "assertions": 16,
+   "modules_exercised": [
+    "fleet",
+    "prospective"
+   ],
+   "uses_subprocess": false
+  },
+  {
+   "file": "tests/test_workflows.py",
+   "lines": 108,
+   "claim": "Deterministic workflows: fixed stages, each a gated task, each firing the",
+   "sections": [
+    "chain",
+    "halt",
+    "guard"
+   ],
+   "assertions": 14,
+   "modules_exercised": [
+    "workflows"
+   ],
+   "uses_subprocess": false
+  }
+ ]
+}

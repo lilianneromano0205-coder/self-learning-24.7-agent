@@ -1,0 +1,143 @@
+#!/usr/bin/env python3
+"""The agent works from an accurate model of ITSELF (M9).
+
+Not a persona and not a claim about consciousness: a compiled, factual
+account of what this expert has verified, what it has proven, what it has
+failed at, and where its knowledge ends -- read from the ledgers the harness
+already writes, so it cannot flatter itself.
+
+1. a brand-new expert is told plainly that it has studied nothing
+2. after study, it reports its courses, verified atoms, exam result and the
+   authority tiers its knowledge rests on
+3. an unexamined course is named as unproven; a lucky single success is
+   reported as "insufficient evidence"; a quarantined playbook is named as
+   do-not-use
+4. it knows the constraints of THIS run: role, tools, where commands execute
+5. the block reaches the window -- including a closed-book exam, because
+   knowing what you have not studied is not course material
+
+Run from the agent/ directory:  python tests/test_awareness.py
+"""
+
+import json
+import os
+import sys
+
+from common import AGENT_DIR, make_sandbox
+
+sys.path.insert(0, AGENT_DIR)
+import context
+import fleet
+import loop
+import memory
+import selfmodel
+import skills
+import sources
+
+
+def write(root, rel, text):
+    p = os.path.join(root, rel.replace("/", os.sep))
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(text)
+    return rel
+
+
+def main():
+    home = make_sandbox("awareness", providers={"m": {"script": "s.json"}},
+                        roles={"tester": "m"}, scripts={"s.json": []})
+    root = fleet.create(home, "Aware One", "designs interfaces that work")
+
+    # --- 1. a fresh expert admits it knows nothing
+    block = selfmodel.render(selfmodel.build(root))
+    assert "studied NOTHING" in block, block
+    assert "Aware One" in block or "aware-one" in block
+    assert "not in my training" in block.lower() or "stop" in block.lower()
+    print("[fresh] a new expert is told it has verified nothing yet, instead "
+          "of being handed a confident persona")
+
+    # --- 2. after study it reports what it actually has
+    write(root, "courses/design/notes.md",
+          "- C-0101 Contrast for body text is at least 4.5:1 "
+          "[src: https://www.w3.org/TR/WCAG22/]\n"
+          "- C-0102 Focus rings must remain visible on every control "
+          "[src: https://www.w3.org/TR/WCAG22/]\n")
+    write(root, "courses/design/exam-results.md",
+          "# Exam 1\nScore: 92%\nVerdict: PASS\n")
+    write(root, "courses/design/gaps.md",
+          "- motion and animation timing is not covered by any source yet\n")
+    write(root, "courses/typography/notes.md",
+          "- C-0201 Line length reads best near 66 characters "
+          "[src: https://practicaltypography.com]\n")
+    sources.record(root, "design", "https://www.w3.org/TR/WCAG22/", "WCAG 2.2")
+    sources.record(root, "typography", "https://practicaltypography.com",
+                   "Practical Typography")
+    m = selfmodel.build(root)
+    by_course = {s["course"]: s for s in m["studied"]}
+    assert by_course["design"]["atoms"] == 2, by_course["design"]
+    assert by_course["design"]["exam"]["score"] == 92
+    assert by_course["design"]["exam"]["verdict"] == "pass"
+    assert by_course["typography"]["exam"] is None
+    block = selfmodel.render(m)
+    assert "studied design: 2 verified atom(s); exam 92% (pass)" in block, block
+    assert "tier 1" in block, "the tier its knowledge rests on is stated"
+    assert "NEVER EXAMINED" in block, "typography was never examined"
+    assert "motion and animation timing" in block, "its own gap is named"
+    print("[studied] it reports each course by verified atoms, exam result and "
+          "source tier -- and names the course it was never examined on")
+
+    # --- 3. evidence, not flattery
+    memory.record_outcome(home, "aware-one", "design", success=True,
+                          verified=True, task_id="t-1")
+    m2 = selfmodel.build(root)
+    comp = m2["proven"]["competence"]["design"]
+    assert comp["claim"] == "insufficient evidence", comp
+    assert "insufficient evidence" in selfmodel.render(m2)
+    for i in range(3):
+        skills.record_use(root, ["skills/guess-the-spacing.md"],
+                          f"t-loss-{i}", success=False)
+    assert skills.status_of(root, "skills/guess-the-spacing.md") == "quarantined"
+    block3 = selfmodel.render(selfmodel.build(root))
+    assert "quarantined playbooks (do NOT use): guess-the-spacing" in block3
+    print("[evidence] one lucky success is reported as insufficient evidence, "
+          "and a playbook that lost three times is named as do-not-use")
+
+    # --- 4. the constraints of this run
+    n = selfmodel.build(root, role="tester",
+                        task={"id": "t-x", "role": "tester",
+                              "stop": {"max_steps": 4}})["now"]
+    assert n["role"] == "tester" and n["sandbox"] == "host"
+    assert "finish_task" in (n.get("tools") or []), n
+    assert n["stop"] == {"max_steps": 4}
+    # a role with no provider configured is a fact about itself, not a crash
+    unconfigured = selfmodel.build(root, role="student")
+    assert "[roles.student]" in unconfigured["now"].get("role_problem", ""), \
+        unconfigured["now"]
+    assert "WARNING" in selfmodel.render(unconfigured)
+    print("[now] it knows its role, its allowed tools, its stop condition and "
+          "where commands run -- and says so when a role has no provider")
+
+    # --- 5. it reaches the window, closed book included
+    a = loop.Agent(root)
+    msgs, man = context.compile(a, {"id": "t-self", "role": "practitioner",
+                                    "course": "design", "memory_files": [],
+                                    "goal": "improve the contrast of the app"})
+    user = msgs[1]["content"]
+    assert user.startswith("SELF —") or "SELF —" in user[:400], user[:200]
+    ssrc = [s for s in man["sources"] if s["name"] == "self"][0]
+    assert ssrc["used_tokens"] > 0 and not ssrc["excluded_by_router"]
+    exam_msgs, exam_man = context.compile(
+        a, {"id": "t-exam", "role": "student", "course": "design",
+            "memory_files": [], "goal": "sit the closed-book exam on design"})
+    ex = {s["name"]: s["excluded_by_router"] for s in exam_man["sources"]}
+    assert not ex["self"], "a student keeps its self-model"
+    assert ex["commons"] and ex["skills"], "and stays closed-book otherwise"
+    assert "4.5:1" not in exam_msgs[1]["content"], \
+        "the self-model must never smuggle the answers in"
+    print("[window] the self-model leads every context window, survives a "
+          "closed-book exam, and carries no course content with it")
+    print("PASS test_awareness")
+
+
+if __name__ == "__main__":
+    main()

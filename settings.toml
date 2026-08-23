@@ -1,0 +1,186 @@
+# ----------------------------------------------------------------- agent
+[agent]
+max_steps = 150                     # runaway-loop ceiling per task
+command_timeout_seconds = 300       # hard timeout on run_command
+model_timeout_seconds = 180
+poll_interval_seconds = 10          # sleep when the queue is empty
+context_token_threshold = 50000     # past this, oldest turns get compacted
+context_keep_recent_messages = 10
+max_malformed_tool_calls = 3
+lock_stale_minutes = 30             # single-writer course lock staleness
+reflect_after = ["practitioner"]    # roles that get a Reflector task on finish
+daily_budget_usd = 10               # circuit breaker: pause when today's spend
+                                    # hits this (0 disables). Provider spend
+                                    # caps remain the outer wall.
+max_output_tokens = 0               # cap per model response (0 = provider default)
+retain_finished_tasks = 150         # finished tasks kept in the hot queue;
+                                    # older ones move to logs/tasks-archive.jsonl
+                                    # so a fleet running for months stays fast
+max_task_usd = 2.0                  # hard per-run cost ceiling (0 disables) —
+                                    # the third brake, beside max_steps and finish_task
+max_done_rejects = 6                # refusals of finish_task before the task fails
+escalate_after_errors = 3           # consecutive tool errors -> stronger model
+exam_threshold = 90                 # minimum exam score for course completion
+reexam_days = [7, 30, 90]           # spaced re-exams after completion (Part 8)
+max_skills_loaded = 3               # skills/ playbooks auto-loaded per task
+
+# --- keys the code reads that this file used to leave undeclared. An audit
+# --- found ten of them; two decide containment, so an operator reading only
+# --- settings.toml could not see what their fleet was actually doing.
+auto_scan_inbox = true              # the idle tick scans inbox/ by itself
+inbox_settle_seconds = 10           # ignore files still being copied in
+max_task_retries = 3                # retries of a failed task before it rests
+candidates_max = 5                  # test-time compute: attempts to score
+candidates_on_gate_failure = true   # escalate n on a refused finish_task
+design_gate = true                  # interface deliverables must pass designcheck
+
+# WHERE model-written commands run, and WHAT they can see. Both the tool path
+# (run_command) and the verification path (done_check / spec CHECK: lines) go
+# through these — the gate used to bypass them and see the full environment.
+sandbox = "host"                    # host | docker | e2b | daytona.
+                                    # An unavailable backend FAILS CLOSED: it
+                                    # refuses rather than falling back to host.
+sandbox_network = true              # false cuts network inside the sandbox
+# sandbox_image = "python:3.12-slim"  # image for the docker backend
+command_env_allow = []              # env vars a command MAY see. Everything
+                                    # credential-shaped is withheld by default;
+                                    # name one here only when a tool needs it.
+
+# Pipeline chaining: when the left role finishes a task, queue the right role
+# on the same course. Gaps feedback (the mandated edge) is automatic anyway.
+[agent.chain]
+ripper = "watcher"
+student = "examiner"                # a sat exam is always graded
+# watcher = "practitioner"          # enable to auto-execute after each study pass
+# practitioner = "examiner"         # enable to auto-grade after each execution
+
+# ------------------------------------------------------------- providers
+# Any OpenAI-compatible endpoint works. Keys come from the environment
+# (api_key_env) or a file readable only by the agent user (api_key_file) —
+# never from this repo. Set spend caps on every key BEFORE first use.
+
+[providers.deepseek]
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "DEEPSEEK_API_KEY"
+# api_key_file = "/home/agent/.keys/deepseek"
+input_per_mtok = 0.27               # USD per 1M input tokens (for cost logging)
+output_per_mtok = 1.10
+
+[providers.groq]
+base_url = "https://api.groq.com/openai/v1"
+api_key_env = "GROQ_API_KEY"
+input_per_mtok = 0.59
+output_per_mtok = 0.79
+
+[providers.nvidia]
+# NVIDIA Build: 100+ hosted models (DeepSeek, Llama, Qwen, Nemotron, vision)
+# FREE with a Developer Program key from build.nvidia.com (nvapi-…, no card,
+# ~40 req/min). OpenAI-compatible, so it drops straight into any role:
+#   [roles.watcher]  provider = "nvidia"  model = "deepseek-ai/deepseek-v4"
+base_url = "https://integrate.api.nvidia.com/v1"
+api_key_env = "NVIDIA_API_KEY"
+
+[providers.huggingface]
+# Hugging Face Inference Providers router: one HF token reaches Groq,
+# Together, Fireworks, Cerebras and more, with free monthly credits.
+# Browse ids at huggingface.co/models?inference_provider=all
+base_url = "https://router.huggingface.co/v1"
+api_key_env = "HF_TOKEN"
+
+[providers.openrouter]
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+# native_tools = false             # set for models without function calling;
+                                   # the agent then uses the grounding header's
+                                   # inline-JSON tool format automatically
+# [providers.openrouter.extra_headers]      # optional OpenRouter attribution
+# HTTP-Referer = "https://your-site.example"
+# X-Title = "learning-agent"
+
+# To run ANY role through OpenRouter, point it there — two lines per role:
+#   [roles.watcher]
+#   provider = "openrouter"
+#   model = "deepseek/deepseek-chat"     # any id from openrouter.ai/models
+# Verify wiring with one command before running:  python loop.py check
+#
+# RECOMMENDED LANE (Aug 2026) — frontier quality, small money. One OpenRouter
+# key runs every role; swap a model id and re-run `python loop.py check`.
+#   workers  (Watcher/Librarian/Practitioner/Student):
+#     "deepseek/deepseek-v4-pro"        ~80.6% SWE-bench at a fraction of
+#                                        frontier output price — the value pick
+#   Examiner (MUST be a different family — uncorrelated blind spots):
+#     "google/gemini-3.5-flash"          fast, cheap, multimodal
+#     "anthropic/claude-opus-4.7"        if you want the strongest judge
+#   Ripper/Reflector (cheap mechanical work):
+#     "deepseek/deepseek-v4-flash"
+#   vision (scanned pages, slides): OPENROUTER_VISION_MODEL env var,
+#     default "google/gemini-flash-1.5"; "google/gemini-3.5-flash" is stronger.
+# Routing cheap work to cheap models and hard judging to a strong one is the
+# 2026 production norm — this file is already shaped for it.
+#
+# FREE LANE — open-source models at $0 via OpenRouter's :free tier.
+# A free OpenRouter account + one key runs the ENTIRE system without charge
+# (rate-limited; ideal for testing and light overnight study). Example:
+#   model = "deepseek/deepseek-chat-v3-0324:free"        # workers
+#   model = "meta-llama/llama-3.3-70b-instruct:free"     # Examiner
+#     (different family than the workers, kept uncorrelated — for free)
+# Browse current free ids: https://openrouter.ai/models?max_price=0
+# Then: python loop.py check — every role must say OK.
+
+# ----------------------------------------------------------------- roles
+# One block per role; switching provider/model is a one-line change.
+# Role -> model mapping per the master document Part 7: Ripper/Reflector on
+# the cheapest capable model; workers on DeepSeek; the Examiner on a
+# DIFFERENT model family (Groq Llama) so blind spots don't overlap.
+
+[roles.default]
+provider = "deepseek"
+model = "deepseek-chat"
+
+[roles.ripper]
+provider = "deepseek"
+model = "deepseek-chat"
+
+[roles.watcher]
+provider = "deepseek"
+model = "deepseek-chat"
+# Rule of Two: roles that read untrusted source material don't hold run_command
+tools = ["read_file", "write_file", "finish_task", "ask_human"]
+
+[roles.librarian]
+provider = "deepseek"
+model = "deepseek-chat"
+tools = ["read_file", "write_file", "finish_task", "ask_human"]
+
+[roles.practitioner]
+provider = "deepseek"
+model = "deepseek-chat"
+fallback_provider = "openrouter"
+fallback_model = "deepseek/deepseek-chat"
+# Model routing: cheap by default, expensive on hard steps. This model takes
+# over when the agent hits escalate_after_errors consecutive tool errors, or
+# writes [[ESCALATE]] itself. Uncomment once you have the key.
+# escalate_provider = "openrouter"
+# escalate_model = "anthropic/claude-opus-4.7"
+
+[roles.examiner]
+provider = "groq"
+model = "llama-3.3-70b-versatile"
+
+[roles.reflector]
+provider = "deepseek"
+model = "deepseek-chat"
+tools = ["read_file", "write_file", "finish_task", "ask_human"]
+
+[roles.consultant]
+provider = "deepseek"
+model = "deepseek-chat"
+# answers only — no shell; evidence is injected by the harness (consult.py)
+tools = ["read_file", "write_file", "finish_task", "ask_human"]
+
+[roles.student]
+provider = "deepseek"
+model = "deepseek-chat"
+# CLOSED BOOK BY CONSTRUCTION: no read access at all — the Student cannot
+# open the notes even if it tries; mission/index/questions arrive in context.
+tools = ["write_file", "finish_task", "ask_human"]

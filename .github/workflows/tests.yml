@@ -1,0 +1,80 @@
+# The suite is the specification, so it runs on every push.
+#
+# It is keyless by construction: every model call in the tests goes to the
+# scripted mock provider, so this workflow needs no secrets and cannot spend
+# money. That is also its limit — a green run proves the harness holds, not
+# that any provider works. `python loop.py check` is the live probe, and it
+# belongs in your deploy, not here.
+name: tests
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  suite:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.11", "3.12", "3.13"]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: No third-party dependencies
+        shell: bash
+        run: |
+          test ! -f requirements.txt && test ! -f pyproject.toml \
+            && echo "stdlib only, as designed" || {
+              echo "a dependency file appeared — this platform ships stdlib only"
+              exit 1
+            }
+
+      - name: Every core module imports
+        shell: bash
+        run: |
+          python - <<'PY'
+          import doctor
+          bad = []
+          for m in doctor.CORE_MODULES:
+              try:
+                  __import__(m)
+              except Exception as e:
+                  bad.append(f"{m}: {type(e).__name__}: {e}")
+          if bad:
+              print("\n".join(bad))
+              raise SystemExit(1)
+          print(f"{len(doctor.CORE_MODULES)} core modules import cleanly")
+          PY
+
+      - name: Harness contracts hold
+        run: python harness.py --check
+
+      - name: Acceptance suite
+        run: python tests/run_all.py
+
+      - name: Package builds without secrets
+        shell: bash
+        run: |
+          python package.py --out ./dist.zip
+          python - <<'PY'
+          import zipfile
+          names = zipfile.ZipFile("dist.zip").namelist()
+          # an EMPTY experts/ scaffold is intentional (a fresh unzip must be
+          # runnable); expert DATA is what must never ship
+          leaked = [n for n in names
+                    if n.rsplit("/", 1)[-1] in ("agent.env", "ui-token.txt",
+                                                "state.json")
+                    or (n.startswith("experts/")
+                        and n.rsplit("/", 1)[-1] not in (".gitkeep", ""))]
+          assert not leaked, f"the archive carries private data: {leaked[:5]}"
+          print(f"{len(names)} files, no secrets, no expert data")
+          PY
