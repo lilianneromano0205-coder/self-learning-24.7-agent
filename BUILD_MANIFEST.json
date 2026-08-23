@@ -137,11 +137,32 @@
     "uncounted": 3
    }
   },
-  "coverage_statement": "All 58 top-level modules read line-by-line, plus ui.html (2698 lines), settings.toml and the 10 prompt files. No module remains structurally-inventoried only."
+  "coverage_statement": "All 58 top-level modules read line-by-line, plus ui.html (2698 lines), settings.toml and the 10 prompt files. No module remains structurally-inventoried only.",
+  "remediation": {
+   "state": "all P0/P1/P2 findings fixed; each carries a regression test",
+   "record": "REMEDIATION.md",
+   "new_modules": [
+    "credentials.py",
+    "gates.py"
+   ],
+   "new_tests": [
+    "tests/test_hardening.py",
+    "tests/test_csrf.py"
+   ],
+   "version_control": "git initialised; 187 files tracked; no credential tracked",
+   "verified": "83/83 tests pass twice consecutively; harness --check exit 0; preflight 0 blockers; EVIDENCE.md 341 observations, 83/83 classified",
+   "still_unverified": [
+    "live provider behaviour",
+    "docker/e2b backends",
+    "real MCP/A2A servers",
+    "24/7 endurance",
+    "routing attribution after failover (P3-2)"
+   ]
+  }
  },
  "totals": {
-  "modules": 58,
-  "module_lines": 19762,
+  "modules": 60,
+  "module_lines": 20776,
   "tests": 81,
   "test_lines": 10642,
   "test_assertions": 1466,
@@ -166,8 +187,8 @@
  "modules": [
   {
    "file": "approvals.py",
-   "sha256_12": "2b7cfeb60868",
-   "lines": 147,
+   "sha256_12": "ff8683f19ecc",
+   "lines": 156,
    "subsystem": "governance",
    "purpose": "Approval-gated side effects \u2014 the human in the loop, as a mechanism.",
    "entry_point": true,
@@ -213,8 +234,8 @@
   },
   {
    "file": "backup.py",
-   "sha256_12": "b3c0dd9bfdad",
-   "lines": 321,
+   "sha256_12": "71d4565e3b16",
+   "lines": 366,
    "subsystem": "control-plane",
    "purpose": "BACKUP AND RESTORE \u2014 the fleet's memory is the asset, so it is portable.",
    "entry_point": true,
@@ -428,8 +449,8 @@
   },
   {
    "file": "checkpoint.py",
-   "sha256_12": "aa1438cc8942",
-   "lines": 135,
+   "sha256_12": "c83eb9202875",
+   "lines": 138,
    "subsystem": "harness-loop",
    "purpose": "Fiber-style checkpoints for long tool work \u2014 recover, don't restart.",
    "entry_point": true,
@@ -460,8 +481,8 @@
   },
   {
    "file": "chief.py",
-   "sha256_12": "7bfc4cfe4f42",
-   "lines": 301,
+   "sha256_12": "4d3e8f445e10",
+   "lines": 306,
    "subsystem": "control-plane",
    "purpose": "Chief of Staff \u2014 the Personal Strategic Operator.",
    "entry_point": true,
@@ -535,8 +556,8 @@
   },
   {
    "file": "commons.py",
-   "sha256_12": "3c9c923b063a",
-   "lines": 404,
+   "sha256_12": "814530e02032",
+   "lines": 412,
    "subsystem": "memory",
    "purpose": "The Commons \u2014 shared memory for the whole fleet, plus peer consultation.",
    "entry_point": true,
@@ -838,8 +859,8 @@
   },
   {
    "file": "demo.py",
-   "sha256_12": "27020d4350db",
-   "lines": 184,
+   "sha256_12": "99dc241dbe9f",
+   "lines": 199,
    "subsystem": "support",
    "purpose": "No-keys demo: watch the entire ecosystem run on your machine, right now.",
    "entry_point": true,
@@ -947,8 +968,8 @@
   },
   {
    "file": "effects.py",
-   "sha256_12": "eec5caf3cb96",
-   "lines": 102,
+   "sha256_12": "4abf067084d9",
+   "lines": 153,
    "subsystem": "harness-loop",
    "purpose": "Effects ledger \u2014 exactly-once side effects across retries.",
    "entry_point": true,
@@ -981,8 +1002,8 @@
   },
   {
    "file": "evidence.py",
-   "sha256_12": "5a4b37b74bfe",
-   "lines": 308,
+   "sha256_12": "a0f6b01c34ef",
+   "lines": 309,
    "subsystem": "governance",
    "purpose": "EVIDENCE \u2014 why we believe each system works, and where belief runs out.",
    "entry_point": true,
@@ -1009,8 +1030,8 @@
   },
   {
    "file": "federation.py",
-   "sha256_12": "08065e130163",
-   "lines": 449,
+   "sha256_12": "319d069bd8d4",
+   "lines": 473,
    "subsystem": "control-plane",
    "purpose": "Federation \u2014 let another owner's agents work with yours, without trust.",
    "entry_point": true,
@@ -1147,8 +1168,8 @@
   },
   {
    "file": "goal.py",
-   "sha256_12": "bdf95071842c",
-   "lines": 363,
+   "sha256_12": "97095c19cce9",
+   "lines": 383,
    "subsystem": "work-systems",
    "purpose": "Goal pursuit \u2014 state what you want; the system pursues it until it is",
    "entry_point": true,
@@ -1279,8 +1300,8 @@
   },
   {
    "file": "ingest.py",
-   "sha256_12": "6193a3c5eaf0",
-   "lines": 985,
+   "sha256_12": "31a66c27358b",
+   "lines": 1010,
    "subsystem": "ingestion",
    "purpose": "Ingestion pipeline (Part 4): every input type, exact path. Stdlib-only;",
    "entry_point": true,
@@ -1360,8 +1381,8 @@
   },
   {
    "file": "locks.py",
-   "sha256_12": "0f83e78392e1",
-   "lines": 50,
+   "sha256_12": "60f54760f636",
+   "lines": 84,
    "subsystem": "harness-loop",
    "purpose": "One cross-process lock primitive for every mutating ledger.",
    "entry_point": false,
@@ -1388,8 +1409,8 @@
   },
   {
    "file": "loop.py",
-   "sha256_12": "f13e41d60eaf",
-   "lines": 2080,
+   "sha256_12": "3d9da445d4c0",
+   "lines": 2164,
    "subsystem": "harness-loop",
    "purpose": "Persistent autonomous agent loop (v4 master build document, Part 5).",
    "entry_point": true,
@@ -1559,8 +1580,8 @@
   },
   {
    "file": "mcp.py",
-   "sha256_12": "18334dd96a19",
-   "lines": 454,
+   "sha256_12": "6d74fb9f8fbb",
+   "lines": 469,
    "subsystem": "control-plane",
    "purpose": "MCP client \u2014 plug ANY Model Context Protocol tool server into the fleet.",
    "entry_point": true,
@@ -1638,8 +1659,8 @@
   },
   {
    "file": "memory.py",
-   "sha256_12": "8d9d575339ec",
-   "lines": 485,
+   "sha256_12": "53198c04140d",
+   "lines": 490,
    "subsystem": "memory",
    "purpose": "The fleet's memory institution \u2014 the categories that outlive every model,",
    "entry_point": true,
@@ -1730,8 +1751,8 @@
   },
   {
    "file": "modelrouter.py",
-   "sha256_12": "3b8a5a6a6044",
-   "lines": 238,
+   "sha256_12": "d1052aa19dd2",
+   "lines": 272,
    "subsystem": "control-plane",
    "purpose": "CAPABILITY ROUTING \u2014 pick the model from measured outcomes, not vibes.",
    "entry_point": true,
@@ -1769,8 +1790,8 @@
   },
   {
    "file": "package.py",
-   "sha256_12": "2593ad52ddd1",
-   "lines": 66,
+   "sha256_12": "3b4a1b1bf652",
+   "lines": 85,
    "subsystem": "support",
    "purpose": "Build the distributable archive.",
    "entry_point": true,
@@ -1905,8 +1926,8 @@
   },
   {
    "file": "prospective.py",
-   "sha256_12": "9870d2b6f3ad",
-   "lines": 325,
+   "sha256_12": "39161f1a4a05",
+   "lines": 348,
    "subsystem": "work-systems",
    "purpose": "Prospective memory \u2014 remembering to ACT, not just remembering facts.",
    "entry_point": true,
@@ -1959,8 +1980,8 @@
   },
   {
    "file": "providers.py",
-   "sha256_12": "5fbe71a99d4d",
-   "lines": 274,
+   "sha256_12": "8fc4d69d3b11",
+   "lines": 269,
    "subsystem": "control-plane",
    "purpose": "Plug in any model, from anywhere \u2014 and point any role at it.",
    "entry_point": true,
@@ -2082,8 +2103,8 @@
   },
   {
    "file": "replay.py",
-   "sha256_12": "89e919849349",
-   "lines": 172,
+   "sha256_12": "3725cd56d848",
+   "lines": 200,
    "subsystem": "governance",
    "purpose": "Trajectory replay \u2014 measure a model (or charter) against recorded",
    "entry_point": true,
@@ -2148,8 +2169,8 @@
   },
   {
    "file": "routines.py",
-   "sha256_12": "c80a6262f45b",
-   "lines": 224,
+   "sha256_12": "5b7f9e5a60ab",
+   "lines": 233,
    "subsystem": "work-systems",
    "purpose": "ROUTINES \u2014 show the work once, then have it done forever.",
    "entry_point": true,
@@ -2280,8 +2301,8 @@
   },
   {
    "file": "skills.py",
-   "sha256_12": "d4519e4b1428",
-   "lines": 535,
+   "sha256_12": "ed602f6da425",
+   "lines": 563,
    "subsystem": "memory",
    "purpose": "Skill Graph \u2014 procedural memory as a validated, composable graph.",
    "entry_point": true,
@@ -2348,8 +2369,8 @@
   },
   {
    "file": "sources.py",
-   "sha256_12": "76e1a0aa9506",
-   "lines": 321,
+   "sha256_12": "b43383fee34d",
+   "lines": 353,
    "subsystem": "memory",
    "purpose": "THE SOURCE LEDGER \u2014 every claim knows where it came from, and what that",
    "entry_point": true,
@@ -2592,8 +2613,8 @@
   },
   {
    "file": "ui.py",
-   "sha256_12": "825d6040a5ca",
-   "lines": 1572,
+   "sha256_12": "8fcceaac4120",
+   "lines": 1626,
    "subsystem": "control-plane",
    "purpose": "Expert Fleet control panel \u2014 mission control for the whole system.",
    "entry_point": true,
@@ -2758,8 +2779,8 @@
   },
   {
    "file": "verify.py",
-   "sha256_12": "9e98ec3df010",
-   "lines": 119,
+   "sha256_12": "803deae98e5c",
+   "lines": 147,
    "subsystem": "governance",
    "purpose": "Mechanical spec verification \u2014 layer 1 of the hierarchy (Part 8).",
    "entry_point": true,
@@ -2818,6 +2839,53 @@
     "test_workflows.py"
    ],
    "read_line_by_line": true
+  },
+  {
+   "file": "credentials.py",
+   "sha256_12": "0fc017617035",
+   "lines": 245,
+   "subsystem": "control-plane",
+   "purpose": "remediation: the one credential model",
+   "security_sensitive": true,
+   "read_line_by_line": true,
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [],
+   "classes": [],
+   "local_imports": [],
+   "imported_by": [],
+   "writes_state": false,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": true,
+   "emits_events": [],
+   "tested_by": [
+    "test_hardening.py"
+   ]
+  },
+  {
+   "file": "gates.py",
+   "sha256_12": "94b3eda88a2b",
+   "lines": 175,
+   "subsystem": "harness-loop",
+   "purpose": "remediation: the closed done-check catalogue",
+   "security_sensitive": true,
+   "read_line_by_line": true,
+   "entry_point": true,
+   "cli_subcommands": [],
+   "public_functions": [],
+   "classes": [],
+   "local_imports": [],
+   "imported_by": [],
+   "writes_state": false,
+   "executes_commands": false,
+   "network": false,
+   "reads_env": false,
+   "emits_events": [],
+   "tested_by": [
+    "test_hardening.py",
+    "test_csrf.py"
+   ]
   }
  ],
  "tests": [

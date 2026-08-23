@@ -1,9 +1,28 @@
 # Gaps, Risks and Unfinished Work
 
-Findings from the forensic audit, ranked by consequence. **Nothing here has
-been fixed** — this pass was read-only by instruction. Each entry states what
-is wrong, how I established it, what it costs, and the options, so the decision
-stays with the owner.
+> **STATUS — REMEDIATED.** Every P0 and P1 in this document, and all four P2s,
+> have been fixed and carry a regression test. See **`REMEDIATION.md`** for the
+> disposition of each finding, the test that holds it closed, and the residual
+> risk that remains. This document is preserved as the AUDIT RECORD — it says
+> what was wrong and how it was proven, which is the half a changelog loses.
+>
+> Verified after remediation: 83/83 tests pass twice consecutively,
+> `harness.py --check` exits 0, `preflight.py` reports 0 blockers.
+> Still open by nature, not by neglect: live-provider behaviour, Docker/E2B
+> backends, real MCP/A2A servers, and 24/7 endurance — all listed under
+> *Residual risk* in `REMEDIATION.md`.
+
+
+Findings from the forensic audit, ranked by consequence. Each entry states what
+was wrong, how it was established, what it cost, and the options that were
+open at the time.
+
+**Read this as the audit record, in the present tense of the audit.** It was
+written during a read-only pass, before anything was fixed, and the wording is
+deliberately left that way: the value of a finding is the evidence and the
+reasoning that produced it, and rewriting those in the past tense after the
+fact would quietly erase how each defect was actually proven. What happened
+*next* is in `REMEDIATION.md`.
 
 Severity scale:
 

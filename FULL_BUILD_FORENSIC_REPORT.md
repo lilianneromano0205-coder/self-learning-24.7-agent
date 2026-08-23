@@ -838,6 +838,13 @@ Stated plainly, because a report that omits its own blind spots is not an audit.
 
 ## 8B. Invariant Coverage Matrix
 
+> **Post-remediation note.** The matrix below records the state AT AUDIT TIME
+> and is left unaltered — an audit that edits its own findings after the fact
+> is worth nothing. Of the 11 invariants marked broken, **all 11 are now
+> fixed**, each with a regression test; the 2 marked prompt/config-enforced are
+> now mechanically enforced. `REMEDIATION.md` maps every row to its fix, and
+> `tests/test_hardening.py` + `tests/test_csrf.py` keep them closed.
+
 For every major invariant: all code paths that can reach the protected
 operation, whether the primary path is defended, whether the alternates are,
 and what happened when I tried to break it.
