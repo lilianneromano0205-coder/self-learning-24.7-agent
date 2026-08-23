@@ -1,0 +1,9 @@
+# Keep line endings stable across platforms. Without this, git's autocrlf
+# rewrites files on checkout, which changes their bytes — and the Proof
+# System hashes code to decide whether its evidence still describes it.
+# A badge must never downgrade because someone cloned on a different OS.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.pdf binary
+*.zip binary
