@@ -825,3 +825,13 @@ python preflight.py       # is this installation fit to run unattended
 | [EVIDENCE.md](EVIDENCE.md) | generated from an actual suite run, quoting each test verbatim |
 | [FULL_BUILD_FORENSIC_REPORT.md](FULL_BUILD_FORENSIC_REPORT.md) | the forensic audit, with evidence labels on every claim |
 | [CHANGELOG.md](CHANGELOG.md) | what shipped, and the defects each release found |
+
+---
+
+## Licence
+
+GNU Affero General Public License v3.0 — see [LICENSE](LICENSE) and the
+plain-language summary in [README.md](README.md#license). The operative
+consequence for this codebase is §13: it ships a network-facing control
+panel, so a modified version offered to others as a service must offer those
+users its source.

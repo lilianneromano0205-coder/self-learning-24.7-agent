@@ -228,3 +228,36 @@ contents.
 defects, each with reproduction and the test that holds it closed — **and
 three of them are defects in code written during those same passes**, because
 a report that finds faults only in other people's work is not an audit.
+
+---
+
+## License
+
+**GNU Affero General Public License v3.0** — see [LICENSE](LICENSE).
+
+Copyright © 2026 the Expert Fleet authors.
+
+AGPL was chosen deliberately rather than MIT or Apache. The clause that
+matters is **§13, Remote Network Interaction**: this platform ships a web
+control panel (`ui.py`), so anyone who modifies it and offers it to others
+over a network — a hosted "agent platform" built on this code — must make
+their modified source available to those users. A permissive licence would
+allow a closed hosted fork; this one does not.
+
+What that means in practice:
+
+- **Use it, privately, however you like.** Running it for yourself or inside
+  your company, modified or not, triggers nothing. AGPL obligations attach to
+  *distribution* and to *offering it over a network to others*.
+- **Modify and self-host for your own use** — still nothing to publish.
+- **Offer a modified version as a service to other people** — you must offer
+  those users the corresponding source of your modified version.
+- **Redistribute it** — under the same licence, with the source.
+
+> This is a plain-language summary for orientation, not legal advice. The
+> [LICENSE](LICENSE) file is the operative text, and if the distinction
+> matters to your situation you should read §13 yourself or ask a lawyer.
+
+If the copyright line should carry a legal name or entity rather than
+"the Expert Fleet authors", edit it here and in any file headers you add —
+it is the one thing in this repository that a tool should not have guessed.
