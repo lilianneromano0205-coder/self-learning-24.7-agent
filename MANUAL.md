@@ -213,6 +213,7 @@ dialogs, 40 px targets.
 | `python demo.py` | the whole platform, keyless, in one run |
 | `python preflight.py` | is this installation fit to run unattended? (§17) |
 | `python backup.py create\|verify\|restore\|list` | the memory is the asset — back it up and prove the restore |
+| `python backup.py push\|pull\|remote-list` | the same archives, on any S3-compatible store (R2, MinIO, B2, AWS) — signed with stdlib SigV4, no dependency |
 | `python proof.py [--refresh] [--feature F]` | every capability's proof level, why it holds, and the command that reproduces it; `--refresh` re-runs the covering tests and re-records the evidence |
 | `python mission.py new\|show\|meet\|block` | the objective, its success criteria and the evidence behind each |
 | `python workers.py add\|list\|choose` | the computers work can run on, and which one a task would use, with the reason |

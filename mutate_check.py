@@ -57,6 +57,22 @@ MUTATIONS = [
      "found, so the container never boots and no assertion is ever reached — "
      "a CAUGHT here would be the crash being counted, not the test noticing"),
 
+    ("backup: the S3 query string signed uncanonicalised", "backup.py",
+     '''    query = "&".join(f"{k}={v}" for k, v in sorted(parts))''',
+     '''    query = u.query or ""''',
+     "test_backup.py",
+     "every signed request with a query string rejected by the store"),
+
+    ("backup: a push proceeds without credentials", "backup.py",
+     '''    if not kid or not secret:
+        raise SystemExit(
+            f"ERROR: no S3 credentials. Put {S3_KEY_ID} and {S3_KEY_SECRET} "''',
+     '''    if False:
+        raise SystemExit(
+            f"ERROR: no S3 credentials. Put {S3_KEY_ID} and {S3_KEY_SECRET} "''',
+     "test_backup.py",
+     "an unauthenticated upload attempt instead of a refusal"),
+
     ("inbox: a zero settle window can still hold a file back", "ingest.py",
      '''        if settle > 0 and age < settle:''',
      '''        if age < settle:''',

@@ -410,9 +410,28 @@ Each item is scoped, and the first two need no new infrastructure.
    paste an account id, put `CLOUDFLARE_API_TOKEN` in `agent.env`, run
    `python loop.py check`. **This is the whole integration.**
 
-2. **`backup.py --s3` (small).** Push and pull archives to any S3-compatible
-   endpoint, R2 included. Keep it stdlib: R2 accepts presigned URLs, so this
-   is `urllib` plus an HMAC signature, not a dependency.
+2. **Push backups to R2** — *also done in this commit.* `backup.py` grew
+   `push`, `pull` and `remote-list` against any S3-compatible endpoint, with
+   AWS Signature V4 written in `hmac` + `urllib` rather than boto3, so the
+   zero-dependency promise holds.
+
+   ```bash
+   python backup.py push <archive> --endpoint https://<id>.r2.cloudflarestorage.com --bucket fleet
+   python backup.py pull  fleet-2026-08-24.zip --dest ../restored --endpoint ... --bucket fleet
+   python backup.py remote-list --endpoint ... --bucket fleet
+   ```
+
+   Signing correctness was the real question, since no bucket exists to test
+   against. AWS publishes example signatures; two of them — chosen because
+   their `SignedHeaders` set matches ours exactly — are now permanent
+   assertions in `test_backup.py`, **reproduced byte for byte**. The first
+   draft failed them: it signed the raw query string instead of
+   canonicalising it, which would have broken every `remote-list` call
+   (`?list-type=2`) and shown up against a live bucket as an opaque 403
+   rather than a diff. Credentials come through `credentials.resolve()` so
+   all four sources work; a `pull` re-verifies every manifest checksum before
+   returning; and a push with no credentials refuses by name **without
+   touching the network**.
 
 3. **A container image and a start/stop hook (medium).** `Dockerfile` already
    exists. Add: restore from R2 at boot, snapshot to R2 before sleep, and set

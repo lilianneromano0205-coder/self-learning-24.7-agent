@@ -14,6 +14,7 @@
 Run from the agent/ directory:  python tests/test_backup.py
 """
 
+import calendar
 import json
 import os
 import sys
@@ -185,6 +186,51 @@ def main():
     assert backup.age_days(os.path.join(home, "nowhere")) is None
     print("[freshness] the age helpers the preflight depends on report a real "
           "number, and None when there is nothing to report")
+
+    # --- 7. the remote path: signed correctly, and credentials never travel
+    # A backup that only exists on the machine being backed up is not a
+    # backup, so archives can be pushed to any S3-compatible store. That
+    # signing is AWS Signature V4 written here in stdlib, and the only honest
+    # way to know it is right without an account is AWS's OWN published
+    # example vectors. The first draft passed the raw query string through
+    # instead of canonicalising it, and these caught it -- which would have
+    # broken every remote-list call, since that one carries ?list-type=2.
+    EMPTY = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    KID = "AKIAIOSFODNN7EXAMPLE"
+    SEC = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+    ts = calendar.timegm((2013, 5, 24, 0, 0, 0, 0, 0, 0))
+    vectors = [
+        ("GET", "https://examplebucket.s3.amazonaws.com/?lifecycle",
+         "fea454ca298b7da1c68078a5d1bdbfbbe0d65c699e0f91ac7a200a0136783543"),
+        ("GET", "https://examplebucket.s3.amazonaws.com/?max-keys=2&prefix=J",
+         "34b48302e7b5fa45bde8084f4b7868a86f0a534bc59db6670ed5711ef69dc6f7"),
+    ]
+    for method, url, expect in vectors:
+        h = backup._sigv4(method, url, EMPTY, KID, SEC, region="us-east-1",
+                          now=ts)
+        got = h["Authorization"].split("Signature=")[-1]
+        assert got == expect, (url, got, expect)
+        assert "AWS4-HMAC-SHA256" in h["Authorization"]
+        # the SECRET must never appear in a header, only a derived signature
+        assert SEC not in h["Authorization"], "the secret key leaked into the header"
+        assert SEC not in json.dumps(h), "the secret key leaked into the headers"
+    print(f"[sigv4] {len(vectors)} of AWS's own published example signatures "
+          f"reproduced byte for byte, and the secret appears in no header -- "
+          f"the request is signed with a derivation of it, never the key")
+
+    # a push with no credentials refuses, names the variable, and uploads
+    # nothing: the same fail-closed rule the sandbox backends follow
+    for var in ("R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
+                "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"):
+        os.environ.pop(var, None)
+    arch = backup.latest(out_dir)["path"]
+    try:
+        backup.push(arch, "https://example.invalid", "b", root=home)
+        raise AssertionError("a push with no credentials must refuse")
+    except SystemExit as e:
+        assert "R2_ACCESS_KEY_ID" in str(e), str(e)
+    print("[fail-closed] a push with no credentials refuses by name and sends "
+          "nothing -- it does not reach the network to find out")
     print("PASS test_backup")
 
 

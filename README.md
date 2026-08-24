@@ -95,7 +95,7 @@ site in 71 modules, every declared control file, 12 traversal spellings, all
 4 credential sources against every subsystem that must exclude them, all 9
 provider-call purposes, all 9 roles, every module that mints an expert, every
 reader of the exam file, all 144 sandbox names across 99 test files, all
-61 CLI subcommands the manual promises, and — parsing every module — every
+64 CLI subcommands the manual promises, and — parsing every module — every
 comparison that puts a file timestamp on both sides, which is how two
 silent staleness bugs were found at once rather than one at a time.
 

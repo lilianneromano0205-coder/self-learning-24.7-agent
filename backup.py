@@ -11,6 +11,18 @@ tested restore does not have backups, it has hopes.
     python backup.py restore ../fleet-backups/fleet-2026-08-22-1430.zip --dest ./restored
     python backup.py list ../fleet-backups
 
+A backup that only exists on the machine being backed up is not a backup, so
+archives can be pushed to any S3-compatible store -- Cloudflare R2, MinIO,
+B2, AWS -- with AWS Signature V4 written in stdlib rather than a dependency:
+
+    python backup.py push  <archive> --endpoint https://<id>.r2.cloudflarestorage.com                            --bucket fleet
+    python backup.py pull  fleet-2026-08-24-0130.zip --dest ../restored                            --endpoint ... --bucket fleet
+    python backup.py remote-list --endpoint ... --bucket fleet
+
+A pull VERIFIES before it returns: the bytes are written, then every checksum
+in the manifest is recomputed. A corrupt backup discovered at restore time is
+the worst possible moment to discover it.
+
 What goes in: settings, prompts, identities, courses, skills, commons,
 state, archives, transcripts, intentions, routines, approvals, gotchas.
 
@@ -29,9 +41,14 @@ recomputes them, so "is this backup intact?" is a question with an answer.
 
 import argparse
 import hashlib
+import hmac
 import json
 import os
+import re
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -287,6 +304,180 @@ def age_days(out_dir):
     return round((time.time() - t) / 86400, 2)
 
 
+
+# ------------------------------------------------------------------ remote
+# A backup that only exists on the machine being backed up is not a backup.
+# This is the smallest thing that makes an archive survive the machine: PUT
+# it to any S3-compatible endpoint, GET it back.
+#
+# Written against AWS Signature V4 with hmac and urllib rather than boto3,
+# because "no dependencies" is a promise this platform keeps and SigV4 is
+# ninety lines. It works with Cloudflare R2 (region "auto", and egress is
+# free, which is what you want from something you restore from), Backblaze
+# B2, MinIO, and AWS itself.
+#
+# The endpoint is OPERATOR-configured, exactly like a provider base_url, so
+# it is not subject to the SSRF policy that governs model-supplied URLs in
+# ingest.py. A URL the owner typed is not untrusted input.
+
+S3_KEY_ID = "R2_ACCESS_KEY_ID"
+S3_KEY_SECRET = "R2_SECRET_ACCESS_KEY"
+_UNSIGNED = "UNSIGNED-PAYLOAD"
+
+
+def _s3_credentials(root=None):
+    """-> (access_key_id, secret) through the Credential Authority.
+
+    Never os.environ directly: credentials.resolve models four sources (env,
+    agent.env beside the expert AND beside the code, inline, key file), and a
+    subsystem that models fewer would report a working configuration broken.
+    Falls back to the AWS_* names so an existing profile works unchanged.
+    """
+    import credentials
+    kid = (credentials.resolve({"api_key_env": S3_KEY_ID}, root)
+           or credentials.resolve({"api_key_env": "AWS_ACCESS_KEY_ID"}, root))
+    sec = (credentials.resolve({"api_key_env": S3_KEY_SECRET}, root)
+           or credentials.resolve({"api_key_env": "AWS_SECRET_ACCESS_KEY"}, root))
+    return kid, sec
+
+
+def _sign(key, msg):
+    return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
+
+
+def _sigv4(method, url, payload_sha, kid, secret, region="auto", service="s3",
+           now=None):
+    """-> headers for one signed request. Pure function, so it is testable
+    against the published AWS example vectors without a network."""
+    u = urllib.parse.urlsplit(url)
+    host = u.netloc
+    path = urllib.parse.quote(u.path or "/", safe="/~")
+    # The canonical query string is NOT the raw one. Parameters are sorted by
+    # name, every value is URI-encoded, and a valueless parameter becomes
+    # "name=" with the equals sign present. Passing u.query through unchanged
+    # produced a signature AWS rejects — caught by checking against AWS's own
+    # published example rather than by a live 403, which is the whole reason
+    # that vector is in the test suite.
+    parts = []
+    for item in (u.query or "").split("&"):
+        if not item:
+            continue
+        k, _eq, v = item.partition("=")
+        parts.append((urllib.parse.quote(urllib.parse.unquote(k), safe="~"),
+                      urllib.parse.quote(urllib.parse.unquote(v), safe="~")))
+    query = "&".join(f"{k}={v}" for k, v in sorted(parts))
+    t = time.gmtime(now if now is not None else time.time())
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", t)
+    date = time.strftime("%Y%m%d", t)
+
+    canon_headers = (f"host:{host}\n"
+                     f"x-amz-content-sha256:{payload_sha}\n"
+                     f"x-amz-date:{stamp}\n")
+    signed_headers = "host;x-amz-content-sha256;x-amz-date"
+    canon = (f"{method}\n{path}\n{query}\n{canon_headers}\n"
+             f"{signed_headers}\n{payload_sha}")
+    scope = f"{date}/{region}/{service}/aws4_request"
+    to_sign = ("AWS4-HMAC-SHA256\n"
+               f"{stamp}\n{scope}\n"
+               + hashlib.sha256(canon.encode("utf-8")).hexdigest())
+    k = _sign(("AWS4" + secret).encode("utf-8"), date)
+    k = _sign(k, region)
+    k = _sign(k, service)
+    k = _sign(k, "aws4_request")
+    sig = hmac.new(k, to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+    return {
+        "Host": host,
+        "x-amz-content-sha256": payload_sha,
+        "x-amz-date": stamp,
+        "Authorization": (f"AWS4-HMAC-SHA256 Credential={kid}/{scope}, "
+                          f"SignedHeaders={signed_headers}, Signature={sig}"),
+    }
+
+
+def _s3(method, url, kid, secret, body=None, region="auto", timeout=300):
+    """One signed request. Returns (status, bytes). Errors carry the endpoint
+    and the status, never the key."""
+    payload_sha = (hashlib.sha256(body).hexdigest() if body is not None
+                   else hashlib.sha256(b"").hexdigest())
+    headers = _sigv4(method, url, payload_sha, kid, secret, region=region)
+    req = urllib.request.Request(url, data=body, method=method)
+    for h, v in headers.items():
+        if h != "Host":                    # urllib sets Host itself
+            req.add_header(h, v)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        detail = e.read()[:400].decode("utf-8", "replace")
+        raise RuntimeError(
+            f"{method} {urllib.parse.urlsplit(url).path} -> HTTP {e.code}. "
+            f"{detail}") from None
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"cannot reach {urllib.parse.urlsplit(url).netloc}: "
+                           f"{e.reason}") from None
+
+
+def push(archive, endpoint, bucket, prefix="", root=None, region="auto"):
+    """Upload one archive. -> {"url", "bytes", "sha256"}.
+
+    The local archive is not deleted and not modified: a push is a copy, so a
+    failed upload can never cost you the backup you already had.
+    """
+    kid, secret = _s3_credentials(root)
+    if not kid or not secret:
+        raise SystemExit(
+            f"ERROR: no S3 credentials. Put {S3_KEY_ID} and {S3_KEY_SECRET} "
+            f"in agent.env (or the AWS_* equivalents). For Cloudflare R2: "
+            f"dash.cloudflare.com -> R2 -> Manage API tokens. The values are "
+            f"never printed by this tool.")
+    with open(archive, "rb") as f:
+        body = f.read()
+    key = (prefix.strip("/") + "/" if prefix.strip("/") else "") + \
+        os.path.basename(archive)
+    url = f"{endpoint.rstrip('/')}/{bucket}/{urllib.parse.quote(key)}"
+    _s3("PUT", url, kid, secret, body=body, region=region)
+    return {"url": url, "key": key, "bytes": len(body),
+            "sha256": hashlib.sha256(body).hexdigest()}
+
+
+def pull(key, dest_dir, endpoint, bucket, root=None, region="auto"):
+    """Download one archive by key. -> the local path.
+
+    Verified before it is trusted: the bytes are written, then `verify()`
+    recomputes every checksum in the manifest. A truncated download is a
+    corrupt backup, and a corrupt backup discovered at restore time is the
+    worst possible moment to discover it.
+    """
+    kid, secret = _s3_credentials(root)
+    if not kid or not secret:
+        raise SystemExit(f"ERROR: no S3 credentials ({S3_KEY_ID}).")
+    url = f"{endpoint.rstrip('/')}/{bucket}/{urllib.parse.quote(key)}"
+    _st, body = _s3("GET", url, kid, secret, region=region)
+    os.makedirs(dest_dir, exist_ok=True)
+    out = os.path.join(dest_dir, os.path.basename(key))
+    with open(out, "wb") as f:
+        f.write(body)
+    rep = verify(out)
+    if rep.get("problems"):
+        raise RuntimeError(f"downloaded archive is DAMAGED: {rep['problems'][:3]}")
+    return out
+
+
+def remote_list(endpoint, bucket, prefix="", root=None, region="auto"):
+    """-> [{"key", "bytes"}] newest-name-last, without parsing XML properly:
+    the listing response is small and the two fields wanted are unambiguous."""
+    kid, secret = _s3_credentials(root)
+    if not kid or not secret:
+        raise SystemExit(f"ERROR: no S3 credentials ({S3_KEY_ID}).")
+    q = "list-type=2" + (f"&prefix={urllib.parse.quote(prefix)}" if prefix else "")
+    url = f"{endpoint.rstrip('/')}/{bucket}?{q}"
+    _st, body = _s3("GET", url, kid, secret, region=region)
+    text = body.decode("utf-8", "replace")
+    keys = re.findall(r"<Key>([^<]+)</Key>", text)
+    sizes = re.findall(r"<Size>(\d+)</Size>", text)
+    return [{"key": k, "bytes": int(s)} for k, s in zip(keys, sizes)]
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -313,7 +504,46 @@ def main():
     p.add_argument("dir")
     p.add_argument("--json", action="store_true")
 
+    for name, helptext in (("push", "upload an archive to S3/R2"),
+                           ("pull", "download an archive from S3/R2"),
+                           ("remote-list", "what archives exist remotely")):
+        p = sub.add_parser(name, help=helptext)
+        if name == "push":
+            p.add_argument("archive")
+        if name == "pull":
+            p.add_argument("key")
+            p.add_argument("--dest", required=True)
+        p.add_argument("--endpoint", required=True,
+                       help="e.g. https://<accountid>.r2.cloudflarestorage.com")
+        p.add_argument("--bucket", required=True)
+        p.add_argument("--prefix", default="")
+        p.add_argument("--region", default="auto")
+        p.add_argument("--root", default=None,
+                       help="where to look for agent.env (default: beside the code)")
+        p.add_argument("--json", action="store_true")
+
     a = ap.parse_args()
+    if a.cmd in ("push", "pull", "remote-list"):
+        if a.cmd == "push":
+            out = push(a.archive, a.endpoint, a.bucket, a.prefix, a.root, a.region)
+            print(json.dumps(out, indent=2) if a.json else
+                  f"pushed {out['bytes']:,} bytes -> {out['key']}  "
+                  f"sha256 {out['sha256'][:16]}")
+        elif a.cmd == "pull":
+            local = pull(a.key, a.dest, a.endpoint, a.bucket, a.root, a.region)
+            print(json.dumps({"path": local}, indent=2) if a.json else
+                  f"pulled {a.key} -> {local}  (checksums verified)")
+        else:
+            rows = remote_list(a.endpoint, a.bucket, a.prefix, a.root, a.region)
+            if a.json:
+                print(json.dumps(rows, indent=2))
+            elif not rows:
+                print("no archives at that prefix")
+            else:
+                for r in rows:
+                    print(f"{r['bytes']:>12,}  {r['key']}")
+        return
+
     if a.cmd == "create":
         man = create(a.home, a.out, a.with_logs, a.label)
         if a.json:
