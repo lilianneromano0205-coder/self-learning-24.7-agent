@@ -94,6 +94,19 @@ def _path(root):
     return os.path.join(root, LEDGER)
 
 
+def _safe_name(name):
+    """A package name as a directory name, with no path meaning at all."""
+    return re.sub(r"[^A-Za-z0-9._-]", "_", str(name))[:64] or "unnamed"
+
+
+def _import_name(name):
+    """The module a distribution most likely provides. Distribution names and
+    import names differ often enough that this is a guess -- so a failed
+    import is reported as what it is (the probe could not import it) rather
+    than as proof the package is broken."""
+    return re.sub(r"[^A-Za-z0-9_]", "_", str(name)).strip("_") or "sys"
+
+
 def load(root):
     try:
         with open(_path(root), "r", encoding="utf-8") as f:
@@ -126,27 +139,56 @@ def _edit_distance(a, b):
 
 # --------------------------------------------------------------- 1. search
 
+def _need_words(need):
+    """The meaningful WORDS of a need, as whole tokens.
+
+    Substring matching is what makes a search like this useless: the need
+    "a thing" matched the capability recall_memory because its description
+    contains "everything", so a request for an unrelated package was refused
+    as already-satisfied. Match tokens, and only tokens long enough to mean
+    something.
+    """
+    return {w for w in re.findall(r"[a-z0-9_]+", str(need or "").lower())
+            if len(w) > 3}
+
+
+def _matches(need_words, haystack):
+    """True when a need word appears in the haystack AS A WORD."""
+    if not need_words:
+        return False
+    hay = set(re.findall(r"[a-z0-9_]+", str(haystack or "").lower()))
+    return bool(need_words & hay)
+
+
 def search_known(root, need):
     """Step 2: look in what we already trust BEFORE reaching outside.
 
     The cheapest capability acquisition is the one you already made.
     """
-    need = str(need or "").lower()
+    words = _need_words(need)
     hits = []
     for row in load(root):
         if row["stage"] != "trusted":
             continue
-        hay = f"{row['name']} {row.get('provides','')} {row.get('why','')}".lower()
-        if need and any(w in hay for w in need.split() if len(w) > 3):
+        hay = f"{row['name']} {row.get('provides','')} {row.get('why','')}"
+        if _matches(words, hay):
             hits.append(row)
+    # This read scan(root)["tools"], which has never been a key that scan()
+    # returns — it returns binaries/modules/keys/custom/capabilities. Dead
+    # code, and silently dead, because the whole branch sat inside a bare
+    # `except Exception: pass`. The cost was not a crash but the opposite:
+    # step 2 of the ladder ("look in what we already trust BEFORE reaching
+    # outside") never looked at this machine's own capabilities, so the
+    # cheapest possible acquisition — the one already made — was invisible.
     try:
         import toolbox
-        for t in toolbox.scan(root).get("tools", []):
-            if t.get("ready") and need and any(
-                    w in f"{t['name']} {t.get('desc','')}".lower()
-                    for w in need.split() if len(w) > 3):
-                hits.append({"name": t["name"], "stage": "trusted",
-                             "source": "toolbox", "provides": t.get("desc", "")})
+        for name, cap in (toolbox.scan(root).get("capabilities") or {}).items():
+            if not cap.get("ready"):
+                continue
+            hay = f"{name} {cap.get('how', '')}"
+            if _matches(words, hay):
+                hits.append({"name": name, "stage": "trusted",
+                             "source": "toolbox", "provides": cap.get("how", "")})
     except Exception:
         pass
     return hits
@@ -253,21 +295,90 @@ def install(root, home, acq_id, worker_id=None, task_text=""):
             f"dependency is untrusted code by definition, so it goes in a "
             f"disposable computer — never on the host and never on an "
             f"organization machine.")
+    # THE LADDER NOW ACTUALLY CLIMBS.
+    #
+    # Until this, install() selected a worker, wrote
+    #     "command": "(install <name>==<ver> in <worker>)"
+    # — a sentence in parentheses describing a thing that had not happened —
+    # and set stage="installed". There was no subprocess, no sandbox.run and
+    # no execution.run anywhere in this module. An acquisition could reach
+    # "trusted", with a full evidence trail, while nothing was ever fetched,
+    # unpacked or run. Every refusal above it was real; the two steps those
+    # refusals guarded were not.
+    #
+    # Where it installs matters as much as that it installs. --target keeps
+    # the package inside the EXPERT'S OWN directory, so it is: visible to the
+    # File Authority, carried by backup.py, destroyed with the expert, and
+    # incapable of altering the interpreter the platform itself runs on. A
+    # dependency that can rewrite the harness is not a dependency, it is a
+    # new owner.
+    target = os.path.join(root, "capabilities", _safe_name(rec["name"]))
+    os.makedirs(target, exist_ok=True)
+    # A LOCAL path is the safest install there is: nothing is resolved from a
+    # registry, so the name cannot be typosquatted and the bytes cannot change
+    # between the inspection and the install. It is also what makes this step
+    # testable without reaching the network at all.
+    local = rec.get("local_path")
+    if local:
+        spec = local if os.path.isabs(local) else os.path.join(root, local)
+        if not os.path.exists(spec):
+            raise Refused(f"local_path {spec!r} does not exist")
+    else:
+        spec = rec["name"] if not rec.get("version") else \
+            f"{rec['name']}=={rec['version']}"
+    argv = [sys.executable, "-m", "pip", "install", "--no-input",
+            "--disable-pip-version-check", "--no-warn-script-location",
+            "--target", target, spec]
+    if rec.get("index_url"):
+        argv += ["--index-url", str(rec["index_url"])]
+    import execution
+    rc, out, err = execution.run("converter", argv, root, timeout=600,
+                                 reason=f"acquire {spec}")
+    ok = (rc == 0)
     rec["worker"] = w["id"]
-    rec["stage"] = "installed"
+    rec["install_path"] = os.path.relpath(target, root).replace(os.sep, "/")
+    rec["stage"] = "installed" if ok else "rejected"
     rec["install_evidence"] = {
         "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "worker": w["id"],
         "zone": w["zone"],
-        "command": f"(install {rec['name']}=={rec['version']} in {w['name']})",
+        "command": " ".join(argv[:4] + ["--target", rec["install_path"], spec]),
+        "exit_code": rc,
+        "output": ((out or "") + (err or "")).strip()[-1200:],
+        "installed_names": sorted(os.listdir(target))[:40] if ok else [],
     }
+    if not ok:
+        rec["history"].append({
+            "at": rec["install_evidence"]["at"], "stage": "rejected",
+            "why": f"install exited {rc}: "
+                   f"{((err or out or '').strip() or 'no output')[:160]}"})
+        _save(root, rows)
+        raise Refused(
+            f"install FAILED (exit {rc}) and the acquisition is rejected, not "
+            f"pending: {((err or out or '').strip() or 'no output')[:300]}")
     rec["history"].append({"at": rec["install_evidence"]["at"],
                            "stage": "installed", "why": f"in {w['name']}"})
     _save(root, rows)
     return rec
 
 
-def capability_test(root, acq_id, passed, evidence, command=""):
-    """Step 6: MANDATORY. A tool that installed has proven it installs."""
+def capability_test(root, acq_id, passed=None, evidence="", command="",
+                    probe=None):
+    """Step 6: MANDATORY, and now actually a test.
+
+    `passed` and `evidence` used to be SUPPLIED BY THE CALLER. The step the
+    module calls mandatory recorded whatever verdict it was handed — a claim
+    wearing the word "test", in the one place this platform swears never to
+    accept one. "A tool that installed has proven it installs" was true only
+    because nothing checked.
+
+    Now the default path RUNS the thing: import the installed distribution
+    from where it was installed, in a subprocess whose sys.path is exactly
+    that directory, and observe the exit code. The caller may pass its own
+    `probe` argv for a tool that is not importable — a binary, say — but it
+    cannot pass a verdict. `passed` survives only for the explicit
+    owner-override path, and when it is used the evidence records that a
+    human asserted it rather than that anything was observed.
+    """
     rows = load(root)
     rec = next((r for r in rows if r["id"] == acq_id), None)
     if rec is None:
@@ -275,6 +386,86 @@ def capability_test(root, acq_id, passed, evidence, command=""):
     if rec["stage"] != "installed":
         raise Refused(f"{acq_id} is at stage {rec['stage']}; a capability test "
                       f"runs against an installed tool")
+
+    if passed is None:
+        target = os.path.join(root, rec.get("install_path")
+                              or os.path.join("capabilities",
+                                              _safe_name(rec["name"])))
+        if not os.path.isdir(target):
+            raise Refused(
+                f"nothing is installed at {target!r}, so there is nothing to "
+                f"test. An acquisition cannot pass a capability test by "
+                f"having its paperwork in order.")
+        # The probe IMPORTS code that was installed seconds ago from outside
+        # this project. That is untrusted execution by definition, so it runs
+        # through `capability_probe` — the operation declared model-authored,
+        # policy-screened and SANDBOXED — and not through the platform's own
+        # argv path, which is not sandboxed. Testing a new dependency by
+        # running it unconfined would defeat the entire point of installing it
+        # into an isolated directory in the first place.
+        #
+        # The probe is written to a FILE rather than passed with -c because
+        # the operation takes a shell string, and a program embedded in a
+        # shell string is a quoting bug waiting for a package name with an
+        # apostrophe in it.
+        # The probe must NOT live in capabilities/. Python puts a script's own
+        # directory on sys.path[0], so a probe stored there makes every
+        # sibling folder an implicit NAMESPACE PACKAGE — and an empty
+        # capabilities/<name>/ directory then imports successfully. Measured:
+        # a package that was never installed reported "imported notinstalled"
+        # and the ladder marked it TESTED. That is the precise false pass this
+        # step exists to prevent, manufactured by the step itself.
+        probe_dir = os.path.join(root, "tmp")
+        os.makedirs(probe_dir, exist_ok=True)
+        probe_py = os.path.join(probe_dir, f"probe-{_safe_name(rec['name'])}.py")
+        with open(probe_py, "w", encoding="utf-8") as f:
+            f.write(
+                "import os, sys\n"
+                # REPLACE sys.path, never insert: a package that happens to
+                # exist in the host interpreter must not make a failed install
+                # look successful. The stdlib paths Python needs are already
+                # bound before this line runs.
+                f"sys.path = [{target!r}] + [p for p in sys.path\n"
+                "             if p and 'site-packages' not in p "
+                "and p != os.path.dirname(os.path.abspath(__file__))]\n"
+                f"import {_import_name(rec['name'])} as m\n"
+                # a namespace package has __file__ = None. Requiring a real
+                # file inside the target is what tells an INSTALLED package
+                # apart from an empty directory that merely shares its name.
+                "f = getattr(m, '__file__', None)\n"
+                "if not f:\n"
+                "    raise SystemExit('NOT INSTALLED: %r resolved to a "
+                "namespace package with no file — an empty directory, not a "
+                "package' % m.__name__)\n"
+                f"if not os.path.abspath(f).startswith(os.path.abspath({target!r})):\n"
+                "    raise SystemExit('WRONG COPY: imported from %s, not from "
+                "the isolated install' % f)\n"
+                "print('imported', m.__name__, getattr(m, '__version__', ''),\n"
+                "      'from', f)\n")
+        import execution
+        if probe:
+            cmd = " ".join(f'"{a}"' if " " in str(a) else str(a) for a in probe)
+        else:
+            cmd = f'"{sys.executable}" "{probe_py}"'
+        argv = probe or [sys.executable, probe_py]
+        rc, out, err = execution.run("capability_probe", cmd, root,
+                                     timeout=180,
+                                     reason=f"capability test {rec['name']}")
+        passed = (rc == 0)
+        evidence = (f"exit {rc}: " + ((out or "") + (err or "")).strip()[-400:]) \
+            or f"exit {rc} with no output"
+        command = " ".join(str(a) for a in argv)[:300]
+    else:
+        # Check what the CALLER supplied, before decorating it. Prefixing
+        # first made the emptiness check unreachable — "   " became
+        # "OWNER-ASSERTED (nothing was observed):    ", which is not empty,
+        # so a pass with no evidence would have been accepted. The refusal
+        # was still in the file and could no longer fire.
+        if not str(evidence).strip():
+            raise Refused("a capability test records what it OBSERVED; a pass "
+                          "with no evidence is a claim")
+        evidence = f"OWNER-ASSERTED (nothing was observed): {evidence}"
+
     if not str(evidence).strip():
         raise Refused("a capability test records what it OBSERVED; a pass "
                       "with no evidence is a claim")

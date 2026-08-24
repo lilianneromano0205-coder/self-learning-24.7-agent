@@ -99,6 +99,21 @@ def custom_tools(root=None):
     return out
 
 
+def _ingest_tool(binary, module=None):
+    """Ask ingest.py how it would ACTUALLY run this tool.
+
+    Importing the answer rather than reimplementing it keeps one definition of
+    "is this available", so the capability report and the runtime can never
+    disagree — which is the whole failure this helper exists to prevent.
+    """
+    try:
+        import ingest
+        return ingest.tool_argv(binary, module)
+    except Exception:                        # pragma: no cover — defensive
+        exe = shutil.which(binary)
+        return [exe] if exe else None
+
+
 def scan(root=None):
     env = _env_with_file(root)
     binaries = {b: bool(shutil.which(b)) for b in BINARIES}
@@ -123,7 +138,14 @@ def scan(root=None):
                      "ingest.py pdf-text IN OUT"),
         "docs_convert": (binaries["pandoc"] or modules["docling"] or modules["markitdown"],
                          "ingest.py docx IN OUT (docx/pptx/xlsx/epub)"),
-        "video_download": (binaries["yt-dlp"], "ingest.py youtube/subs <url> …"),
+        # A pip-installed yt-dlp puts a MODULE on sys.path and a script in a
+        # Scripts/ directory that is usually not on PATH — the default on
+        # Windows and on any --user install. Asking only shutil.which reported
+        # MISSING for a capability the machine demonstrably had, and the agent
+        # then did the right thing with wrong information: declined, and asked
+        # the owner to install what was already installed.
+        "video_download": (bool(_ingest_tool("yt-dlp", "yt_dlp")),
+                           "ingest.py youtube/subs <url> …"),
         "audio_chunk": (binaries["ffmpeg"], "ingest.py chunk-audio IN OUTDIR"),
         "transcribe": (binaries["ffmpeg"] and keys["GROQ_API_KEY"],
                        "ingest.py transcribe IN OUT (Groq Whisper)"),

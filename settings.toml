@@ -92,6 +92,75 @@ api_key_env = "NVIDIA_API_KEY"
 base_url = "https://router.huggingface.co/v1"
 api_key_env = "HF_TOKEN"
 
+# ---------------------------------------------------------------------------
+# EVERY PROVIDER BELOW WAS VERIFIED AGAINST ITS OWN DOCUMENTATION, not from
+# memory: the base_url, whether the endpoint is OpenAI-compatible, whether it
+# supports native tool calling, and what the free tier ACTUALLY is. A wrong
+# base_url does not fail loudly — it produces an opaque 404 months later — so
+# each is cited to the page it came from.
+#
+# The honest summary of "free": only ONE of these has a standing free
+# allowance that needs no card and never expires. The rest are trials,
+# one-off credits, or require a payment method on file. That distinction is
+# written on each block rather than smoothed over.
+#
+# To activate any of them: uncomment the block, put its key in agent.env, and
+# point a role at it. `python doctor.py` then reports it ready.
+# ---------------------------------------------------------------------------
+
+# Cerebras — very fast inference. Verified: inference-docs.cerebras.ai/resources/openai
+# FREE TIER: none that is permanent. $5 in credits only after adding a
+# verified payment method, expiring after 30 days, and rate-limited to about
+# 5 requests/minute — roughly one request every 12 seconds, which is tight
+# for an agent loop that takes several steps per task.
+# GOTCHA, documented: gpt-oss-120b REJECTS a request carrying both `tools`
+# and `response_format`. This platform sends tools, so do not also set a
+# response format for this provider.
+# [providers.cerebras]
+# base_url = "https://api.cerebras.ai/v1"
+# api_key_env = "CEREBRAS_API_KEY"
+# model: "gpt-oss-120b"
+
+# Fireworks. Verified: docs.fireworks.ai/tools-sdks/openai-compatibility
+# NOTE THE PATH — it is /inference/v1, not the usual /v1. Dropping the
+# "/inference" segment is the single most likely cause of a 404 here.
+# FREE TIER: $1 of one-off credits; an account with no payment method is
+# capped at 10 requests/minute.
+# Model ids look like "accounts/fireworks/models/<name>" and serverless
+# availability rotates — check the model page still says "Serverless:
+# Supported" before relying on one.
+# [providers.fireworks]
+# base_url = "https://api.fireworks.ai/inference/v1"
+# api_key_env = "FIREWORKS_API_KEY"
+# model: "accounts/fireworks/models/kimi-k3"
+
+# Mistral. Verified: docs.mistral.ai/resources/migration-guides
+# FREE TIER: the "Free" plan includes $10/month of API credits under fair use.
+# [providers.mistral]
+# base_url = "https://api.mistral.ai/v1"
+# api_key_env = "MISTRAL_API_KEY"
+# model: "mistral-large-2512"
+
+# Together AI. Verified: docs.together.ai/docs/openai-api-compatibility
+# FREE TIER: none documented. Their docs describe no signup credits; the only
+# free thing confirmed is a single free-priced serverless model. The pricing
+# page says "start for free" without saying what that means, and a marketing
+# page is not documentation.
+# [providers.together]
+# base_url = "https://api.together.ai/v1"
+# api_key_env = "TOGETHER_API_KEY"
+# model: "MiniMaxAI/MiniMax-M3"
+
+# OpenAI. Verified: developers.openai.com/api/reference
+# FREE TIER: none unconditional. Some organisations are offered complimentary
+# daily tokens IN EXCHANGE FOR sharing prompts and completions for training,
+# and a positive balance is still required. Read that trade before taking it:
+# this platform's whole point is that your expert's memory is your asset.
+# [providers.openai]
+# base_url = "https://api.openai.com/v1"
+# api_key_env = "OPENAI_API_KEY"
+# model: "gpt-5.6-sol"
+
 # Cloudflare Workers AI. Serverless inference on Cloudflare's own network,
 # with an OpenAI-compatible /v1/chat/completions endpoint — so it is an
 # ordinary provider here, not an integration. There is a standing free

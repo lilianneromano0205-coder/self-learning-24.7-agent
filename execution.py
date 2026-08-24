@@ -120,6 +120,49 @@ def run(op, command, root, cfg=None, role="default", task=None, timeout=300,
             _trace(root, op, command, role, task, refused=verdict)
             raise Refused(verdict)
 
+    # ---- approval: the control this module DECLARED and did not enforce
+    # OPERATIONS has carried "approval": True for model_command since it was
+    # written, describe() exported the flag, and the docstring's control table
+    # promised it — while nothing in this module ever imported `approvals`.
+    # The invariant that enumerates this catalogue checked `policy` and
+    # `sandbox` and skipped the one flag nobody implemented.
+    #
+    # Non-blocking, matching mcp.guarded_call exactly: a 24/7 loop must never
+    # sleep on a human. The command is refused with an approval id and an
+    # instruction to ask_human; when the owner grants it and the task retries,
+    # it runs once.
+    if spec.get("approval"):
+        try:
+            import policy as _pol
+            needs, why = _pol.review(command, cfg.get("agent", {}))
+        except ImportError:                  # pragma: no cover — defensive
+            needs, why = False, ""
+        if needs:
+            import approvals
+            key = approvals.approval_id(f"cmd:{root}:{command}")
+            st = approvals.status_of(root, key)
+            if st == "denied":
+                _trace(root, op, command, role, task,
+                       refused=f"owner denied: {why}")
+                raise Refused(
+                    f"DENIED by the owner: this command ({why}) will not run. "
+                    f"Do not retry it; choose another route or finish with "
+                    f"what you have.")
+            if st != "granted":
+                rec = approvals.request(
+                    root, key, server="execution", tool=op,
+                    arguments={"command": command if isinstance(command, str)
+                               else list(command)},
+                    reason=why, task_id=str((task or {}).get("id", "-")))
+                _trace(root, op, command, role, task,
+                       refused=f"approval required ({rec['id']}): {why}")
+                raise Refused(
+                    f"APPROVAL REQUIRED ({rec['id']}): this command {why}, so "
+                    f"the owner must approve it first. Do NOT retry it. Call "
+                    f"ask_human now with exactly: \"Approve {rec['id']}: "
+                    f"{str(command)[:160]} ?\" — the owner decides in the "
+                    f"panel, and when this task is retried it runs once.")
+
     # ---- bundled third-party skill scripts stay disabled until promoted
     if op in MODEL_AUTHORED:
         try:

@@ -102,6 +102,53 @@ def need(tool):
                  f"Install it (Part 4 A3) and retry.")
 
 
+# A tool can be present in two ways and this platform kept seeing only one.
+# `pip install yt-dlp` puts a module on sys.path and a script in a Scripts/
+# directory that is very often NOT on PATH — the default on Windows, and on
+# any Linux install using --user. shutil.which() then says "missing" about a
+# capability the machine demonstrably has, toolbox.py reports MISSING, and
+# the agent is told it cannot watch video. It then does the correct thing
+# with wrong information: it declines, and asks the owner to install what is
+# already installed.
+#
+# Three call sites each hard-coded ["yt-dlp", ...]. That is the shape this
+# codebase keeps finding in itself (U15, U17): a fact resolved at each caller
+# instead of once at a gateway. Resolve it once, here.
+
+def tool_argv(binary, module=None):
+    """-> the argv prefix that actually runs this tool here, or None.
+
+    Prefers the real executable; falls back to `python -m module`, which is
+    the same program by a different door.
+    """
+    exe = shutil.which(binary)
+    if exe:
+        return [exe]
+    if module:
+        try:
+            import importlib.util
+            if importlib.util.find_spec(module) is not None:
+                return [sys.executable, "-m", module]
+        except (ImportError, ValueError):     # pragma: no cover — exotic paths
+            pass
+    return None
+
+
+def need_argv(binary, module=None, why=""):
+    """tool_argv, or exit naming BOTH ways it could be provided."""
+    argv = tool_argv(binary, module)
+    if argv is None:
+        sys.exit(f"ERROR: '{binary}' is not available. Install it on PATH, "
+                 f"or `pip install {module or binary}` so it can be run as a "
+                 f"module{(' — needed to ' + why) if why else ''}.")
+    return argv
+
+
+def ytdlp_argv():
+    """yt-dlp, however it happens to be installed on this machine."""
+    return need_argv("yt-dlp", "yt_dlp", why="read video sources")
+
+
 def fmt_ts(seconds):
     s = int(seconds)
     return f"{s // 3600:02d}:{s % 3600 // 60:02d}:{s % 60:02d}"
@@ -454,10 +501,10 @@ def youtube_subs(url, dst):
     """Captions-first: most course videos already carry subtitles. Fetching
     them costs nothing and takes a second, versus downloading audio and paying
     for transcription. Returns True when a transcript was produced."""
-    need("yt-dlp")
+    yt = ytdlp_argv()
     workdir = os.path.join(os.path.dirname(dst) or ".", "_subs")
     os.makedirs(workdir, exist_ok=True)
-    cmd = ["yt-dlp", "--skip-download", "--write-subs", "--write-auto-subs",
+    cmd = yt + ["--skip-download", "--write-subs", "--write-auto-subs",
            "--sub-langs", "en.*,en,live_chat-none", "--sub-format", "vtt/srt",
            "-o", os.path.join(workdir, "%(id)s.%(ext)s"), url]
     for d in (os.getcwd(), os.path.dirname(os.path.abspath(__file__))):
@@ -485,9 +532,9 @@ def youtube_subs(url, dst):
 
 def playlist_entries(url):
     """Expand a playlist/channel/course URL into its individual video URLs."""
-    need("yt-dlp")
+    yt = ytdlp_argv()
     _rc, _stdout, _stderr = _convert(
-        ["yt-dlp", "--flat-playlist", "--dump-json", url],
+        yt + ["--flat-playlist", "--dump-json", url],
         timeout=600, why="expand playlist", check=False)
 
     class _R:                      # keep the existing r.stdout call shape
@@ -679,9 +726,9 @@ def fetch_url(url, dst):
 def youtube_audio(url, outdir):
     """Download a YouTube video's audio via yt-dlp (uses cookies.txt beside
     the agent if present — the designed answer to datacenter-IP blocking)."""
-    need("yt-dlp")
+    yt = ytdlp_argv()
     os.makedirs(outdir, exist_ok=True)
-    cmd = ["yt-dlp", "-x", "--audio-format", "mp3",
+    cmd = yt + ["-x", "--audio-format", "mp3",
            "-o", os.path.join(outdir, "%(title)s.%(ext)s"), url]
     for cookie_dir in (os.getcwd(), os.path.dirname(os.path.abspath(__file__))):
         ck = os.path.join(cookie_dir, "cookies.txt")

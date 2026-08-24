@@ -912,8 +912,10 @@ function homeCommandBar(){
       <input class="field" id="cmdBar" style="flex:1;min-width:220px;font-size:15px"
         placeholder="e.g. review our supplier contracts and flag anything that renews automatically"
         onkeydown="if(event.key==='Enter')startFromBar()">
+      <button class="btn" onclick="checkReady()" title="Assess before starting: what does this goal need that we do not have?">Can it do this?</button>
       <button class="btn pri" onclick="startFromBar()">Start</button>
     </div>
+    <div id="readyOut"></div>
     <p class="muted" style="font-size:12px;margin:6px 0 0">Describe the outcome,
     not the steps. The next screen asks how you will know it worked — a mission
     with no way to tell is one that can only be abandoned, never finished.</p>
@@ -924,6 +926,54 @@ function homeCommandBar(){
       <button class="btn" onclick="dlgConnect()">Connect tool or computer</button>
     </div>
   </div></div>`;
+}
+/* ---- the universal agent: assess BEFORE starting ------------------------
+   The layer that decides which of the platform's systems a goal needs. A goal
+   handed straight to the pursuit loop assumes the expert already knows the
+   subject and already owns the tools; when it does not, the run dies several
+   milestones deep looking like a weak model, when the real answer was "it
+   needed a PDF reader" or "it had never studied this".
+
+   This is a READ. It routes and explains; it starts nothing and installs
+   nothing, because a page that acts while you are still typing into it is not
+   one anybody leaves open. */
+async function checkReady(){
+  const e = document.getElementById("cmdBar");
+  const text = e ? e.value.trim() : "";
+  if (!text){ toast("say what you want accomplished"); return; }
+  const experts = ((S.sys||{}).experts)||[];
+  if (!experts.length){ toast("create an expert first"); return; }
+  const who = experts[0].name;
+  const out = document.getElementById("readyOut");
+  if (out) out.innerHTML = `<p class="muted" style="font-size:12.5px">assessing…</p>`;
+  let r;
+  try {
+    r = await api(`/api/universal?expert=${encodeURIComponent(who)}`
+                  + `&goal=${encodeURIComponent(text)}`);
+  } catch(err){ if (out) out.innerHTML = `<p class="bad">${esc(String(err))}</p>`; return; }
+  if (!out) return;
+  if (r.error){ out.innerHTML = `<p class="bad">${esc(r.error)}</p>`; return; }
+  const tone = r.verdict === "READY" ? "ok" : (r.needs_owner||[]).length ? "warn" : "muted";
+  const rows = (r.blocking||[]).map(g => `
+    <li><b>${esc(g.user_sees||g.dimension)}</b> — ${esc(g.what)}
+        <br><span class="muted" style="font-size:12px">${esc(g.why)}</span>
+        <br><span class="muted" style="font-size:12px">routes to: ${esc(g.routes_to)}</span></li>`).join("");
+  const acts = (r.actions||[]).filter(a=>a.command).map(a => `
+    <li>${esc(a.action)}: <code style="font-size:11.5px">${esc(a.command)}</code></li>`).join("");
+  out.innerHTML = `
+    <div class="card" style="margin-top:10px"><div class="body">
+      <div class="row" style="justify-content:space-between;align-items:baseline">
+        <b class="${tone}">${esc(r.verdict)}</b>
+        <span class="muted" style="font-size:12px">${esc(who)}</span>
+      </div>
+      <p style="font-size:13px;margin:6px 0">${esc(r.why||"")}</p>
+      ${rows ? `<ul style="font-size:13px;margin:6px 0 0;padding-left:18px">${rows}</ul>` : ""}
+      ${acts ? `<p class="muted" style="font-size:12px;margin:10px 0 4px">To close these yourself:</p>
+                <ul style="font-size:12px;margin:0;padding-left:18px">${acts}</ul>` : ""}
+      <p class="muted" style="font-size:11.5px;margin:10px 0 0">Assessed from what
+      is on disk now — capabilities probed, atoms counted, sources rated. READY
+      means nothing known is missing; it never means this will succeed.</p>
+    </div></div>`;
 }
 function startFromBar(){
   const e = document.getElementById("cmdBar");

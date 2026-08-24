@@ -1534,6 +1534,25 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/goals":
                 import goal
                 self._json(goal.list_goals(self.home))
+            elif path == "/api/universal":
+                # "Can this expert do this yet, and if not, what is in the
+                # way?" — answered from mechanical probes, never from a
+                # model's opinion. This is a READ: it assesses and routes,
+                # and it does not start work or open acquisitions, because a
+                # page that installs things while you type a sentence into it
+                # is not a page anyone would leave open.
+                import universal
+                expert = (q.get("expert", [None])[0] or "").strip()
+                want = (q.get("goal", [""])[0] or "").strip()
+                if not expert or not want:
+                    self._json({"error": "expert and goal are both required"}, 400)
+                elif not os.path.isdir(os.path.join(self.home, "experts", expert)):
+                    self._json({"error": f"no expert '{expert}'"}, 404)
+                else:
+                    self._json(universal.resolve(
+                        self.home, expert, want,
+                        (q.get("criteria", [""])[0] or "").strip(),
+                        apply=False))
             elif path == "/api/commons":
                 import commons
                 commons.refresh_directory(self.home)

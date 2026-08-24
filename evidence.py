@@ -207,6 +207,25 @@ SYSTEMS = {
                  "the two defects they cover were found in a real browser at "
                  "375 px, which no test here runs.",
     },
+    "13. The universal agent": {
+        "what": "the layer that decides which of these systems a goal needs "
+                "before any work starts: that the readiness verdict is EARNED "
+                "from mechanical probes rather than asserted, that knowledge "
+                "from a weak source does not count as knowledge, that an "
+                "AUTHORITY gap stops the run before goal.pursue is ever "
+                "reached, that a dry run writes nothing, and that every gap "
+                "is classified by the platform's own gap router rather than "
+                "by a second opinion",
+        "tests": ["test_universal.py"],
+        "blind": "it reads the goal's WORDS to infer what will be needed, so "
+                 "a goal that requires a PDF reader without saying anything "
+                 "PDF-shaped is not detected — the inference is a keyword "
+                 "table, deliberately inspectable rather than a model's "
+                 "guess, and it is better at over-asking than under-asking. "
+                 "It also decides readiness from what is on disk NOW: an "
+                 "expert can be READY and still fail, because ready means "
+                 "'nothing known is missing', never 'this will succeed'.",
+    },
 }
 GLOBAL_CAVEAT = (
     "Every model call in every test is the scripted mock provider. A green "

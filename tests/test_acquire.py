@@ -45,12 +45,59 @@ token = os.environ["OPENAI_API_KEY"]
 """
 
 
+
+def _local_package(sb, name="fleetprobe", version="1.0.0"):
+    """Build a real installable package on disk.
+
+    Installing from a LOCAL path is what makes this test hermetic AND safe:
+    nothing is resolved from a registry, so the name cannot be typosquatted
+    and the bytes cannot change between the inspection and the install.
+    """
+    src = os.path.join(sb, "_pkgsrc", name)
+    os.makedirs(os.path.join(src, name), exist_ok=True)
+    with open(os.path.join(src, "pyproject.toml"), "w", encoding="utf-8") as f:
+        f.write("\n".join([
+            "[project]",
+            f'name = "{name}"',
+            f'version = "{version}"',
+            "[build-system]",
+            'requires = ["setuptools"]',
+            'build-backend = "setuptools.build_meta"',
+            ""]))
+    with open(os.path.join(src, name, "__init__.py"), "w", encoding="utf-8") as f:
+        f.write(f'__version__ = "{version}"' + "\n")
+    return src
+
+
+def _install_local(sb, rec_id, src):
+    """Point an acquisition at the local path, then install it for real."""
+    rows = acquire.load(sb)
+    for r in rows:
+        if r["id"] == rec_id:
+            r["local_path"] = src
+    acquire._save(sb, rows)
+    return acquire.install(sb, sb, rec_id, task_text="install a package")
+
+
 def check_search_first(sb):
     """The cheapest acquisition is the one already made."""
-    rec = acquire.request(sb, "pdfplumber", "pypi", "extract tables from pdf",
-                          version="0.11.0")
-    acquire.install(sb, sb, rec["id"], task_text="install a package")
-    acquire.capability_test(sb, rec["id"], True, "parsed a 2-page fixture pdf")
+    # The ladder used to be walkable with nothing installed: install() wrote
+    # "(install <name>==<ver> in <worker>)" and capability_test() recorded
+    # whatever verdict the CALLER handed it, in the step the module calls
+    # mandatory. Both now do the thing, so this walks it with a package that
+    # really exists — built locally, so no registry is consulted and no
+    # agent-chosen name can be typosquatted.
+    src = _local_package(sb, "fleetprobe", "1.0.0")
+    rec = acquire.request(sb, "fleetprobe", "pypi", "extract tables from pdf",
+                          version="1.0.0")
+    rec = _install_local(sb, rec["id"], src)
+    assert rec["stage"] == "installed", rec
+    assert rec["install_evidence"]["exit_code"] == 0, rec["install_evidence"]
+    assert rec["install_evidence"]["installed_names"], "nothing landed on disk"
+    # and the verdict is OBSERVED, not supplied
+    rec = acquire.capability_test(sb, rec["id"])
+    assert rec["stage"] == "tested", rec["test_evidence"]
+    assert "imported fleetprobe" in rec["test_evidence"]["evidence"],         rec["test_evidence"]["evidence"]
     acquire.promote(sb, rec["id"], provides="extract tables from pdf")
     try:
         acquire.request(sb, "some-other-pdf-lib", "pypi",
@@ -140,8 +187,13 @@ def check_no_host_install(sb):
 
 
 def check_test_is_mandatory(sb):
-    rec = acquire.request(sb, "chartlib", "pypi", "draw a chart", version="3.0.1")
-    acquire.install(sb, sb, rec["id"])
+    # a real local package again: install() now genuinely installs, so a
+    # fictional name fails at the index and never reaches the rung this
+    # check is about
+    src = _local_package(sb, "chartprobe", "3.0.1")
+    rec = acquire.request(sb, "chartprobe", "pypi", "draw a chart",
+                          version="3.0.1")
+    rec = _install_local(sb, rec["id"], src)
     try:
         acquire.promote(sb, rec["id"])
         raise AssertionError("an untested tool must not be promoted")
@@ -167,9 +219,10 @@ def check_test_is_mandatory(sb):
 
 
 def check_ladder_and_rollback(sb):
+    src = _local_package(sb, "goodlib", "1.2.3")
     rec = acquire.request(sb, "goodlib", "pypi", "a real need", version="1.2.3")
     assert rec["stage"] == "inspected"
-    acquire.install(sb, sb, rec["id"])
+    _install_local(sb, rec["id"], src)
     got = next(r for r in acquire.load(sb) if r["id"] == rec["id"])
     assert got["worker"], "the worker it installed into is recorded"
     assert got["install_evidence"]["zone"] == "isolated"

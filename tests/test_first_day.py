@@ -260,6 +260,115 @@ def _point_at(root, base_url, key_env):
         f.write(chr(10).join(lines) + chr(10))
 
 
+
+def check_one_key_produces_a_working_fleet():
+    """The gap between "I gave you a key" and "it works".
+
+    A key is only ONE of the three things a provider needs: the endpoint has
+    to be configured and every role has to point at it. Until this existed an
+    owner pasted a key and the fleet went on aiming at whatever the template
+    shipped with -- silently, because a role pointing at a provider with no
+    key looks exactly like a role that is simply idle.
+    """
+    import tomllib
+    sys.path.insert(0, AGENT_DIR)
+    import bootstrap, fleet
+
+    saved = {k: os.environ.pop(k, None) for k in
+             ("GROQ_API_KEY", "DEEPSEEK_API_KEY", "CLOUDFLARE_API_TOKEN",
+              "CLOUDFLARE_ACCOUNT_ID", "OPENAI_API_KEY", "NVIDIA_API_KEY",
+              "HF_TOKEN", "OPENROUTER_API_KEY", "MISTRAL_API_KEY")}
+    home = tempfile.mkdtemp(prefix="activate-")
+    try:
+        def fresh(keys):
+            for k in list(saved):
+                os.environ.pop(k, None)
+            h = tempfile.mkdtemp(prefix="act-", dir=home)
+            bootstrap.ensure_env(h, keys)
+            bootstrap.load_env(h)
+            fleet.create(h, "T", "x")
+            return h, os.path.join(h, "experts", "t")
+
+        def roles_of(root):
+            with io.open(os.path.join(root, "settings.toml"),
+                         encoding="utf-8-sig") as f:
+                d = tomllib.loads(f.read())
+            return d, sorted({r.get("provider") for r in d["roles"].values()})
+
+        # --- no key at all: refuse, do not guess
+        h0, r0 = fresh([])
+        assert bootstrap.activate(h0, root=r0) == {}, \
+            "activation invented a provider with no credentials present"
+
+        # --- one key: every role moves, and the endpoint is written
+        h1, r1 = fresh(["GROQ_API_KEY=gsk-not-a-real-key"])
+        _d, before = roles_of(r1)
+        res = bootstrap.activate(h1, root=r1)
+        d, after = roles_of(r1)
+        assert res["provider"] == "groq", res
+        assert after == ["groq"], (before, after)
+        assert res["roles"] >= 8, f"only {res['roles']} roles were repointed"
+        assert d["providers"]["groq"]["base_url"] == \
+            "https://api.groq.com/openai/v1", d["providers"]["groq"]
+        # the owner's own annotations survive: this file is full of comments
+        # explaining each choice, and a TOML round-trip would delete them all
+        with io.open(os.path.join(r1, "settings.toml"), encoding="utf-8-sig") as f:
+            assert "#" in f.read(), "rewriting settings.toml stripped its comments"
+        # and re-running changes nothing
+        assert bootstrap.activate(h1, root=r1) == res, "activation is not idempotent"
+
+        # --- credentials that cannot form a working URL are REFUSED, not
+        #     half-applied. Cloudflare needs an account id in the path, so a
+        #     token alone would produce .../accounts/{CLOUDFLARE_ACCOUNT_ID}/...
+        #     and fail as a 404 much later. Fail closed, like every backend.
+        h2, r2 = fresh(["CLOUDFLARE_API_TOKEN=cf-not-real"])
+        assert bootstrap.activate(h2, root=r2) == {}, \
+            "a token with no account id was activated into a broken URL"
+        h3, r3 = fresh(["CLOUDFLARE_API_TOKEN=cf-not-real",
+                        "CLOUDFLARE_ACCOUNT_ID=acct-123"])
+        res3 = bootstrap.activate(h3, root=r3)
+        d3, _ = roles_of(r3)
+        assert res3["provider"] == "cloudflare", res3
+        assert "acct-123" in d3["providers"]["cloudflare"]["base_url"], \
+            d3["providers"]["cloudflare"]["base_url"]
+        assert "{" not in d3["providers"]["cloudflare"]["base_url"], \
+            "an unsubstituted placeholder reached the configuration"
+
+        # --- with several keys present, the ranking is by what the provider
+        #     actually GIVES AWAY, not by model size: a standing free
+        #     allowance outranks a paid account.
+        h4, r4 = fresh(["OPENAI_API_KEY=sk-not-real", "GROQ_API_KEY=gsk-not-real"])
+        res4 = bootstrap.activate(h4, root=r4)
+        assert res4["provider"] == "groq", \
+            f"picked {res4['provider']} over a free tier"
+        names = [p[0] for p in bootstrap.PROVIDER_CATALOG]
+        assert names.index("cloudflare") < names.index("openai"), \
+            "the catalogue no longer ranks a standing free tier first"
+
+        # --- every base_url in the catalogue is a real absolute https URL
+        #     with no leftover placeholder except the ones declared in `needs`
+        for name, url, key_env, model, needs, note in bootstrap.PROVIDER_CATALOG:
+            assert url.startswith("https://"), (name, url)
+            assert not url.endswith("/"), f"{name}: trailing slash doubles the path"
+            assert "/chat/completions" not in url, \
+                f"{name}: base_url must NOT include the endpoint path"
+            for ph in re.findall(r"\{(\w+)\}", url):
+                assert ph in needs, f"{name}: {ph} is unsubstitutable"
+            assert key_env.isupper() and model, (name, key_env, model)
+        print(f"[activate] one key repoints every role at the provider that key "
+              f"belongs to, writes its verified endpoint and leaves the file's "
+              f"comments intact; {len(bootstrap.PROVIDER_CATALOG)} providers are "
+              f"catalogued, ranked by what they actually give away; incomplete "
+              f"credentials are refused rather than half-applied; and running "
+              f"it twice changes nothing")
+    finally:
+        for k, v in saved.items():
+            if v is not None:
+                os.environ[k] = v
+            else:
+                os.environ.pop(k, None)
+        shutil.rmtree(home, ignore_errors=True)
+
 def main():
     work = tempfile.mkdtemp(prefix="first-day-")
     srv = FakeProvider()
@@ -270,6 +379,7 @@ def main():
         check_an_unreachable_provider_does_not_hang(home, slug)
         check_the_probe_is_cheap(home, slug, srv)
         check_the_first_task_completes(home, slug, srv)
+        check_one_key_produces_a_working_fleet()
         print("PASS test_first_day")
     finally:
         srv.stop()

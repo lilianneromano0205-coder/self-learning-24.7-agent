@@ -231,6 +231,90 @@ def main():
         assert "R2_ACCESS_KEY_ID" in str(e), str(e)
     print("[fail-closed] a push with no credentials refuses by name and sends "
           "nothing -- it does not reach the network to find out")
+    # --- a backup must not archive its own backups (U-compounding)
+    # The default output is <home>/backups, which is INSIDE the tree being
+    # archived and is not in SKIP_DIRS, so every snapshot swallowed all of
+    # its predecessors: 28,451 -> 43,088 -> 72,321 bytes on a fresh fleet,
+    # with one then two nested archives. Exponential, on the very disk the
+    # fleet needs to save itself — so the failure mode of the backup system
+    # was to make backups impossible. preflight.py recommends exactly that
+    # path, which made the RECOMMENDED configuration the broken one.
+    import zipfile as _zip
+    nested_out = os.path.join(home, "backups")
+    sizes = []
+    for _ in range(4):
+        rec = backup.create(home, nested_out)
+        ap = rec["path"] if isinstance(rec, dict) else str(rec)
+        sizes.append(os.path.getsize(ap))
+        with _zip.ZipFile(ap) as z:
+            # only FLEET archives count: this test deliberately plants
+            # evil.zip and tampered.zip earlier to exercise traversal and
+            # damage detection, and those are legitimate content
+            inner = [n for n in z.namelist()
+                     if os.path.basename(n).startswith("fleet-")
+                     and n.lower().endswith(".zip")]
+        assert not inner, (
+            f"a backup archived {len(inner)} earlier archive(s): {inner[:3]}")
+    assert max(sizes) <= min(sizes) * 1.15, (
+        f"archive size grew {max(sizes)/min(sizes):.2f}x across four "
+        f"snapshots into the default directory: {sizes}")
+    print(f"[compounding] four snapshots into the DEFAULT output directory "
+          f"stayed flat at {sizes[-1]:,} bytes with zero nested archives — a "
+          f"backup no longer archives its own backups, which on a 24/7 fleet "
+          f"filled the disk the fleet needs in order to save itself")
+
+    # --- pull must VERIFY, and be able to say no
+    # `pull` shipped claiming "a pull re-verifies every manifest checksum
+    # before returning" with NO test behind it, and the claim was false twice
+    # over: verify() returns (ok, report) and the code called .get() on the
+    # tuple, so every pull raised AttributeError; and "problems" was never a
+    # key of that report, so unpacking correctly would have returned None and
+    # trusted a DAMAGED archive in silence. push and remote-list had pinned
+    # AWS vectors; pull — the half a container needs to get its memory back
+    # at boot — had nothing.
+    good = backup.create(home, os.path.join(home, "pulltest"))
+    good_path = good["path"] if isinstance(good, dict) else str(good)
+    stored = {}
+    with open(good_path, "rb") as f:
+        stored["fleet-good.zip"] = f.read()
+    damaged = bytearray(stored["fleet-good.zip"])
+    damaged[len(damaged) // 2] ^= 0xFF          # one byte, deep inside
+    stored["fleet-bad.zip"] = bytes(damaged)
+
+    saved_env = {k: os.environ.get(k) for k in
+                 ('R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY')}
+    os.environ['R2_ACCESS_KEY_ID'] = 'AKIAIOSFODNN7EXAMPLE'
+    os.environ['R2_SECRET_ACCESS_KEY'] = 'not-a-real-secret'
+    real_s3 = backup._s3
+    def fake_s3(method, url, kid, secret, body=None, region="auto", **kw):
+        name = url.rsplit("/", 1)[-1].split("?")[0]
+        return 200, stored[name]
+    backup._s3 = fake_s3
+    try:
+        dest = os.path.join(home, "pulled")
+        got = backup.pull("fleet-good.zip", dest, "https://x.example", "b")
+        assert os.path.isfile(got), "a good archive did not land on disk"
+        ok, _rep = backup.verify(got)
+        assert ok, "the pulled archive should verify"
+        try:
+            backup.pull("fleet-bad.zip", dest, "https://x.example", "b")
+            raise AssertionError(
+                "a corrupted archive was accepted — restoring from it would "
+                "put a damaged memory back into the fleet")
+        except RuntimeError as e:
+            assert "DAMAGED" in str(e), f"refused for the wrong reason: {e}"
+    finally:
+        backup._s3 = real_s3
+        for k, v in saved_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    print("[pull] a good archive downloads and verifies; one flipped byte "
+          "deep inside is caught and REFUSED with the reason — the check the "
+          "feature advertised now actually runs, having previously crashed "
+          "on every archive and, once unpacked, trusted a damaged one")
+
     print("PASS test_backup")
 
 

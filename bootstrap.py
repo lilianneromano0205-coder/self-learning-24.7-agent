@@ -118,6 +118,172 @@ def seed_home(home):
     return copied
 
 
+# --------------------------------------------------------------- activation
+# The gap this closes: an owner pastes a key and the platform still does
+# nothing, because a key is only one of three things a working provider needs
+# — the endpoint has to be configured, and the roles have to point at it.
+# Three manual steps to turn one secret into a working fleet is three places
+# to get it wrong.
+#
+# Every base_url below was verified against that provider's own documentation
+# rather than recalled, because a wrong base_url does not fail loudly: it
+# produces an opaque 404 much later, when somebody is trying to work.
+#
+# The order is deliberate and is the answer to "which key should I get?".
+# It ranks by what the provider ACTUALLY gives away, not by model quality:
+# a standing free allowance that needs no card outranks trial credits that
+# expire, which outrank a card-only tier. Ties break toward cheaper.
+
+PROVIDER_CATALOG = [
+    # (name, base_url, key_env, model, needs, free-tier note)
+    ("cloudflare", "https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/v1",
+     "CLOUDFLARE_API_TOKEN", "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+     ("CLOUDFLARE_ACCOUNT_ID",),
+     "10,000 Neurons/day free, standing, no card"),
+    ("groq", "https://api.groq.com/openai/v1", "GROQ_API_KEY",
+     "llama-3.3-70b-versatile", (), "free tier, very fast"),
+    ("nvidia", "https://integrate.api.nvidia.com/v1", "NVIDIA_API_KEY",
+     "meta/llama-3.3-70b-instruct", (), "free developer tier"),
+    ("huggingface", "https://router.huggingface.co/v1", "HF_TOKEN",
+     "Qwen/Qwen2.5-72B-Instruct", (), "free tier"),
+    ("deepseek", "https://api.deepseek.com/v1", "DEEPSEEK_API_KEY",
+     "deepseek-chat", (), "paid, inexpensive"),
+    ("mistral", "https://api.mistral.ai/v1", "MISTRAL_API_KEY",
+     "mistral-large-2512", (), "$10/month of credits on the Free plan"),
+    ("cerebras", "https://api.cerebras.ai/v1", "CEREBRAS_API_KEY",
+     "gpt-oss-120b", (), "$5 trial credits, needs a card, ~5 req/min"),
+    ("fireworks", "https://api.fireworks.ai/inference/v1", "FIREWORKS_API_KEY",
+     "accounts/fireworks/models/kimi-k3", (), "$1 one-off credits"),
+    ("together", "https://api.together.ai/v1", "TOGETHER_API_KEY",
+     "MiniMaxAI/MiniMax-M3", (), "no documented free allowance"),
+    ("openrouter", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY",
+     "meta-llama/llama-3.3-70b-instruct", (), "paid, many models on one key"),
+    ("openai", "https://api.openai.com/v1", "OPENAI_API_KEY",
+     "gpt-5.6-sol", (), "paid; 'free' tokens are traded for your prompts"),
+]
+
+
+def available_providers(home):
+    """-> [(name, base_url, key_env, model, note)] for every provider whose
+    credentials are actually present, best first.
+
+    Presence is asked of the Credential Authority, not of os.environ: it
+    models four sources (environment, agent.env beside the code AND beside
+    the expert, inline, key file), and a check that models fewer would call a
+    working configuration broken.
+    """
+    import credentials
+    out = []
+    for name, url, key_env, model, needs, note in PROVIDER_CATALOG:
+        probe = {"api_key_env": key_env}
+        if not credentials.resolve(probe, root=home):
+            continue
+        extra = {n: (os.environ.get(n) or _env_value(home, n)) for n in needs}
+        if any(not v for v in extra.values()):
+            continue                      # a key without its account id is not usable
+        for n, v in extra.items():
+            url = url.replace("{" + n + "}", v)
+        out.append((name, url, key_env, model, note))
+    return out
+
+
+def _env_value(home, name):
+    """One value out of agent.env, without printing anything."""
+    try:
+        with open(_env_path(home), "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith(f"{name}=") and not line.startswith("#"):
+                    return line.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    return ""
+
+
+def activate(home, root=None, chosen=None):
+    """Point an expert's roles at a provider whose key is actually present.
+
+    Returns {"provider":…, "model":…, "roles":n} or {} when no key is set.
+    Idempotent: running it twice changes nothing the second time.
+    """
+    import tomllib
+    avail = available_providers(home)
+    if not avail:
+        return {}
+    pick = None
+    for cand in avail:
+        if chosen is None or cand[0] == chosen:
+            pick = cand
+            break
+    if pick is None:
+        return {}
+    name, url, key_env, model, note = pick
+
+    targets = []
+    if root:
+        targets.append(os.path.join(root, "settings.toml"))
+    else:
+        base = os.path.join(home, "experts")
+        if os.path.isdir(base):
+            for slug in sorted(os.listdir(base)):
+                p = os.path.join(base, slug, "settings.toml")
+                if os.path.isfile(p):
+                    targets.append(p)
+    n_roles = 0
+    for path in targets:
+        n_roles = max(n_roles, _point_roles(path, name, url, key_env, model))
+    return {"provider": name, "model": model, "note": note,
+            "roles": n_roles, "experts": len(targets)}
+
+
+def _point_roles(path, name, base_url, key_env, model):
+    """Rewrite one settings.toml so every role uses `name`.
+
+    Text editing rather than a TOML round-trip, on purpose: this file is the
+    owner's, full of comments that explain each choice, and a serializer
+    would silently delete every one of them.
+    """
+    import re
+    with open(path, "r", encoding="utf-8-sig") as f:
+        text = f.read()
+
+    block = (f"[providers.{name}]\n"
+             f'base_url = "{base_url}"\n'
+             f'api_key_env = "{key_env}"\n')
+    if re.search(rf"^\[providers\.{re.escape(name)}\]", text, re.M):
+        # already declared: replace its base_url so an account id can change
+        text = re.sub(rf"(^\[providers\.{re.escape(name)}\]\n(?:[^\[]*?))"
+                      rf"^base_url = \"[^\"]*\"",
+                      lambda m: m.group(1) + f'base_url = "{base_url}"',
+                      text, count=1, flags=re.M)
+    else:
+        m = re.search(r"^\[providers\.", text, re.M)
+        at = m.start() if m else len(text)
+        text = text[:at] + block + "\n" + text[at:]
+
+    # point every role at it, preserving each role's own extra settings
+    roles = 0
+    out, cur = [], None
+    for line in text.splitlines():
+        m = re.match(r"^\[roles\.([\w-]+)\]", line)
+        if m:
+            cur = m.group(1)
+            out.append(line)
+            continue
+        if cur and re.match(r"^provider\s*=", line):
+            out.append(f'provider = "{name}"')
+            roles += 1
+            continue
+        if cur and re.match(r"^model\s*=", line):
+            out.append(f'model = "{model}"')
+            continue
+        if line.startswith("["):
+            cur = None
+        out.append(line)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(out) + "\n")
+    return roles
+
 def first_expert(home, name, identity):
     import fleet
     have = fleet.list_experts(home)
@@ -235,6 +401,21 @@ def main():
     slug, made = first_expert(home, a.expert, a.identity)
     step("expert", slug=slug, created=made)
     report["expert"] = slug
+
+    # 5b — point the roles at a provider whose key is actually present.
+    # Without this, pasting a key left the fleet still aimed at whatever the
+    # template shipped with, and the owner had to know that a key is only one
+    # of three things a working provider needs. Runs before the live probe so
+    # the probe checks what will really be used.
+    act = activate(home, root=os.path.join(home, "experts", slug))
+    report["activated"] = act
+    if act:
+        step("activate", provider=act["provider"], model=act["model"],
+             roles=act["roles"], free=act["note"])
+    else:
+        step("activate", provider="none",
+             why="no provider key found — the fleet still runs keyless "
+                 "(python demo.py), but agents cannot think yet")
 
     # 4 — live providers (after the expert exists: it owns the settings)
     if a.offline:

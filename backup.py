@@ -92,16 +92,31 @@ def _secret_roots(home):
     return roots
 
 
-def _walk(home, with_logs=False):
+def _walk(home, with_logs=False, exclude_dir=None):
     """Every file worth keeping, as (absolute, archive-relative, redactor).
 
     Exclusion is delegated to credentials.is_secret, which knows the
     conventional names AND the files settings.toml points at.
+
+    `exclude_dir` is where the archive is being WRITTEN, and skipping it is
+    not tidiness — it is the difference between backups that work and backups
+    that destroy the machine. The default output directory is `<home>/backups`,
+    which is inside the tree being archived and is not in SKIP_DIRS, so every
+    snapshot swallowed all of its predecessors. Measured on a fresh fleet:
+    28,451 -> 43,088 -> 72,321 bytes, with one then two nested archives
+    inside. That is exponential, and the disk it fills is the disk the fleet
+    needs in order to save itself at all — so the failure mode of the backup
+    system was to make backups impossible. `preflight.py` recommends exactly
+    that output path, so the recommended configuration was the broken one.
     """
     import credentials
     home = os.path.abspath(home)
     roots = _secret_roots(home)
+    skip_real = os.path.realpath(exclude_dir) if exclude_dir else None
     for dirpath, dirnames, filenames in os.walk(home):
+        if skip_real:
+            dirnames[:] = [d for d in dirnames
+                           if os.path.realpath(os.path.join(dirpath, d)) != skip_real]
         dirnames[:] = sorted(d for d in dirnames
                              if d not in SKIP_DIRS
                              and (with_logs or d not in LOG_DIRS))
@@ -126,7 +141,7 @@ def create(home, out_dir=None, with_logs=False, label=""):
     name = f"fleet-{stamp}{('-' + label) if label else ''}.zip"
     path = os.path.join(out_dir, name)
     files, skipped_secrets, redacted_inline = [], 0, 0
-    for full, rel in _walk(home, with_logs):
+    for full, rel in _walk(home, with_logs, exclude_dir=out_dir):
         files.append((full, rel))
     import credentials
     _roots = _secret_roots(home)
@@ -457,9 +472,30 @@ def pull(key, dest_dir, endpoint, bucket, root=None, region="auto"):
     out = os.path.join(dest_dir, os.path.basename(key))
     with open(out, "wb") as f:
         f.write(body)
-    rep = verify(out)
-    if rep.get("problems"):
-        raise RuntimeError(f"downloaded archive is DAMAGED: {rep['problems'][:3]}")
+    # Two bugs lived in the two lines this replaces, and together they meant
+    # the verification a pull advertises never ran:
+    #
+    #   rep = verify(out)          # verify() returns (ok, report), a TUPLE
+    #   if rep.get("problems"):    # -> AttributeError on EVERY pull, even a
+    #                              #    perfectly good archive
+    #
+    # and "problems" is not a key the report has ever contained — the real
+    # ones are corrupt/missing/secrets_leaked — so unpacking the tuple
+    # correctly would have produced None and passed a DAMAGED archive in
+    # silence. A wrong check that crashes is luckier than a wrong check that
+    # agrees with you; this one managed to be both.
+    #
+    # There was no test. `push` was covered by pinned AWS signature vectors
+    # and `remote-list` by the same, while `pull` — the half a container
+    # depends on to get its expert's memory back at boot — had none.
+    ok, rep = verify(out)
+    if not ok:
+        bad = list(rep.get("corrupt") or []) + list(rep.get("missing") or [])
+        raise RuntimeError(
+            f"downloaded archive is DAMAGED and was NOT trusted: "
+            f"{bad[:3] or rep}. The file is on disk at {out} for inspection; "
+            f"restoring from it would put a corrupted memory back into the "
+            f"fleet, which is worse than starting empty.")
     return out
 
 

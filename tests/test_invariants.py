@@ -74,6 +74,33 @@ def check_execution_catalogue():
             assert not o["shell"], (
                 f"{name} is platform-authored and must take an argument "
                 f"vector — a platform call has no reason to invoke a shell")
+    # EVERY declared flag must be enforced, not the two we happened to check.
+    # `approval: True` sat in this catalogue, was exported by describe(), and
+    # was promised in the module docstring's control table, while nothing in
+    # execution.py ever imported `approvals`. This loop checked policy and
+    # sandbox and skipped the one flag nobody implemented — an enumeration
+    # with a hole is how a declared control goes missing in plain sight.
+    import tempfile
+    for name, o in ops.items():
+        if not o.get("approval"):
+            continue
+        probe = tempfile.mkdtemp(prefix="approval-inv-")
+        consequential = "git push origin main"
+        try:
+            execution.run(name, consequential, probe, cfg={},
+                          role="practitioner", timeout=5)
+            raise AssertionError(
+                f"{name} declares approval:True and ran a consequential "
+                f"command without one — the catalogue promises a control "
+                f"this operation does not have")
+        except execution.Refused as e:
+            assert "APPROVAL REQUIRED" in str(e), (
+                f"{name} refused {consequential!r} for the wrong reason: {e}")
+        # and ordinary work must still flow, or the control is a brake
+        rc, _o, _e = execution.run(name, "echo ok", probe, cfg={},
+                                   role="practitioner", timeout=30)
+        assert rc == 0, f"{name} blocked ordinary work (rc={rc})"
+
     # and the type check is real, not documentation
     for name, o in ops.items():
         bad = ["echo hi"] if o["shell"] else "echo hi"
@@ -82,9 +109,12 @@ def check_execution_catalogue():
             raise AssertionError(f"{name} accepted the wrong command type")
         except execution.Refused:
             pass
+    n_app = sum(1 for o in ops.values() if o.get("approval"))
     print(f"[catalogue] {len(ops)} execution operations: every model-authored "
           f"one enforces policy+sandbox, every platform one refuses a shell "
-          f"string")
+          f"string, and each of the {n_app} declaring approval actually "
+          f"requires one for a consequential command while still letting "
+          f"ordinary work through")
 
 
 def check_filesystem_zones(sb):
@@ -666,6 +696,84 @@ def check_no_file_clock_comparisons():
           f"records the edge it cannot")
 
 
+def check_capability_report_matches_reality():
+    """Every capability toolbox.py reports must agree with what can be RUN.
+
+    A tool is present in two ways and this platform kept seeing only one.
+    `pip install yt-dlp` puts a module on sys.path and a script in a Scripts/
+    directory that is usually not on PATH — the default on Windows and on any
+    --user install. Asking only shutil.which reported MISSING for a capability
+    the machine demonstrably had, and the agent then did the right thing with
+    wrong information: it declined, and asked the owner to install what was
+    already installed.
+
+    So the check is not "is the binary on PATH" but "do the report and the
+    runtime give the same answer" — enumerated over every tool that has a
+    module form, rather than over the one that was noticed.
+    """
+    import shutil
+    import subprocess
+    import ingest
+    import toolbox
+
+    # every tool this platform can reach by either door
+    DUAL = [("yt-dlp", "yt_dlp")]
+    checked = []
+    for binary, module in DUAL:
+        argv = ingest.tool_argv(binary, module)
+        on_path = shutil.which(binary) is not None
+        importable = False
+        try:
+            import importlib.util
+            importable = importlib.util.find_spec(module) is not None
+        except (ImportError, ValueError):
+            pass
+        assert (argv is not None) == (on_path or importable), (
+            f"{binary}: resolver says {argv!r} but PATH={on_path} "
+            f"module={importable} — the two doors disagree")
+        if argv is None:
+            continue
+        # it must not merely resolve; it must RUN. A resolver that reports a
+        # capability which then fails is worse than one that reports MISSING.
+        r = subprocess.run(argv + ["--version"], capture_output=True,
+                           text=True, timeout=180)
+        assert r.returncode == 0, (
+            f"{binary} resolved to {argv!r} but exits {r.returncode} — the "
+            f"capability report would be a promise the runtime cannot keep")
+        checked.append((binary, "PATH" if on_path else "module"))
+
+    # and the published REPORT must agree with the resolver. capability_note()
+    # is the text injected into an agent's context — it is what the agent
+    # actually believes about this machine, so it is the thing that must be
+    # true, not an internal table nobody reads.
+    note = toolbox.capability_note()
+    for binary, module in DUAL:
+        runnable = ingest.tool_argv(binary, module) is not None
+        # the note is a READY: section then a MISSING: section, each holding
+        # "- name: how" lines, so which SECTION the line falls in is the
+        # report — not the text of the line itself
+        section, reported = None, None
+        for l in note.splitlines():
+            if l.startswith("READY:"):
+                section = True
+            elif l.startswith("MISSING"):
+                section = False
+            elif "video_download" in l and section is not None:
+                reported = section
+                break
+        assert reported is not None, "video_download vanished from the note"
+        assert reported == runnable, (
+            f"the agent is told video_download is "
+            f"{'READY' if reported else 'MISSING'} while ingest "
+            f"{'can' if runnable else 'cannot'} actually run {binary} — a "
+            f"capability report the runtime disagrees with is worse than no "
+            f"report, because the agent acts on it")
+
+    print(f"[capabilities] every dual-installed tool resolves the same way for "
+          f"the report and the runtime, and each one actually executes: "
+          f"{', '.join(f'{b} via {how}' for b, how in checked) or 'none present'}")
+
+
 def main():
     sb = make_sandbox("invariants", providers={"m": {"script": "s.json"}},
                       roles={"practitioner": "m"},
@@ -684,6 +792,7 @@ def main():
     check_sandbox_names_are_unique()
     check_documented_cli_exists()
     check_no_file_clock_comparisons()
+    check_capability_report_matches_reality()
     print("PASS test_invariants")
 
 
