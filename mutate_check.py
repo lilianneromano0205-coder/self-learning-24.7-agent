@@ -57,6 +57,12 @@ MUTATIONS = [
      "found, so the container never boots and no assertion is ever reached — "
      "a CAUGHT here would be the crash being counted, not the test noticing"),
 
+    ("inbox: a zero settle window can still hold a file back", "ingest.py",
+     '''        if settle > 0 and age < settle:''',
+     '''        if age < settle:''',
+     "test_url.py",
+     "a dropped file never ingested because a clock ran a few ms ahead"),
+
     ("credentials: the environment scrub removed from every backend",
      "sandbox.py",
      '''    env, dropped = scrub_env({**os.environ, **(env or {})}, cfg, cmd)''',

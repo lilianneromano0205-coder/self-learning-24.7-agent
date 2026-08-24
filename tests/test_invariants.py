@@ -570,6 +570,16 @@ def check_no_file_clock_comparisons():
     Comparing a file's age to the WALL CLOCK (`time.time() - getmtime(p) >
     stale`) is sound and stays allowed -- that is how every lock in this
     codebase expires. What is banned is one file's stamp against another's.
+
+    That allowance has an edge, and U22 walked straight into it: an age is
+    sound, but an age is NOT guaranteed non-negative. The filesystem's clock
+    and time.time() are different sources, and on a virtualised host a file
+    written a moment ago can carry an mtime AHEAD of the wall clock. Any
+    threshold at or near zero then inverts -- `age < 0` was true, and an
+    inbox setting meaning "no settling required" became "never ingest".
+    Compare against a positive threshold, or clamp the age; do not assume
+    time only moves one way. This is written down because an allowance whose
+    edge nobody records is the next defect waiting.
     """
     import ast
 
@@ -647,9 +657,13 @@ def check_no_file_clock_comparisons():
         if "getmtime(" in line and "time.time()" not in line
         and not line.lstrip().startswith("#"))
     print(f"[clocks] every .py in the platform parsed: no file timestamp is "
-          f"compared against another file's — the {n_mtime} remaining "
-          f"getmtime sites are sorting or age-against-the-wall-clock, which "
-          f"a coarse filesystem tick cannot corrupt (U19, U20)")
+          f"compared against another file's, which is the comparison a "
+          f"coarse filesystem tick corrupts (U19, U20). The {n_mtime} "
+          f"remaining getmtime sites sort, or measure age against the wall "
+          f"clock — sound, but not unconditionally: an age can come back "
+          f"NEGATIVE when the two clocks disagree, which is what U22 was, so "
+          f"this check bans the pattern it can prove and the docstring "
+          f"records the edge it cannot")
 
 
 def main():

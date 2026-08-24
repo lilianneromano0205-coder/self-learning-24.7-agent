@@ -19,8 +19,9 @@ import os
 import pathlib
 import sys
 import threading
+import time
 
-from common import AGENT_DIR, make_sandbox, read_state, serve_dir
+from common import AGENT_DIR, agent_setting, make_sandbox, read_state, serve_dir
 
 sys.path.insert(0, AGENT_DIR)
 import ingest
@@ -100,6 +101,38 @@ def main():
     tasks = read_state(sb)["tasks"]
     assert tasks[-1]["role"] == "watcher" and tasks[-1]["course"] == "reading-list"
     print("[.urls] dropped link file became a course with its own lessons")
+
+    # --- the settle window must not be able to invert (U22)
+    # A file whose mtime lands AHEAD of time.time() gave a negative age, and
+    # `age < settle` was then true even at settle = 0 — "no settling
+    # required" behaving as "never ingest". It happened on a CI runner and
+    # not once in 3000 attempts here, so the skew is forced rather than
+    # waited for: nothing about this defect was reproducible by patience.
+    second = os.path.join(sb, "inbox", "second list.urls")
+    with open(second, "w", encoding="utf-8") as f:
+        f.write(f"# more links\n{uri}\n")
+    future = time.time() + 5           # the filesystem clock, running ahead
+    os.utime(second, (future, future))
+    assert os.path.getmtime(second) - time.time() > 0, "the skew was not applied"
+    n2 = ingest.scan_inbox(sb)
+    assert n2 == 1, (
+        f"a file dated in the future was skipped at settle = 0: scan_inbox "
+        f"returned {n2}. Zero settling must mean zero, or a clock a few "
+        f"milliseconds ahead strands the file until something touches it")
+    # and a real settle window still holds that same file back
+    agent_setting(sb, "inbox_settle_seconds = 30")
+    third = os.path.join(sb, "inbox", "third list.urls")
+    with open(third, "w", encoding="utf-8") as f:
+        f.write(f"# still copying\n{uri}\n")
+    assert ingest.scan_inbox(sb) == 0, (
+        "a file written moments ago was ingested despite a 30s settle "
+        "window — the fix for the zero case must not disable the feature")
+    os.utime(third, (time.time() - 60, time.time() - 60))
+    assert ingest.scan_inbox(sb) == 1, "a settled file was never picked up"
+    agent_setting(sb, "inbox_settle_seconds = 0")
+    print("[settle] zero settling means zero even when the filesystem clock "
+          "runs ahead of the wall clock, and a real window still holds a "
+          "file back until it stops changing")
     stop_site()
     print("PASS test_url")
 

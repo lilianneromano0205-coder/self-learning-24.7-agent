@@ -1649,3 +1649,92 @@ between platforms, read the failure, not the verdict.
 Five of the twenty-one numbered defects are now defects in this project's
 own verification machinery rather than in the platform it verifies: U8, U13,
 U17, U18 and this one.
+
+---
+
+## U22 — a settle window of zero behaved as a window of forever
+
+**Severity:** P3 in the default configuration, P1 for anyone who sets
+`inbox_settle_seconds = 0`. Found by the third CI run, on the one job that
+had passed the second.
+
+**How it surfaced.** With U21 fixed, five of six jobs were green and
+windows-3.12 failed — the job that had passed the run before. A bare
+`AssertionError` with no message, at `test_url.py:99`:
+
+```python
+n = ingest.scan_inbox(sb)
+assert n == 1
+```
+
+The platform's own log line, twenty lines further down, said everything:
+
+```
+reading list.urls: still settling (modified <0s ago), next scan
+```
+
+**The defect.** `scan_inbox` skips a file that is still being copied in:
+
+```python
+if time.time() - os.path.getmtime(src) < settle:
+    continue
+```
+
+With `settle = 0` that guard should be inert — nothing is less than zero. It
+is inert only while the age is non-negative, and the age is **not** always
+non-negative. The filesystem's timestamp and `time.time()` do not come from
+the same clock, and on a virtualised host they disagree by milliseconds. A
+file written a moment ago can carry an mtime a hair *ahead* of the wall
+clock, the age goes negative, and `age < 0` is true. A setting documented as
+"no settling required" then means "never ingest this file" until something
+touches it again.
+
+**Why one machine could not find it.** Writing 3000 files on the development
+host and stat'ing each immediately produced **zero** negative ages, worst
+skew 0.000 ms. The defect is not rare on the right hardware and absent on
+the wrong hardware — it is invisible on the wrong hardware. Three CI runs
+were needed to see it once, because it needs a runner whose clocks disagree.
+
+**Impact in production.** The shipped default is `inbox_settle_seconds = 10`,
+where a negative age costs one scan cycle and nothing else. The operator who
+reads the setting as "off" and sets it to `0` gets a `inbox/` that silently
+stops working for exactly the files that arrive when the clocks disagree.
+Silence is the whole problem: no error, no warning, and a file sitting in a
+watched directory forever.
+
+**Fixed by** making zero mean zero:
+
+```python
+age = time.time() - os.path.getmtime(src)
+if settle > 0 and age < settle:
+```
+
+The message now prints the real age and the window it needed, instead of
+`modified <0s ago` — which was the log line that solved this, and would have
+solved it faster had it said `-0.003s`.
+
+**Test.** `test_url.py` does not wait for the skew, because waiting is what
+does not work: it **forces** it with `os.utime(f, (time.time() + 5, ...))`,
+asserts the mtime really is in the future, and requires `scan_inbox` to
+ingest the file anyway at `settle = 0`. It then proves the fix did not simply
+disable the feature — a 30-second window still holds a freshly written file
+back, and releases it once the file is old enough.
+
+**Mutation:** `inbox: a zero settle window can still hold a file back`
+restores the original comparison; `test_url.py` fails in 1 s.
+
+**Relation to U19 and U20.** Same family — a decision derived from a file
+timestamp — and specifically the case the AST invariant *permits*. That
+invariant bans comparing two files' timestamps and allows comparing one
+against `time.time()`, on the grounds that an age is sound. An age is sound;
+what is not sound is assuming it cannot be negative. The invariant's
+docstring now says so, because an allowance whose edge nobody wrote down is
+the next defect waiting.
+
+**A note on the fix to `tests/common.py` that came with it.** Writing the
+regression test needed `agent_setting(sb, "inbox_settle_seconds = 30")` on a
+key the sandbox already defines, which inserted a *second* copy and made
+tomllib refuse the file outright. The helper's docstring already explained
+that it exists to avoid a silent no-op; this was the next trap along the same
+path, failing in the loader rather than at the call site. It now replaces an
+existing key in place and inserts only a genuinely new one.

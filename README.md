@@ -105,6 +105,8 @@ load-bearing behaviour and requires its test to fail:
 ```
 CAUGHT  docker: egress allowed by default
 CAUGHT  docker: timeout leaves the container
+SKIP    docker: every host variable forwarded into the container
+CAUGHT  inbox: a zero settle window can still hold a file back
 CAUGHT  credentials: the environment scrub removed from every backend
 CAUGHT  provider: no Authorization header
 CAUGHT  provider: malformed body kills the task
@@ -116,29 +118,39 @@ CAUGHT  fleet: creation stops seeding the home
 CAUGHT  loop: a running task is stolen from a live sibling
 SKIP    credentials: a secret written under the umask
 SKIP    docker: the container runs as root in the mount
-SKIP    docker: every host variable forwarded into the container
 
-14 mutations: 11 caught, 0 missed, 3 skipped     [on Windows]
+15 mutations: 12 caught, 0 missed, 3 skipped     [on Windows]
 ```
 
-**A `SKIP` here is a refusal to score, and each says why.** The first two are
-POSIX-only because file modes are not the mechanism on Windows. The third is
-POSIX-only for a completely different reason, and it is the more interesting
-one: forwarding a Windows `PATH` into a Linux container means `sh` cannot be
-found, so the container never boots and the assertions are never reached — a
+**A `SKIP` here is a refusal to score, and each states its own reason.** Two
+are POSIX-only because file modes are not the mechanism on Windows. The
+third — `every host variable forwarded into the container` — is POSIX-only
+for a completely different reason, and it is the one worth reading:
+forwarding a Windows `PATH` into a Linux container means `sh` cannot be
+found, so the container never boots and no assertion is ever reached. A
 CAUGHT there would be counting a crash, not a test noticing anything.
 
-That is not hypothetical. This row **did** report CAUGHT on Windows for four
-releases, certifying a test that had never actually run. The first time the
+That is not hypothetical. That row **did** report CAUGHT on Windows for four
+releases, certifying a test that had never actually run; the first time the
 mutation step reached Linux it reported MISSED, which was the truth. See
 [U21](GAPS_RISKS_AND_UNFINISHED.md) — a mutation harness reports two things
 and only one was being checked: whether the test failed, and whether it
-failed **for the reason claimed**.
+failed **for the reason claimed**. A shared skip reason was the same mistake
+one level up, so each row now carries its own.
 
-CI runs all three on Linux. Two of them are confirmed CAUGHT there. The
-third is the one just retargeted at `_agent_env`, and whether the tightened
-assertion catches it is a question for the next CI run rather than a claim
-this file gets to make — which is the whole point of the entry above.
+Three scores, because where a mutation ran changes what it means:
+
+| Where | Result |
+|---|---|
+| Windows | 15 mutations: **12 caught, 0 missed**, 3 refused (POSIX-only) |
+| Linux container, no docker daemon | **11 caught, 0 missed**, 4 refused (the docker rows skip themselves rather than pass) |
+| CI on ubuntu, with a daemon | last run scored **14 caught, 0 missed, 0 skipped** on the fourteen rows it had — nothing is refused there |
+
+The fifteenth row was added after that CI run, and is confirmed CAUGHT in the
+Linux container above. Splitting that hair is the point: writing "15 caught
+on Linux" before a machine had said so was the first thing typed into this
+paragraph, and it is exactly the reflex [U21](GAPS_RISKS_AND_UNFINISHED.md)
+is about.
 
 **The paths that touch something real.** Docker containers actually start —
 isolation is proven by the container answering under its own hostname and a
@@ -171,20 +183,23 @@ Stated plainly, because a README that only reports wins is marketing.
   live probe, and until somebody runs it with a real key the honest ceiling
   for every capability here is **OFFLINE VERIFIED** — which is what
   `python proof.py` reports.
-- **One machine is one machine.** Everything above was developed and proven
-  on a single Windows laptop. The first time CI ran the suite on computers
-  this code had never touched — Ubuntu and Windows × Python 3.11/3.12/3.13 —
-  **four of the six jobs failed**, and every failure was a real defect: a
-  task could be taken from a live sibling loop and executed twice; a
-  container ran as root and handed back a workspace the agent could not
-  write to; a secret was created world-readable; an evidence sentence
-  asserted the host was Windows wherever it ran. Reproducing those locally in
-  a Linux container found two more, where "has this changed?" was decided by
-  comparing two files' timestamps — unsound on overlayfs, which is what every
-  container uses. All six are fixed and held closed
-  ([U15–U20](GAPS_RISKS_AND_UNFINISHED.md)). The suite is now green on Linux
-  and Windows. The lesson stands: a green suite on one machine is evidence
-  about that machine.
+- **One machine is one machine, and it took three CI runs to stop finding
+  defects.** Everything above was developed and proven on a single Windows
+  laptop, green twice consecutively, after four audit passes. Then the suite
+  ran on computers this code had never touched — Ubuntu and Windows × Python
+  3.11/3.12/3.13. Each run found what the one before it had masked:
+
+  | Run | Result | Found |
+  |---|---|---|
+  | 1 | 4 of 6 jobs failed | a task taken from a **live** sibling loop and executed twice; a container running as root, handing back a workspace the agent could not write to; a secret created world-readable; an evidence sentence claiming "on a Windows host" wherever it ran (U15–U18) — and reproducing them locally found two more, where "has this changed?" was decided by comparing two files' timestamps, unsound on the filesystem every container uses (U19, U20) |
+  | 2 | 1 of 6 failed | the suite was green everywhere; the **mutation harness** was not. A row had reported CAUGHT for four releases while the test it certified had never actually run (U21) |
+  | 3 | 1 of 6 failed | a settle window of zero behaving as a window of forever, because a file's mtime can land *ahead* of the wall clock (U22) |
+
+  Eight defects, all fixed and held closed by tests and mutations
+  ([U15–U22](GAPS_RISKS_AND_UNFINISHED.md)). U22 is the one to notice:
+  3000 files written and stat'd on the development machine produced **zero**
+  negative ages. It is not that the defect is rare here — it is invisible
+  here. A green suite on one machine is evidence about that machine.
 - **The UI has been used by nobody but its author.** The spec asks for a
   five-person test at ≥90 % task completion; that has not happened.
 - **No gradient updates.** The Training Lab governs promotion and exports

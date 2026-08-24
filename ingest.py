@@ -992,8 +992,19 @@ def scan_inbox(root, course=None):
     processed = 0
     for fn in items:
         src = os.path.join(inbox, fn)
-        if time.time() - os.path.getmtime(src) < settle:
-            print(f"{fn}: still settling (modified <{settle}s ago), next scan")
+        # A file written a moment ago can carry an mtime a hair AHEAD of
+        # time.time(): the filesystem's clock and the wall clock are not the
+        # same source, and a virtualised host can have them disagree by
+        # milliseconds. `age` then goes NEGATIVE, `age < settle` is true even
+        # when settle is 0, and a setting documented as "no settling
+        # required" silently means "never ingest this file" until something
+        # touches it again. Seen on a GitHub windows-latest runner; it does
+        # not occur on the development machine in 3000 attempts, which is
+        # exactly why one machine could not find it. Zero means zero.
+        age = time.time() - os.path.getmtime(src)
+        if settle > 0 and age < settle:
+            print(f"{fn}: still settling (modified {max(age, 0.0):.1f}s ago, "
+                  f"needs {settle}s), next scan")
             continue
 
         # a whole course dropped as a folder

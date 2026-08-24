@@ -664,6 +664,7 @@ requires the test that claims to cover it to fail:
 | every write allowed regardless of role | `test_rbac.py` |
 | expert creation stops seeding the home | `test_invariants.py` |
 | a running task is stolen from a live sibling loop | `test_audit.py` |
+| a zero settle window can still hold a file back | `test_url.py` |
 | a secret written under the umask † | `test_preflight.py` |
 | the container runs as root in the mount † | `test_docker_live.py` |
 | every host variable forwarded into the container ‡ | `test_docker_live.py` |

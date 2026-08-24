@@ -565,3 +565,8 @@ enumerates the callers rather than exercising one of them.
 | U7 | one `try/except Refused` for `acquire.py`'s whole CLI |
 | U9 | the scroll container moved **into** `taskTable()` |
 | U10 | `_authed` resolves an actor; `_may_write` reads a declared table |
+| U15 | `adopt_task` — the resume path now passes through a mutex-guarded gate, exactly as the queued path passes through `claim_task`. The mutex existed; only one of the two ways to claim a task went through it |
+| U17 | `credentials.write_secret` — the Credential Authority could recognise a secret and not create one, so three modules wrote their own `open` + `chmod` and a fourth forgot |
+| U19, U20 | one helper each answering "did it change?" from the material rather than from a clock, plus an AST invariant that enumerates **every** module instead of the two that were noticed |
+| U21 | not a gateway but its mirror image: the verification harness reported *whether* a test failed and never *why*, so a container that could not boot was scored as a test catching a bug |
+| U22 | the guard now asks whether a window exists before asking whether it has elapsed — `settle > 0 and age < settle`. Zero meant "no settling required" everywhere except in the one comparison that implemented it |

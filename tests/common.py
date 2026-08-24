@@ -43,12 +43,28 @@ def agent_setting(root, line):
     section happens to be last (a [roles.*] table), where the loop never
     reads it -- a silent no-op that makes a test look green for the wrong
     reason. This inserts it where it belongs.
+
+    Setting a key the table ALREADY defines used to insert a second copy,
+    which tomllib rejects outright ("Cannot overwrite a value") -- the next
+    trap along from the silent no-op above, and one that fails in the loader
+    rather than at the call site. An existing key is now replaced in place.
     """
     p = os.path.join(root, "settings.toml")
     with open(p, "r", encoding="utf-8") as f:
         text = f.read()
     assert "[agent]" in text, "sandbox settings.toml has no [agent] table"
-    out = text.replace("[agent]\n", "[agent]\n" + line.strip() + "\n", 1)
+    key = line.split("=", 1)[0].strip()
+    head, sep, rest = text.partition("[agent]\n")
+    # the [agent] table ends at the next table header
+    body, nxt, tail = rest.partition("\n[")
+    lines = body.splitlines()
+    for i, l in enumerate(lines):
+        if l.split("=", 1)[0].strip() == key and "=" in l:
+            lines[i] = line.strip()
+            break
+    else:
+        lines.insert(0, line.strip())
+    out = head + sep + "\n".join(lines) + nxt + tail
     with open(p, "w", encoding="utf-8") as f:
         f.write(out)
     return p

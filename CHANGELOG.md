@@ -1,6 +1,6 @@
 # Changelog
 
-## v8 — the first run on a computer we do not own (2026-08-23)
+## v8 — three runs on computers we do not own (2026-08-23)
 
 v7 shipped with a green suite and an honest limits list whose twelfth entry
 read: *"Windows and OneDrive were the development environment... A CI
@@ -101,7 +101,7 @@ to the wall clock stays allowed — that is how every lock here expires. Run
 against the previous release it names `commons.py:284` and
 `conflicts.py:322`, and nothing else.
 
-**Four mutations added**, 10 → 14. Three are declared POSIX-only and skipped
+**Five mutations added**, 10 → 15. Three are declared POSIX-only and skipped
 out loud on Windows rather than reported as passes, and each now states its
 own reason rather than sharing a blanket one — two because modes are not the
 mechanism there, the third because the container cannot even start. On a
@@ -139,6 +139,38 @@ defends credentials: `scrub_env` removed from `run()`, caught by
 The lesson is the reason U21 is the longest entry in the audit record: a
 mutation harness reports two things and only one was being checked — whether
 the test failed, and whether it failed **for the reason claimed**.
+
+**U22 — a settle window of zero behaved as a window of forever.** Run three:
+five jobs green, and windows-3.12 — which had passed run two — failed on a
+bare `assert n == 1`. The platform's own log line named it:
+
+    reading list.urls: still settling (modified <0s ago), next scan
+
+`scan_inbox` skips a file still being copied in, via `time.time() -
+getmtime(src) < settle`. At `settle = 0` that guard is inert only while the
+age is non-negative — and the filesystem's clock is not `time.time()`. On a
+virtualised host a file written a moment ago carries an mtime a hair AHEAD of
+the wall clock, the age goes negative, and a setting documented as "no
+settling required" means "never ingest this file". The shipped default of 10
+absorbs it; an operator who reads 0 as "off" gets an inbox that silently
+stops working.
+
+Writing 3000 files on the development machine and stat'ing each immediately
+produced **zero** negative ages, worst skew 0.000 ms. The defect is not rare
+on this hardware, it is invisible on it.
+
+The regression test does not wait for the skew, because waiting is exactly
+what does not work: it forces one with `os.utime(f, time.time() + 5)`,
+asserts the mtime really is in the future, and requires ingestion anyway —
+then proves the fix did not simply disable the feature, by holding a fresh
+file back for a 30-second window and releasing it once it ages.
+
+U22 sits in the case the new AST invariant deliberately **permits**: it bans
+comparing two files' timestamps and allows comparing one against the wall
+clock, because an age is sound. An age is sound; assuming it cannot be
+negative is not. The invariant's docstring now records that edge, and the
+sentence it prints into `EVIDENCE.md` no longer claims the remaining sites
+are beyond corruption — one of them was.
 
 **A small proof that the proof system is not decorative.** Late in this pass a
 *comment* was edited in `conflicts.py` — no behaviour changed at all. The next
