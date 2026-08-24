@@ -38,11 +38,31 @@ MUTATIONS = [
      "test_docker_live.py",
      "an orphaned container after a timeout"),
 
-    ("docker: credentials passed through", "sandbox.py",
+    # Was labelled "docker: credentials passed through" and paired with the
+    # credential assertions, which scrub_env has already satisfied before
+    # _docker runs at all -- so this breaks the SECOND filter, not the one
+    # that stops credentials. It reported CAUGHT on Windows for a reason that
+    # had nothing to do with the test noticing: forwarding a Windows PATH
+    # into a Linux container means `sh` is not found and the container never
+    # boots, so the credential check never executed. Linux, where the host
+    # PATH is valid, told the truth and reported MISSED. Now it says what it
+    # breaks, is POSIX-only for the same boot reason, and the docker test
+    # asserts the property it actually removes.
+    ("docker: every host variable forwarded into the container", "sandbox.py",
      '''    for k, v in sorted(_agent_env(env).items()):''',
      '''    for k, v in sorted(env.items()):''',
      "test_docker_live.py",
-     "API keys inside the container"),
+     "the host's entire environment inside the container",
+     "forwarding a Windows PATH into a Linux container stops `sh` from being "
+     "found, so the container never boots and no assertion is ever reached — "
+     "a CAUGHT here would be the crash being counted, not the test noticing"),
+
+    ("credentials: the environment scrub removed from every backend",
+     "sandbox.py",
+     '''    env, dropped = scrub_env({**os.environ, **(env or {})}, cfg, cmd)''',
+     '''    env, dropped = {**os.environ, **(env or {})}, []''',
+     "test_secrets.py",
+     "API keys handed to a command the harness did not write"),
 
     ("provider: no Authorization header", "loop.py",
      '''                        "Authorization": f"Bearer {self._api_key(prov)}",''',
@@ -152,13 +172,17 @@ def main():
         # Windows uses ACLs and the platform says so at every chmod. Calling
         # such a mutation MISSED on Windows would be a false alarm; calling
         # it CAUGHT would be a lie. It is declared, and skipped out loud.
+        # True, or a string saying WHY this one is POSIX-only. A single
+        # blanket reason was wrong the moment a second kind of mutation
+        # became POSIX-only for a different cause, and a skip line nobody
+        # can trust is worse than no skip line.
         posix_only = entry[6] if len(entry) > 6 else False
         if only and only not in label:
             continue
         if posix_only and os.name == "nt":
-            results.append((label, "SKIP",
-                            "POSIX-only: Windows uses ACLs, not modes, so "
-                            "nothing here can catch it — run this on Linux"))
+            why = posix_only if isinstance(posix_only, str) else \
+                "Windows uses ACLs, not modes, so nothing here can catch it"
+            results.append((label, "SKIP", f"POSIX-only: {why} — run on Linux"))
             continue
         path = os.path.join(AGENT, fname)
         backup = path + ".mutbak"

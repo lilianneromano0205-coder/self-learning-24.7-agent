@@ -1502,3 +1502,150 @@ exists to stop; the figure above came from running it.
 **The general lesson**, worth more than the fix: *deriving "did it change?"
 from a comparison between two different files' timestamps is unsound.* The
 codebase is now checked for that pattern by an invariant test.
+
+---
+
+## U20 — the fleet's shared lessons stopped reaching every agent's context
+
+**Severity:** P2. The same unsound test as U19, in a second module, found by
+enumerating the pattern rather than by noticing it twice.
+
+`commons.digest()` builds the block of hard-won fleet lessons that is injected
+into **every agent's context window**. Before injecting it, it refreshed the
+curated view:
+
+```python
+led = os.path.getmtime(os.path.join(d, "lessons.md"))
+cur = os.path.getmtime(os.path.join(d, CURATED))
+if led > cur:
+    curate(home)
+```
+
+`lessons.md` is the append-only ledger; `lessons.curated.md` is the merged
+view derived from it. When a new lesson is appended and the curated view is
+rewritten in the same filesystem tick — which on overlayfs is anything within
+about a tenth of a second — the two timestamps come out **equal**, `led > cur`
+is false, and the view is never rebuilt. The lesson exists on disk and reaches
+no agent. Nothing errors; the block is simply one lesson short, forever.
+
+This is worse than U19 in reach and better in luck: worse because the commons
+digest is injected into every context of every expert in the fleet rather than
+one course's conflict scan, and better because a later unrelated edit to
+`lessons.md` eventually lands on a different tick and repairs it silently.
+"Eventually self-healing by accident" is not a property to rely on for the
+mechanism whose entire job is that a lesson paid for once is not paid for
+twice.
+
+**Demonstrated on the published code**, not inferred. Forcing the two files to
+share an mtime — exactly what the container produces naturally:
+
+```
+PRISTINE CODE — mtimes identical: True
+PRISTINE CODE — new lesson reaches the injected digest: False
+```
+
+and after the fix, on the same input:
+
+```
+mtimes identical: True
+stale detected  : True
+new lesson reaches the injected digest: True
+```
+
+**Fixed by** `_curation_is_stale()`, which compares a SHA-256 of `lessons.md`
+against the digest recorded in `lessons.curated.md.stamp` when the view was
+built. The curated view now knows *what* it was built from instead of *when*.
+
+**Found by** writing the U19 fix and then asking whether the same mistake
+existed elsewhere, which produced the AST invariant now in
+`test_invariants.py`. It named `commons.py:284` and `conflicts.py:322` and
+nothing else. Neither module's author would have looked at the other; the
+enumeration did.
+
+---
+
+## U21 — a mutation that certified a test as meaningful when it was not
+
+**Severity:** P2 as a defect, and the most instructive finding in this pass.
+It is a failure of the thing built to detect failures.
+
+**How it surfaced.** With U15–U20 fixed, CI went from four failing jobs to
+one, and the survivor failed at a different step: not the acceptance suite,
+which was green everywhere, but **Mutation check** on ubuntu-3.12.
+
+```
+MISSED  docker: credentials passed through
+13 mutations: 12 caught, 1 missed
+```
+
+A `MISSED` row means the feature was removed and the test passed anyway. This
+row had been reported `CAUGHT` on Windows in every previous run.
+
+**Why it differed by platform — the experiment.** Applying the mutation
+locally on Windows and reading the failure rather than the verdict:
+
+```
+File "tests/test_docker_live.py", line 90, in check_it_runs_somewhere_else
+AssertionError: (127, '', 'docker: Error response from daemon: ...
+  exec: "sh": executable file not found in $PATH')
+```
+
+The mutation forwards the **host's entire environment** into the container.
+On Windows that includes `PATH=C:\...;C:\...`, which inside a Linux container
+means `sh` cannot be found and the container never boots. The test died at
+its FIRST check. The credential assertions at line 229 never executed.
+
+So the green `CAUGHT` row was not the credential scrub being noticed. It was
+a container failing to start, for a reason with nothing to do with the
+property the row claimed to certify. On Linux, where the host `PATH` is a
+valid Linux path, the container boots, the credential checks run — and pass.
+Linux was telling the truth.
+
+**And the mutation was aimed at the wrong layer anyway.** `sandbox.run` does:
+
+```python
+env, dropped = scrub_env({**os.environ, **(env or {})}, cfg, cmd)   # line 270
+```
+
+The credentials are gone **before** `_docker` is reached. The mutation broke
+`_agent_env`, the SECOND of two independent filters, so the credential
+property survived on its own. Against that property the mutation is an
+equivalent mutant — a change with no observable effect — and reporting it as
+MISSED overstates the problem as much as CAUGHT understated it.
+
+But `_agent_env` does defend a real and narrower promise that nothing
+asserted: **only agent-scoped variables enter the container at all.** That is
+strictly stronger than "no credentials do", because it stops a credential
+whose *name* the scrub failed to recognise — the residual this codebase has
+already admitted it cannot close by pattern-matching alone.
+
+**Fixed by** three changes, none of which is "delete the row":
+
+1. The docker test now asserts the second filter. `HARMLESS_SETTING` was
+   already planted in the test's environment and never checked; it is exactly
+   the right probe, being a variable no scrub would call secret which must
+   still not travel. The test additionally enumerates every variable the
+   container received and requires each to be `AGENT_*`, `PYTHONUTF8`, or one
+   of the image's own.
+2. The mutation is renamed to what it actually breaks — *every host variable
+   forwarded into the container* — and declared **POSIX-only**, because on
+   Windows any mutation that forwards the host environment kills the
+   container before an assertion can run, and a row that cannot be reached is
+   not a row that passed.
+3. A new mutation attacks the control that really defends credentials:
+   `scrub_env` is removed from `run()`, so keys reach every backend. Paired
+   with `test_secrets.py`, which tests the scrub directly and end to end.
+   **CAUGHT in 1 s, on both platforms.**
+
+**The lesson, which is the reason this entry is long.** Mutation testing was
+adopted here to answer "would this test fail if the feature were removed?"
+This row answered *yes* for four releases while the honest answer was *the
+question was never asked* — the test never got far enough to answer. A
+mutation harness reports two things, and only one of them was being checked:
+whether the test failed, and **whether it failed for the reason claimed.**
+The second is now part of the procedure: when a mutation flips a verdict
+between platforms, read the failure, not the verdict.
+
+Five of the twenty-one numbered defects are now defects in this project's
+own verification machinery rather than in the platform it verifies: U8, U13,
+U17, U18 and this one.

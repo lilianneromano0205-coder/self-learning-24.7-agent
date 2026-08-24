@@ -655,7 +655,7 @@ requires the test that claims to cover it to fail:
 |---|---|
 | docker egress allowed by default | `test_docker_live.py` |
 | docker timeout leaves the container running | `test_docker_live.py` |
-| credentials passed into the container | `test_docker_live.py` |
+| the environment scrub removed from every backend | `test_secrets.py` |
 | no Authorization header on provider calls | `test_live_provider.py` |
 | a malformed body escapes the retry ladder | `test_live_provider.py` |
 | a 4xx retried like weather | `test_live_provider.py` |
@@ -666,11 +666,18 @@ requires the test that claims to cover it to fail:
 | a running task is stolen from a live sibling loop | `test_audit.py` |
 | a secret written under the umask † | `test_preflight.py` |
 | the container runs as root in the mount † | `test_docker_live.py` |
+| every host variable forwarded into the container ‡ | `test_docker_live.py` |
 
-† POSIX-only. Windows uses ACLs rather than modes, so these two are
-**skipped out loud** there rather than run: calling a mutation MISSED on a
-platform where the property does not apply would be a false alarm, and
-calling it CAUGHT would be a lie.
+† POSIX-only: Windows uses ACLs rather than modes, so the property does not
+apply there.
+
+‡ POSIX-only for a different reason, and the one worth reading. Forwarding a
+Windows `PATH` into a Linux container stops `sh` from being found, so the
+container never boots and no assertion is reached. This row reported CAUGHT
+on Windows for four releases while the credential checks it claimed to
+certify had never executed; the first Linux run reported MISSED, which was
+correct. Each skip now carries its own reason rather than a shared one — see
+U21.
 
 Every mutation is reverted afterwards. A `MISSED` row is a test that measures
 nothing, and would be treated as a defect in the test.
@@ -761,7 +768,7 @@ timestamp on both sides. Run against the previous release it names
 forensic audits, one that came from building a specification against the
 running system, one that came from making the never-executed paths runnable,
 and one that came from running the whole thing on hardware this project does
-not own. Twenty numbered defects (`U1`–`U20`), each with reproduction,
+not own. Twenty-one numbered defects (`U1`–`U21`), each with reproduction,
 disposition and the test that holds it closed.
 
 **Five of them are defects in code written during those same passes.** They
@@ -872,7 +879,7 @@ python preflight.py       # is this installation fit to run unattended
 |---|---|
 | [MANUAL.md](MANUAL.md) | the operator's guide — every command, every setting |
 | [REFERENCE.md](REFERENCE.md) | every system end to end, and an honest list of limits |
-| [GAPS_RISKS_AND_UNFINISHED.md](GAPS_RISKS_AND_UNFINISHED.md) | the audit record — five passes, 20 numbered defects |
+| [GAPS_RISKS_AND_UNFINISHED.md](GAPS_RISKS_AND_UNFINISHED.md) | the audit record — five passes, 21 numbered defects |
 | [REMEDIATION.md](REMEDIATION.md) | what was done about each, and the residual risk |
 | [ARCHITECTURE_DECISIONS.md](ARCHITECTURE_DECISIONS.md) | each decision, the alternative rejected, and the price paid |
 | [SYSTEM_DIAGRAMS.md](SYSTEM_DIAGRAMS.md) | execution, memory, trust boundaries, and where the defects lived |

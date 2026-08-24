@@ -234,9 +234,29 @@ def check_credentials_never_enter_the_container(root):
             f"a container is exactly where an untrusted command would look")
     for name in ("DEEPSEEK_API_KEY", "AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN"):
         assert name not in out, f"{name} was passed through by name"
-    print("[credentials] three credential-shaped variables were withheld from "
-          "the container, by name and by value — the scrub is not a host-only "
-          "behaviour")
+    # Those three are stopped by scrub_env before _docker is even reached, so
+    # everything above passes even with the container's OWN filter removed.
+    # The docker path has a second, independent one — _agent_env forwards
+    # only AGENT_* and PYTHONUTF8 — and nothing asserted it, which is why
+    # breaking it was invisible on Linux (U21). HARMLESS_SETTING is planted
+    # to be exactly that: a variable no scrub would call secret, which must
+    # still not travel, because "only agent-scoped variables enter the
+    # container" is a narrower promise than "no credentials do".
+    assert "HARMLESS_SETTING" not in out and "keep-me" not in out, (
+        "a host variable that is not agent-scoped reached the container — "
+        "the docker path is supposed to forward AGENT_* and PYTHONUTF8 and "
+        "nothing else, so a credential the name-based scrub failed to "
+        "recognise would still be stopped here")
+    forwarded = [l.split("=", 1)[0] for l in out.splitlines() if "=" in l]
+    strays = [n for n in forwarded
+              if not n.startswith("AGENT_") and n not in
+              ("PYTHONUTF8", "PATH", "HOME", "HOSTNAME", "PWD", "SHLVL", "_",
+               "LANG", "GPG_KEY", "PYTHON_VERSION", "PYTHON_SHA256")]
+    assert not strays, f"the container received host variables: {strays[:8]}"
+    print(f"[credentials] three credential-shaped variables were withheld from "
+          f"the container by name and by value, and of the {len(forwarded)} "
+          f"variables it did receive none came from this host except the "
+          f"image's own — both filters checked, not just the outer one")
 
 
 def check_a_timeout_kills_the_container(root):

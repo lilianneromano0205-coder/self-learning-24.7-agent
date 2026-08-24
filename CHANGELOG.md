@@ -101,10 +101,44 @@ to the wall clock stays allowed — that is how every lock here expires. Run
 against the previous release it names `commons.py:284` and
 `conflicts.py:322`, and nothing else.
 
-**Three mutations added**, two of them declared POSIX-only and skipped out
-loud on Windows rather than reported as passes — modes are not the mechanism
-there, so calling them MISSED would be a false alarm and calling them CAUGHT
-would be a lie.
+**Four mutations added**, 10 → 14. Three are declared POSIX-only and skipped
+out loud on Windows rather than reported as passes, and each now states its
+own reason rather than sharing a blanket one — two because modes are not the
+mechanism there, the third because the container cannot even start. On a
+platform where the property does not apply, MISSED would be a false alarm and
+CAUGHT would be a lie; the only honest verdict is a refusal to score.
+
+**U21 — and then the mutation harness itself was caught lying.** With the six
+above fixed, CI went from four failing jobs to one, and the survivor failed at
+a different step: not the suite, which was green on all six, but the mutation
+check on ubuntu-3.12. `docker: credentials passed through` came back MISSED
+after four releases of CAUGHT on Windows.
+
+Applying it locally and reading the failure rather than the verdict:
+
+    line 90, check_it_runs_somewhere_else
+    AssertionError: (127, '', 'exec: "sh": executable file not found in $PATH')
+
+The mutation forwards the host's whole environment into the container. On
+Windows that injects `PATH=C:\...` into Linux, `sh` is not found, and the
+container never boots — the test died at its FIRST check and the credential
+assertions never ran. The green row was certifying a test that had not
+executed. It was also aimed at the wrong layer: `sandbox.run` scrubs
+credentials before `_docker` is reached, so the mutation broke the second of
+two redundant filters and the property survived on its own. Linux was right.
+
+Fixed by asserting what that second filter actually defends — the docker test
+now enumerates every variable the container received and requires each to be
+`AGENT_*`, `PYTHONUTF8`, or the image's own, using the `HARMLESS_SETTING`
+probe that had been planted in the test's environment and never checked — by
+renaming the mutation to what it breaks and marking it POSIX-only with its own
+stated reason, and by adding a mutation that attacks the control which really
+defends credentials: `scrub_env` removed from `run()`, caught by
+`test_secrets.py` in one second on both platforms.
+
+The lesson is the reason U21 is the longest entry in the audit record: a
+mutation harness reports two things and only one was being checked — whether
+the test failed, and whether it failed **for the reason claimed**.
 
 **A small proof that the proof system is not decorative.** Late in this pass a
 *comment* was edited in `conflicts.py` — no behaviour changed at all. The next

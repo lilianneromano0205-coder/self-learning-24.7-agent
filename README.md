@@ -104,8 +104,8 @@ load-bearing behaviour and requires its test to fail:
 
 ```
 CAUGHT  docker: egress allowed by default
-CAUGHT  docker: timeout leaves the container running
-CAUGHT  docker: credentials passed into the container
+CAUGHT  docker: timeout leaves the container
+CAUGHT  credentials: the environment scrub removed from every backend
 CAUGHT  provider: no Authorization header
 CAUGHT  provider: malformed body kills the task
 CAUGHT  provider: 4xx retried like weather
@@ -114,17 +114,31 @@ CAUGHT  endurance: never archive finished work
 CAUGHT  rbac: every write allowed
 CAUGHT  fleet: creation stops seeding the home
 CAUGHT  loop: a running task is stolen from a live sibling
-SKIP    credentials: a secret written under the umask      (POSIX-only)
-SKIP    docker: the container runs as root in the mount    (POSIX-only)
+SKIP    credentials: a secret written under the umask
+SKIP    docker: the container runs as root in the mount
+SKIP    docker: every host variable forwarded into the container
 
-13 mutations: 11 caught, 0 missed, 2 skipped     [on Windows]
+14 mutations: 11 caught, 0 missed, 3 skipped     [on Windows]
 ```
 
-The two `SKIP` rows are honest rather than green: file modes are not the
-mechanism on Windows, so nothing there could catch them. Reporting them as
-MISSED would be a false alarm and reporting them as CAUGHT would be a lie.
-Run on Linux, `credentials: a secret written under the umask` is **CAUGHT**;
-the docker one needs a runner with a daemon, and CI is where it executes.
+**A `SKIP` here is a refusal to score, and each says why.** The first two are
+POSIX-only because file modes are not the mechanism on Windows. The third is
+POSIX-only for a completely different reason, and it is the more interesting
+one: forwarding a Windows `PATH` into a Linux container means `sh` cannot be
+found, so the container never boots and the assertions are never reached — a
+CAUGHT there would be counting a crash, not a test noticing anything.
+
+That is not hypothetical. This row **did** report CAUGHT on Windows for four
+releases, certifying a test that had never actually run. The first time the
+mutation step reached Linux it reported MISSED, which was the truth. See
+[U21](GAPS_RISKS_AND_UNFINISHED.md) — a mutation harness reports two things
+and only one was being checked: whether the test failed, and whether it
+failed **for the reason claimed**.
+
+CI runs all three on Linux. Two of them are confirmed CAUGHT there. The
+third is the one just retargeted at `_agent_env`, and whether the tightened
+assertion catches it is a question for the next CI run rather than a claim
+this file gets to make — which is the whole point of the entry above.
 
 **The paths that touch something real.** Docker containers actually start —
 isolation is proven by the container answering under its own hostname and a
@@ -242,7 +256,7 @@ the panel teaches the terminal instead of hiding it.
 | **[ARCHITECTURE.md](ARCHITECTURE.md)** | **the complete technical account — start here** |
 | [MANUAL.md](MANUAL.md) | the operator's guide: every command, every setting |
 | [REFERENCE.md](REFERENCE.md) | every system end to end, and an honest list of limits |
-| [GAPS_RISKS_AND_UNFINISHED.md](GAPS_RISKS_AND_UNFINISHED.md) | the audit record — five passes, 20 numbered defects |
+| [GAPS_RISKS_AND_UNFINISHED.md](GAPS_RISKS_AND_UNFINISHED.md) | the audit record — five passes, 21 numbered defects |
 | [REMEDIATION.md](REMEDIATION.md) | what was done about each, and the residual risk |
 | [ARCHITECTURE_DECISIONS.md](ARCHITECTURE_DECISIONS.md) | each decision, the alternative rejected, the price paid |
 | [SYSTEM_DIAGRAMS.md](SYSTEM_DIAGRAMS.md) | execution, memory, trust boundaries, and where the defects lived |
@@ -265,10 +279,11 @@ contents.
 ## A note on the audit record
 
 `GAPS_RISKS_AND_UNFINISHED.md` is kept in the audit's own present tense, and
-`REMEDIATION.md` records what was done about each finding. Twenty numbered
-defects, each with reproduction and the test that holds it closed — **and
-five of them are defects in code written during those same passes**, because
-a report that finds faults only in other people's work is not an audit.
+`REMEDIATION.md` records what was done about each finding. Twenty-one
+numbered defects, each with reproduction and the test that holds it closed
+— **and five of them are defects in this project's own verification
+machinery** (U8, U13, U17, U18, U21), because a report that finds faults
+only in other people's work is not an audit.
 
 The fifth pass is the one worth reading: it is what happened when the suite
 ran on computers this project does not own.
