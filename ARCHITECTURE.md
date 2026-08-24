@@ -2,7 +2,7 @@
 
 **What this is.** A file-backed, stdlib-only platform for building expert AI
 agents that work continuously, prove what they did, and remember what they
-learned. 70 Python modules, 99 acceptance tests, one HTML control panel, no
+learned. 71 Python modules, 99 acceptance tests, one HTML control panel, no
 database, no framework, no build step. Python 3.11+ and your own API keys.
 
 **Who this document is for.** Somebody who has just been handed the
@@ -603,17 +603,20 @@ the five creation lanes; the lane is named once, at the end, as a footnote.
 
 ## 10. Why I claim it works
 
-This is the section the rest of the document exists to earn. Four kinds of
-evidence, in increasing order of how much they should convince you.
+This is the section the rest of the document exists to earn. Five kinds of
+evidence, in increasing order of how much they should convince you — and the
+last one is the only one produced on a computer this project does not own.
 
 ### 10.1 The suite passes — the weakest claim
 
-99 acceptance tests, green twice consecutively from a clean state. Each test
-prints a sentence describing what it observed, and those sentences are the
-report — `EVIDENCE.md` quotes them verbatim rather than summarising.
+99 acceptance tests, green on Windows under Python 3.14 and on Linux under
+Python 3.11 and 3.13. Each test prints a sentence describing what it
+observed, and those sentences are the report — `EVIDENCE.md` quotes them
+verbatim rather than summarising.
 
 This is the weakest claim because **a passing test proves nothing on its
-own**. Which leads to:
+own** — a point §10.5 makes concrete, where a suite that had been green twice
+consecutively turned out to be hiding six defects. Which leads to:
 
 ### 10.2 The tests enumerate rather than exemplify
 
@@ -660,6 +663,14 @@ requires the test that claims to cover it to fail:
 | finished work is never archived | `test_endurance.py` |
 | every write allowed regardless of role | `test_rbac.py` |
 | expert creation stops seeding the home | `test_invariants.py` |
+| a running task is stolen from a live sibling loop | `test_audit.py` |
+| a secret written under the umask † | `test_preflight.py` |
+| the container runs as root in the mount † | `test_docker_live.py` |
+
+† POSIX-only. Windows uses ACLs rather than modes, so these two are
+**skipped out loud** there rather than run: calling a mutation MISSED on a
+platform where the property does not apply would be a false alarm, and
+calling it CAUGHT would be a lie.
 
 Every mutation is reverted afterwards. A `MISSED` row is a test that measures
 nothing, and would be treated as a defect in the test.
@@ -669,11 +680,17 @@ nothing, and would be treated as a defect in the test.
 The strongest evidence, because it is not a test of a test:
 
 **Docker containers actually start.** `test_docker_live.py` proves isolation
-by reading a Debian `os-release` from inside a container on a Windows host —
-this cannot be the host backend renamed. It confirms the mount works in both
-directions, that the C: drive and the platform's own source are invisible
-from inside, that egress is refused by default (both on the argv *and* by a
-real connection attempt failing), that credentials are withheld, that the
+with a fact that holds on any host — the container answers under its own
+hostname, never this machine's — plus a Debian `os-release` from the image.
+(The os-release *alone* used to be the proof, which is a proof on a Windows
+laptop and no proof at all on a Debian host, where the host would answer the
+same way. CI on Ubuntu is what exposed that.) It confirms the mount works in
+both directions and that the agent can then **rewrite and delete** what the
+container produced — reading it back was never the property that mattered,
+and on Linux the container ran as root until CI said so. It confirms that the
+host's home directory and the platform's own source are invisible from
+inside, that egress is refused by default (both on the argv *and* by a real
+connection attempt failing), that credentials are withheld, that the
 `--pids-limit` **bites** when the container tries to exceed it, and that a
 gated task completes end to end inside containers.
 
@@ -702,15 +719,52 @@ queue held at its retention bound with 78 tasks archived and **none lost**,
 logs capped at 29 MB, no lock outliving its holder, ~11 KB per task, context
 window flat at 1083 tokens.
 
-### 10.5 The audit record
+### 10.5 Computers we do not own — the strongest evidence here
 
-`GAPS_RISKS_AND_UNFINISHED.md` contains **four passes**: two read-only
+Everything above was produced on one machine. That is the flaw in all of it,
+and it is not a rhetorical concession — it is measurable, and it was measured.
+
+The suite was green on a single Windows laptop, twice consecutively, after
+four audit passes. Then GitHub Actions ran the identical suite on Ubuntu and
+Windows across Python 3.11, 3.12 and 3.13. **Four of the six jobs failed**,
+and every failure was a real defect that had been present the whole time:
+
+- a task could be taken from a **live** sibling loop and executed twice —
+  six tasks queued, fourteen completions logged, and a phantom retry of work
+  that had succeeded;
+- the docker sandbox ran as root and handed back a workspace the agent could
+  not write to, in the backend the manual recommends for untrusted work;
+- a secret was created world-readable, caught by the platform's own preflight
+  running its POSIX branch for the first time ever;
+- an evidence sentence claimed "on a Windows host" wherever it ran.
+
+Reproducing each locally in a Linux container — so the diagnosis came from a
+debugger rather than a log — surfaced two more that CI itself had passed by
+luck: staleness decided by comparing two files' timestamps, which overlayfs
+makes unsound. On that filesystem, 200 files written back to back produced
+**nine** distinct timestamps.
+
+The reason this is the strongest section is not that the defects were fixed.
+It is that **no amount of care on one machine would have found them**, and
+the project's own honest-limits list had been saying so, in writing, without
+anyone being able to act on it. The gap between "we disclosed the limit" and
+"we removed it" is six defects wide.
+
+What now holds the class closed rather than the instances: an AST invariant
+that parses every module and fails the build if any comparison puts a file
+timestamp on both sides. Run against the previous release it names
+`commons.py:284` and `conflicts.py:322`, and nothing else.
+
+### 10.6 The audit record
+
+`GAPS_RISKS_AND_UNFINISHED.md` contains **five passes**: two read-only
 forensic audits, one that came from building a specification against the
-running system, and one that came from making the never-executed paths
-runnable. Fourteen numbered defects (`U1`–`U14`), each with reproduction,
+running system, one that came from making the never-executed paths runnable,
+and one that came from running the whole thing on hardware this project does
+not own. Twenty numbered defects (`U1`–`U20`), each with reproduction,
 disposition and the test that holds it closed.
 
-**Three of them are defects in code written during those same passes.** They
+**Five of them are defects in code written during those same passes.** They
 are in the record because a report that finds faults only in other people's
 work is not an audit.
 
@@ -728,7 +782,8 @@ Stated plainly, because a document that only reports wins is marketing.
 | **E2B / Daytona** | The REST client is verified against the documented shape. Neither service has ever received a request from this codebase |
 | **A third-party MCP server** | The transport is real — a spawned subprocess speaking newline-delimited JSON-RPC — but the server on the other end is ours |
 | **Duration** | The soak rules out growth that is O(total work). It cannot rule out a leak that needs days |
-| **Docker beyond one machine** | One host, one image, one daemon version |
+| **Docker beyond two operating systems** | Ubuntu and Windows now, still one image and one daemon version. The Linux run is what revealed that the container had been running as root and handing back a workspace the agent could not write to |
+| **Any machine this has not run on** | This is no longer a theoretical caveat, it is a measured one. The suite was green on one Windows laptop, twice consecutively. The first CI run on Ubuntu and Windows × Python 3.11/3.12/3.13 **failed four of six jobs**, and every failure was a genuine defect — including a task being executed twice by two loops. Reproducing them in a local Linux container found two more. Six defects (U15–U20) were sitting in a codebase that had been audited four times and was passing everything it knew how to ask itself. The suite is green on both platforms now; that is a statement about two platforms |
 | **The "100×" claim** | Defined as verified output per dollar *versus the same raw model without the fleet*. That needs the same work run twice; the baseline half has never been run. `metrics.py` reports the harness's observable contribution as counts and refuses to divide them into a multiplier |
 | **Authentication** | Members hold personal bearer tokens and every write is checked against the role behind the credential — but over plain HTTP, with no TLS, no session and no expiry. This is authorisation given an identity, not an authentication system |
 | **Beauty** | The design gate catches mechanical failures and the fingerprints of unconsidered output. A page can pass every check and still be dull |
@@ -817,7 +872,7 @@ python preflight.py       # is this installation fit to run unattended
 |---|---|
 | [MANUAL.md](MANUAL.md) | the operator's guide — every command, every setting |
 | [REFERENCE.md](REFERENCE.md) | every system end to end, and an honest list of limits |
-| [GAPS_RISKS_AND_UNFINISHED.md](GAPS_RISKS_AND_UNFINISHED.md) | the audit record — four passes, 14 numbered defects |
+| [GAPS_RISKS_AND_UNFINISHED.md](GAPS_RISKS_AND_UNFINISHED.md) | the audit record — five passes, 20 numbered defects |
 | [REMEDIATION.md](REMEDIATION.md) | what was done about each, and the residual risk |
 | [ARCHITECTURE_DECISIONS.md](ARCHITECTURE_DECISIONS.md) | each decision, the alternative rejected, and the price paid |
 | [SYSTEM_DIAGRAMS.md](SYSTEM_DIAGRAMS.md) | execution, memory, trust boundaries, and where the defects lived |

@@ -1273,6 +1273,7 @@ context_token_threshold = 50000     # compaction trigger
 context_keep_recent_messages = 10   # kept verbatim at the tail
 max_malformed_tool_calls = 3
 lock_stale_minutes = 30
+runner_lease_seconds = 900          # see below — a backstop, not the mechanism
 reflect_after = ["practitioner"]    # roles that trigger reflection
 exam_threshold = 90                 # pass mark
 reexam_days = [7, 30, 90]           # spaced repetition
@@ -1292,7 +1293,27 @@ sandbox_image = "python:3.12-slim"
 command_env_allow = []              # named keys a command may see
 design_gate = true                  # gate interface deliverables
 chain = { practitioner = "examiner" }
+```
 
+**`runner_lease_seconds`.** A task marked `running` means either *a loop is
+working on it right now* or *a loop died holding it*, and treating the first
+as the second makes two loops execute one task (U15). Each loop records
+itself on the task it claims — id, pid, host, timestamp — and refreshes that
+timestamp on every commit. Another loop may take the task over only when the
+owner is demonstrably gone.
+
+On the **same host** liveness is the whole answer: an owner whose process is
+alive is never overtaken, however old its timestamp, because a loop parked in
+a twenty-minute provider call is healthy rather than stale; an owner whose
+process is gone is recovered immediately, which is the crash recovery this
+was always meant to provide. `runner_lease_seconds` applies only when
+liveness cannot be asked — the owner recorded a **different host**, so its pid
+number means nothing locally. Raise it if several machines share one expert
+directory over a network filesystem and you would rather wait than risk a
+double run; the default of 15 minutes is already far longer than any single
+step.
+
+```toml
 [agent.context_budget]              # per-source token budgets
 memory_files = 12000
 
@@ -1618,10 +1639,20 @@ Things this platform does **not** do, that you might reasonably assume it does:
 11. **Accessibility is unaudited.** Keyboard navigation, focus order, labels
     and 40 px targets are in place and asserted; contrast ratios and screen
     reader behaviour have not been checked with a tool.
-12. **Windows and OneDrive were the development environment.** Every write
-    retries; sandboxes live in the system temp directory on purpose. A CI
-    workflow now runs the suite on Linux and Windows across Python
-    3.11–3.13, but it has never been executed on a real runner from here.
+12. **Windows and OneDrive were the development environment, and the first
+    Linux run found four defects.** Every write retries; sandboxes live in
+    the system temp directory on purpose. The CI workflow has now executed
+    on real runners across Ubuntu and Windows × Python 3.11/3.12/3.13, and
+    four of the six jobs failed. Every failure was real: a running task
+    could be taken from a live sibling loop and executed twice (invisible on
+    an idle laptop, 3 failures in 12 runs on one contended CPU); a container
+    ran as root and handed the agent back a workspace it could not write to;
+    a secret was created world-readable by a path that never called chmod;
+    and one test asserted isolation with a fact that is only a fact on
+    Windows. All four are fixed and each is held closed by a test and a
+    mutation. See U15–U18 in `GAPS_RISKS_AND_UNFINISHED.md`. The standing
+    lesson: **one machine is one machine**, and a green suite on it says
+    nothing about the next one.
 13. **The panel's master token is still a master key.** Members hold personal
     bearer tokens and every write is checked against the role that token
     belongs to — but whoever holds the token the panel was *started* with

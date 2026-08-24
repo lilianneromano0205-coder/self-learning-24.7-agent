@@ -88,6 +88,40 @@ MUTATIONS = [
      '''    os.makedirs(os.path.join(home, "experts"), exist_ok=True)''',
      "test_invariants.py",
      "a crash on a never-bootstrapped home"),
+
+    # --- found by CI, the first time this suite ran on Linux ---
+
+    ("loop: a running task is stolen from a live sibling", "loop.py",
+     '''    def _may_resume(self, task):
+        """May THIS loop pick up a task already marked running?"""
+        r = task.get("runner")''',
+     '''    def _may_resume(self, task):
+        """May THIS loop pick up a task already marked running?"""
+        return True
+        r = task.get("runner")''',
+     "test_audit.py",
+     "two loops executing one task at the same time"),
+
+    ("credentials: a secret written under the umask", "credentials.py",
+     '''    path = os.fspath(path)
+    d = os.path.dirname(path) or "."
+    os.makedirs(d, exist_ok=True)''',
+     '''    path = os.fspath(path)
+    d = os.path.dirname(path) or "."
+    os.makedirs(d, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    return path''',
+     "test_preflight.py",
+     "a fleet token every account on the machine can read", True),
+
+    ("docker: the container runs as root in the mount", "sandbox.py",
+     '''    if os.name != "nt":
+        # Files created in a bind mount belong to the user INSIDE the''',
+     '''    if False:
+        # Files created in a bind mount belong to the user INSIDE the''',
+     "test_docker_live.py",
+     "a workspace the agent can no longer write to", True),
 ]
 
 
@@ -112,8 +146,19 @@ def run_test(name, timeout=900):
 def main():
     only = sys.argv[1] if len(sys.argv) > 1 else None
     results = []
-    for label, fname, find, repl, test, expect in MUTATIONS:
+    for entry in MUTATIONS:
+        label, fname, find, repl, test, expect = entry[:6]
+        # Some properties exist only on POSIX — file modes are one, because
+        # Windows uses ACLs and the platform says so at every chmod. Calling
+        # such a mutation MISSED on Windows would be a false alarm; calling
+        # it CAUGHT would be a lie. It is declared, and skipped out loud.
+        posix_only = entry[6] if len(entry) > 6 else False
         if only and only not in label:
+            continue
+        if posix_only and os.name == "nt":
+            results.append((label, "SKIP",
+                            "POSIX-only: Windows uses ACLs, not modes, so "
+                            "nothing here can catch it — run this on Linux"))
             continue
         path = os.path.join(AGENT, fname)
         backup = path + ".mutbak"

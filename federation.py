@@ -108,8 +108,13 @@ def identity(home, create=True):
         ident = {"fleet_id": "fleet-" + secrets.token_hex(4),
                  "secret": secret, "fingerprint": fingerprint(secret),
                  "created": time.strftime("%Y-%m-%dT%H:%M:%S")}
-        _save(home, "identity.json", ident)
-        os.chmod(os.path.join(fed_dir(home), "identity.json"), 0o600)
+        # this file carries the fleet's shared secret. atomic_write_json is
+        # atomic but not private: its temp file is born under the umask and
+        # os.replace carries THAT mode onto the destination, so the chmod
+        # that followed was closing a door the file had already been through.
+        import credentials
+        credentials.write_secret(os.path.join(fed_dir(home), "identity.json"),
+                                 json.dumps(ident, indent=2) + "\n")
     return ident
 
 

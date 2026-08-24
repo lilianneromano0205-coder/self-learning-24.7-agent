@@ -2107,12 +2107,10 @@ def main():
     if (exposed or shared) and not token:
         token = secrets.token_urlsafe(24)
         tok_path = os.path.join(Handler.home, "ui-token.txt")
-        with open(tok_path, "w", encoding="utf-8") as f:
-            f.write(token + "\n")
-        try:                       # this token IS the fleet: owner-only
-            os.chmod(tok_path, 0o600)
-        except OSError:            # pragma: no cover — Windows ACLs differ
-            pass
+        # this token IS the fleet: written owner-only by the one writer that
+        # cannot forget the mode
+        import credentials as _cred
+        _cred.write_secret(tok_path, token + "\n")
         print(f"access token generated (saved to {tok_path}):\n  {token}\n")
         if shared and not exposed:
             print("this fleet belongs to an organization, so the panel needs "

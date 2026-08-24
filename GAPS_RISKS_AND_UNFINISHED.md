@@ -1201,3 +1201,304 @@ fail, and each replacement is stronger than a literal fix of the original:
   different environments;
 - the malformed-body branch must name the provider and attempt the ladder —
   which is what found `U14`.
+
+---
+
+# Fifth pass — what the first CI run on another computer found (2026-08-23)
+
+Every finding above was made on one machine: Windows 11, Python 3.14, one
+Docker Desktop daemon. The suite had been green there twice consecutively,
+and the honest-limits list said exactly that. Then the repository was
+published and GitHub Actions ran the same suite on runners this code had
+never touched — Ubuntu and Windows × Python 3.11, 3.12, 3.13.
+
+**Four of the six jobs failed.** Not one failure was a CI artefact.
+
+| Job | Verdict |
+|---|---|
+| ubuntu-latest 3.11 | **fail** — U15, U16, U17 |
+| ubuntu-latest 3.12 | **fail** — U15, U16, U17 |
+| ubuntu-latest 3.13 | **fail** — U16, U17 |
+| windows-latest 3.11 | pass |
+| windows-latest 3.12 | **fail** — U15 |
+| windows-latest 3.13 | pass |
+
+That U15 struck Windows 3.12 while 3.11 and 3.13 passed is the tell: it is
+not a version problem, it is a **race**, and a loaded shared runner opens
+windows an idle laptop never does.
+
+Each defect was then reproduced **locally**, in a Linux container on the
+development machine, so the diagnosis comes from a debugger rather than from
+a log, and every fix was verified before it was pushed. Running the suite in
+that container also found a sixth defect (U19) that CI itself got lucky on.
+
+The single most useful thing this project has done for its own reliability
+was to run its tests on a computer it does not own.
+
+---
+
+## U15 — a task was taken from a live loop and executed twice
+
+**Severity:** P1. The most serious defect found in the platform to date.
+
+**How it surfaced.** `test_audit.py` asserted `len(tasks) == len(ids)` and
+reported `lost tasks: -1`. Not lost — **one too many**. Reproduced locally at
+`docker run --cpus 1`: 3 failures in 12 runs, from code that had never failed
+once on an idle machine.
+
+The state at the moment of failure says the whole thing:
+
+```
+tasks: 7                       (6 were queued)
+  d2a2fbb9baad att=1 done steps=2 task_start x1 | job 0
+  2ce897349d87 att=2 done steps=2 task_start x1 | RETRY 2 of 3: the previous
+                                                   attempt (d2a2fbb9baad) failed
+  step_crash = 1     task_end = 14      <- fourteen endings for seven tasks
+```
+
+**The defect.** `claim_task` is a correct cross-process mutex and every
+queued task goes through it. `next_task` did this:
+
+```python
+for t in state["tasks"]:
+    if t["status"] == "running":
+        return t          # crash recovery
+```
+
+A task marked `running` means one of two opposite things: *a loop is working
+on it right now*, or *a loop died holding it*. Nothing recorded which. The
+running branch of the run loop skips `claim_task` by design — a resumed task
+is already claimed — so a second loop picked up its live sibling's task and
+ran it concurrently. Both wrote steps; one crashed into the other; the crash
+marked the shared task `failed`; `_maybe_retry` queued a **retry of work that
+had in fact succeeded**; and the surviving loop then wrote `done` over the
+failure. The ledger ends up self-consistent and wrong.
+
+This is the same shape as the finding that motivated the Five Authorities:
+*a control defends the path its author was thinking about and does not know
+about the other paths.* The mutex was written for claiming. Resuming is also
+claiming, and nobody told the mutex.
+
+**Why the existing test could not see it.** The audit's headline assertion:
+
+```python
+claims = log.count(f'"task_start", "task": "{t["id"]}"')
+assert claims == 1, "must be exactly once"
+```
+
+`task_start` is logged in the **queued** branch only. A stolen resume emits
+no start line, so the check written to prove exactly-once execution was
+structurally blind to the only path that ever broke it — it passed on every
+failing run. The suite noticed at all only through an incidental count.
+
+**Fixed by** recording ownership on the task and making resumption
+conditional:
+
+- every loop process mints a `runner_id` for its lifetime;
+- `claim_task` stamps `{id, pid, host, ts}` on the task;
+- `commit_task` refreshes `ts` once per step, so a long task never looks
+  abandoned while it is working;
+- `_may_resume` decides. **On this host liveness is the whole answer** — an
+  alive owner is never overtaken (a loop parked in a twenty-minute provider
+  call has a stale timestamp and is perfectly healthy), and a dead one is
+  recovered immediately. For another host, whose pid numbers mean nothing
+  here, a lease (`runner_lease_seconds`, default 900) is the only thing that
+  can free the task;
+- `adopt_task` re-checks all of it **under the state mutex**, so two loops
+  cannot both revive one corpse;
+- and liveness never calls `os.kill` on Windows, where CPython implements it
+  with `TerminateProcess`: the POSIX idiom for *is this process alive* would
+  have killed the sibling it was asking about.
+
+**Tests.** `test_audit.py` now asserts that no task exists which nobody
+queued, that each task has exactly one `task_end` (two executions leave two),
+and that no loop crashed inside a step. Because the race only opens under
+load, the ownership rule is also checked **deterministically**, every branch
+of it: a live sibling's task is refused by the predicate, by `adopt_task` and
+by the scheduler; a dead owner, an unstamped legacy task and an expired
+foreign lease all remain recoverable; and a live owner with a deliberately
+ancient timestamp is still not overtaken. Crash recovery — the behaviour the
+unconditional resume existed for — is asserted to have survived the fix.
+
+**Mutation:** `loop: a running task is stolen from a live sibling` restores
+the unconditional resume; `test_audit.py` fails in 4 s.
+
+**Verified:** 30 consecutive passes at `--cpus 1` on Linux, where the unfixed
+code failed 3 times in 12. At that rate, 30 clean runs is p ≈ 0.02 %.
+
+**Residual, stated rather than glossed.** Two cases the fix answers
+conservatively rather than exactly:
+
+- *Pid reuse.* If a loop dies and the operating system hands its pid to an
+  unrelated process, the dead owner looks alive and its task waits for the
+  lease instead of recovering at once. That is slower recovery, never a
+  double run — the failure mode points the safe way. Distinguishing the two
+  needs a process start-time, which has no stdlib route that works on both
+  platforms, and the cost of getting it wrong is the defect this whole entry
+  is about.
+- *Two `Agent` objects inside one process.* They share a pid and hold
+  different runner ids, so neither will take the other's task. Correct, and
+  the reason `_may_resume` treats "same host" as a liveness question rather
+  than an identity one.
+
+---
+
+## U16 — the sandbox handed back a workspace the agent could not write to
+
+**Severity:** P1 on Linux, which is where a 24/7 fleet actually runs.
+
+**How it surfaced.** All three Ubuntu jobs:
+`PermissionError: [Errno 13] Permission denied: '/tmp/agent-suite/docker-live/out/from_host.txt'`
+
+**The defect.** `docker run` was called with no `--user`, so the command ran
+as **root inside the container**. On Linux a bind mount is a real host
+directory, so `mkdir -p out` created `out/` owned by `root:root` on the host.
+The agent — an ordinary user — could then no longer write into, rewrite or
+clean its own workspace. The gate, `verify.py`, `designcheck.py`, `backup.py`
+and `package.py` all run host-side as that user, on those files.
+
+Docker Desktop remaps ownership on Windows, so this was invisible on the
+machine it was written on. It was live in **the backend the manual recommends
+for untrusted work**, on the platform people actually deploy on.
+
+**Fixed by** passing `--user <uid>:<gid>` on POSIX, plus `HOME=/tmp` so a uid
+with no passwd entry gets a writable, disposable home instead of scattering
+dotfiles into the expert root. This also *improves* isolation: container root
+writing through a bind mount is a way to touch host files as root.
+
+**Test:** the mount check now asserts the created directory is owned by the
+agent's own uid, then deletes and rewrites the file the container produced —
+reading it back was never the property that mattered. The argv check asserts
+`--user` is present and correct on POSIX.
+
+**Mutation:** `docker: the container runs as root in the mount`.
+
+---
+
+## U17 — a secret created world-readable, caught by the platform's own preflight
+
+**Severity:** P2, and the finding is a credit to the system rather than a
+hole in it.
+
+**How it surfaced.** All three Ubuntu jobs: `preflight.py` exited 2 with
+`ui-token.txt is readable by other users (mode 0o644)`. That check is gated
+on `os.name != "nt"`, so it had **never once executed** — every prior run in
+this project's life was on Windows.
+
+**What it caught.** The offending write was in `test_preflight.py` itself: a
+bare `open(..., "w")` under the default umask. The platform's own writer
+(`ui.py`) chmodded correctly. So preflight was right, the platform was right,
+and the test manufactured the exact finding it then asserted was absent.
+
+**The real gap underneath.** `credentials.py` — the Credential Authority —
+could *recognise* a secret (`is_secret`, `looks_like_key`) but had no way to
+*create* one. Three modules each rolled their own `open` + `chmod`, and a
+fourth writer forgot. That is the scattered-control pattern the Five
+Authorities exist to eliminate, still present inside the authority that
+exists to eliminate it. Worse: `federation.py` wrote its fleet secret through
+`atomic_write_json` and chmodded afterwards — but `os.replace` carries the
+**temp file's** mode onto the destination, so that chmod was closing a door
+the file had already walked through.
+
+**Fixed by** adding `credentials.write_secret(path, text)` as the one way to
+create a credential file. The temp file is created `0600` — the mode is set
+as the file is created, not corrected afterwards, so the secret is never
+world-readable on disk, not even for the instant between write and chmod —
+and the replacement is atomic, so a crash mid-write leaves the previous
+credential intact rather than a truncated one. `bootstrap.py`, `ui.py`,
+`federation.py` and the test now all go through it.
+
+**Mutation:** `credentials: a secret written under the umask`. Declared
+POSIX-only and **skipped out loud** on Windows, where modes are not the
+mechanism: calling it MISSED there would be a false alarm, and calling it
+CAUGHT would be a lie.
+
+---
+
+## U18 — an evidence sentence that was false wherever it ran
+
+**Severity:** P3 as a bug, P1 as a matter of principle.
+
+`test_docker_live.py` printed, unconditionally:
+
+> the command ran inside a Debian container on python 3.12.14, **on a Windows
+> host** — this is not the host backend wearing a different name
+
+On Ubuntu that sentence is simply untrue, and these sentences are quoted
+**verbatim** into `EVIDENCE.md`, which is published. A platform whose whole
+thesis is *evidence, not assertion* had an assertion hard-coded into its
+evidence.
+
+The logic was wrong too, not only the prose: a Debian `os-release` proves
+isolation on a Windows laptop and proves **nothing** on a Debian or Ubuntu
+host, where the host would answer the same way.
+
+The same file's containment check probed `ls /c`, described as "the Windows
+C: drive". On Linux that asks whether a path nobody has is absent — a check
+that cannot fail, dressed as containment. It is the sixth vacuous assertion
+found in this codebase, and the second one written by me.
+
+**Fixed by** proving isolation with a fact that holds on every host — the
+container's hostname is its own and is not this machine's — probing a
+directory that really exists on the host it is running on, and reporting the
+real platform. The host's name and absolute paths are deliberately **not**
+printed: an evidence file that gets published should not carry the operator's
+machine name or username.
+
+---
+
+## U19 — new material silently un-scanned on the filesystem containers use
+
+**Severity:** P2. Found by the local Linux reproduction, **not** by CI —
+which passed this test by luck.
+
+**How it surfaced.** Running the full suite in a Linux container:
+`test_conflicts.py` failed on `assert conflicts.refresh(sb, "design") is True,
+"new material must rescan"`. It failed identically on the pristine published
+commit, so it was pre-existing rather than introduced by the fixes above.
+
+**The defect.** `conflicts.refresh` decided whether material had changed by
+comparing two file timestamps:
+
+```python
+stamp  = os.path.getmtime(conflicts.json)     # the ledger
+newest = max(mtime of every notes.md)
+if stamp and newest <= stamp + max_age_s:
+    return False                              # nothing changed
+```
+
+That is a race dressed as a cache. Measured inside the container:
+
+```
+200 files written back to back -> 9 distinct timestamps
+two consecutive writes         -> identical st_mtime_ns
+```
+
+On **overlayfs** the clock behind file timestamps is cached rather than read
+per write. The ledger and the notes written immediately after it look
+simultaneous, `newest <= stamp` is true, and new material is silently
+un-scanned — the one outcome the function's own docstring promised could not
+happen: *"New material must never be silently un-scanned."*
+
+Overlayfs is what every container runs on, including this project's own
+`Dockerfile`, so the defect was live in the containerised deployment. On NTFS
+the two writes usually land on different ticks, which is why a year of runs
+on one Windows machine never showed it.
+
+**Fixed by** recording **what** was scanned instead of **when**: `write()`
+stores a SHA-256 of the material (every `notes.md`, path and bytes) in
+`conflicts-scan.json`, and `refresh()` rescans when that digest differs. A
+hash cannot be fooled by a clock. `max_age_s` is kept, now as an explicit
+debounce.
+
+**What it costs**, measured rather than asserted: 29 ms on a 40-lesson,
+844 KB course — over four times larger than the 50,000-token context budget
+that would have to load it — against roughly 1 ms for the two timestamps.
+`refresh()` runs once per context compile, next to a model call measured in
+seconds, so it is under a percent of a step. The first draft of this entry
+said "microseconds", which is the kind of unchecked number this document
+exists to stop; the figure above came from running it.
+
+**The general lesson**, worth more than the fix: *deriving "did it change?"
+from a comparison between two different files' timestamps is unsound.* The
+codebase is now checked for that pattern by an invariant test.

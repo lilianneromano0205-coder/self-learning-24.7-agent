@@ -169,6 +169,29 @@ def _docker(cmd, root, env, timeout, cfg):
     argv = ["docker", "run", "--rm", "--name", name,
             "--memory", "1g", "--pids-limit", "256",
             "-v", f"{mount}:/work", "-w", "/work"]
+    if os.name != "nt":
+        # Files created in a bind mount belong to the user INSIDE the
+        # container, and with no --user that user is root. On Linux — where
+        # a 24/7 fleet actually runs, and where a bind mount is a real host
+        # directory rather than a translating filesystem — the agent's own
+        # workspace came back root-owned: it could no longer rewrite, gate,
+        # archive or clean the artifacts it had just produced, in the very
+        # backend the manual recommends for untrusted work. Docker Desktop
+        # maps ownership away, so this was invisible on the machine it was
+        # written on and surfaced the first time CI ran it on Linux.
+        # Dropping root inside the container is also strictly better
+        # isolation: container root writing through a bind mount is a way
+        # to touch host files as root.
+        # The consequence to know about: a command in the container is no
+        # longer root, so a system-wide `pip install` fails there. `pip
+        # install --user` works (HOME is writable below) and so does
+        # --target. Nothing in the platform installs packages inside the
+        # sandbox; this only affects commands a model writes.
+        argv += ["--user", f"{os.getuid()}:{os.getgid()}",
+                 # that uid has no passwd entry and therefore no home; give
+                 # it a writable, disposable one so tools that expect $HOME
+                 # do not scatter dotfiles into the expert root or fail
+                 "-e", "HOME=/tmp"]
     if not _cfg(cfg).get("sandbox_network"):
         argv += ["--network", "none"]           # default-deny egress
     for k, v in sorted(_agent_env(env).items()):

@@ -76,12 +76,10 @@ def ensure_env(home, keys=()):
                 break
         if not replaced:
             lines.append(f"{name}={value}")
-    with open(p, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
-    try:                       # keys are secrets: no group/other access
-        os.chmod(p, 0o600)
-    except OSError:
-        pass
+    # keys are secrets: created owner-only, atomically, by the Credential
+    # Authority — the one place that knows what protecting one means
+    import credentials
+    credentials.write_secret(p, "\n".join(lines) + "\n")
     return p, created, names
 
 

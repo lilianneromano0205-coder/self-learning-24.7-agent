@@ -197,6 +197,35 @@ def _shape(text):
             if len(w) > 2 and w not in _CURATE_STOP}
 
 
+CURATED_STAMP = CURATED + ".stamp"
+
+
+def _lessons_digest(d):
+    """A hash of the material the curated view is built from. Returns "" when
+    there is nothing to curate."""
+    try:
+        with open(os.path.join(d, "lessons.md"), "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    except OSError:
+        return ""
+
+
+def _curation_is_stale(d):
+    """Does the curated view need rebuilding? Answered from CONTENT, never
+    from a comparison between two files' timestamps — see the note in
+    digest(), and U19/U20 in GAPS_RISKS_AND_UNFINISHED.md."""
+    fp = _lessons_digest(d)
+    if not fp:
+        return False                       # no lessons: nothing to curate
+    if not os.path.exists(os.path.join(d, CURATED)):
+        return True
+    try:
+        with open(os.path.join(d, CURATED_STAMP), encoding="utf-8") as f:
+            return json.load(f).get("lessons") != fp
+    except (OSError, ValueError):
+        return True                        # no record of what was curated
+
+
 def curate(home, write=True):
     """ACE-style grow-and-refine (arXiv 2510.04618).
 
@@ -264,6 +293,14 @@ def curate(home, write=True):
     path = os.path.join(d, CURATED)
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
+    # record WHICH ledger this view was built from, so staleness is decided
+    # by content and never by two files' timestamps
+    try:
+        with open(os.path.join(d, CURATED_STAMP), "w", encoding="utf-8") as f:
+            json.dump({"lessons": _lessons_digest(d),
+                       "at": time.strftime("%Y-%m-%dT%H:%M:%S")}, f)
+    except OSError:                        # pragma: no cover — read-only dir
+        pass
     stamp = time.strftime("%Y-%m-%dT%H:%M:%S")
     with open(os.path.join(d, EDITS), "a", encoding="utf-8") as f:
         for op in ops:
@@ -278,17 +315,18 @@ def digest(home, limit=MAX_INJECT_CHARS):
     pins first (they outrank everything), then the fleet's hard-won lessons
     in their curated form, then the withdrawals, then the directory."""
     d = commons_dir(home)
-    try:                       # keep the curated view fresh before injecting
-        led = os.path.getmtime(os.path.join(d, "lessons.md"))
-        cur = os.path.getmtime(os.path.join(d, CURATED))
-        if led > cur:
+    # Keep the curated view fresh before injecting it. This used to ask
+    # whether lessons.md was modified after lessons.curated.md, which is the
+    # same unsound test that hid U19: on overlayfs — every container,
+    # including this project's own Dockerfile — two files written back to
+    # back get the IDENTICAL mtime, so `led > cur` was false and the curated
+    # view was never rebuilt. Silently, and in the block injected into EVERY
+    # agent's context across the whole fleet. Compare the material instead.
+    try:
+        if _curation_is_stale(d):
             curate(home)
-    except OSError:
-        try:
-            if os.path.exists(os.path.join(d, "lessons.md")):
-                curate(home)
-        except Exception:
-            pass
+    except Exception:                      # pragma: no cover — never block
+        pass                               # the digest on a curation problem
     lessons = CURATED if os.path.exists(os.path.join(d, CURATED)) else "lessons.md"
     parts = []
     for name in ("pins.md", lessons, "quarantine.md", "directory.md"):

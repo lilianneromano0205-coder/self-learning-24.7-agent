@@ -22,6 +22,7 @@ import hashlib
 import json
 import logging
 import os
+import platform
 import re
 import subprocess
 import sys
@@ -249,6 +250,10 @@ def n_steps(task):
 class Agent:
     def __init__(self, root):
         self.root = os.path.abspath(root)
+        # identifies THIS loop process for the whole of its life, so a task
+        # can record who is working on it and a sibling loop can tell a live
+        # owner from a dead one (see _may_resume)
+        self.runner_id = f"{os.getpid()}:{uuid.uuid4().hex[:12]}"
         self._load_env_file()
         with open(os.path.join(self.root, "settings.toml"), "rb") as f:
             self.cfg = tomllib.loads(f.read().decode("utf-8-sig"))
@@ -261,6 +266,13 @@ class Agent:
         self.ctx_keep_recent = a.get("context_keep_recent_messages", 10)
         self.max_malformed = a.get("max_malformed_tool_calls", 3)
         self.lock_stale_minutes = a.get("lock_stale_minutes", 30)
+        # Backstop only. A running task is normally protected by its owner
+        # being ALIVE (see _may_resume); this timeout exists for the cases
+        # liveness cannot answer — the owner ran on a different host sharing
+        # this storage, or the machine rebooted and recycled the pid. It must
+        # exceed the longest gap between two commits of one task, which is a
+        # model call plus its whole retry ladder.
+        self.runner_lease_seconds = a.get("runner_lease_seconds", 900)
         self.reflect_after = a.get("reflect_after", ["practitioner"])
         self.exam_threshold = a.get("exam_threshold", 90)
         self.reexam_days = a.get("reexam_days", [7, 30, 90])
@@ -389,6 +401,13 @@ class Agent:
         """The only safe way to persist a task: under the mutex, merge THIS
         task into a fresh read of the state — concurrent writers each own
         their tasks and can no longer erase each other's."""
+        # every commit is also a pulse: the lease a sibling loop reads to
+        # decide this task is still owned is refreshed here, once per step,
+        # so a long task never looks abandoned while it is working
+        if task.get("status") == "running" and \
+                isinstance(task.get("runner"), dict) and \
+                task["runner"].get("id") == self.runner_id:
+            task["runner"]["ts"] = time.time()
         with self._state_lock():
             state = self.load_state()
             for i, t in enumerate(state["tasks"]):
@@ -476,6 +495,90 @@ class Agent:
         hits = self.task_history(limit=1, task_id=task_id)
         return hits[-1] if hits else None
 
+    # ------------------------------------------------------ runner leases
+    # A task marked "running" means one of two opposite things: a loop is
+    # working on it RIGHT NOW, or a loop died holding it and it must be
+    # resumed. next_task could not tell them apart, so a second loop resumed
+    # a task its live sibling was still executing — walking straight past
+    # claim_task, the mutex written to make claiming exactly-once, because
+    # that mutex only guards the QUEUED path. Observed on a loaded Linux
+    # runner: 6 tasks queued, 14 task_end events, and a phantom RETRY task
+    # for work that had in fact succeeded. The distinguishing fact is
+    # whether the owner is still alive, so the owner is now recorded.
+
+    def _runner_stamp(self):
+        return {"id": self.runner_id, "pid": os.getpid(),
+                "host": platform.node(), "ts": time.time()}
+
+    @staticmethod
+    def _process_alive(pid):
+        """Is this pid a live process on THIS machine?
+
+        Never os.kill on Windows: CPython implements it with TerminateProcess,
+        so the POSIX idiom `os.kill(pid, 0)` would not ask whether a sibling
+        loop is alive — it would kill it. Anything unexpected answers True,
+        because the cost of a wrong "alive" is waiting for the lease backstop
+        and the cost of a wrong "dead" is two loops running one task.
+        """
+        if not isinstance(pid, int) or pid <= 0:
+            return False
+        if os.name == "nt":
+            try:
+                import ctypes
+                PROCESS_QUERY_LIMITED_INFORMATION, STILL_ACTIVE = 0x1000, 259
+                k = ctypes.windll.kernel32
+                h = k.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+                if not h:
+                    # 87 ERROR_INVALID_PARAMETER: no such process. Anything
+                    # else (5 ERROR_ACCESS_DENIED) means it exists.
+                    return ctypes.GetLastError() != 87
+                code = ctypes.c_ulong()
+                ok = k.GetExitCodeProcess(h, ctypes.byref(code))
+                k.CloseHandle(h)
+                return (not ok) or code.value == STILL_ACTIVE
+            except Exception:
+                return True
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True          # alive, just not ours to signal
+        except OSError:
+            return True
+
+    def _may_resume(self, task):
+        """May THIS loop pick up a task already marked running?"""
+        r = task.get("runner")
+        if not isinstance(r, dict):
+            return True          # never stamped: a crash from before this
+        if r.get("id") == self.runner_id:
+            return True          # our own task, resumed after a step
+        if r.get("host") == platform.node():
+            # On our own machine liveness is the whole answer, and the lease
+            # must not get a vote: a loop parked in a twenty-minute provider
+            # call has a stale timestamp and is perfectly healthy. Overtaking
+            # it because a clock said so is the very double-execution this
+            # exists to prevent. Dead owner, on the other hand, recovers now.
+            return not self._process_alive(r.get("pid"))
+        # Another host cannot be asked: its pid numbers mean nothing here, so
+        # the lease is the only thing that can ever free the task.
+        return (time.time() - float(r.get("ts") or 0)) > self.runner_lease_seconds
+
+    def adopt_task(self, task_id):
+        """The running-path twin of claim_task: take over an abandoned task
+        atomically. Without the re-check under the mutex, two loops could
+        both find the same corpse and both revive it."""
+        with self._state_lock():
+            state = self.load_state()
+            t = next((x for x in state["tasks"] if x["id"] == task_id), None)
+            if t is None or t["status"] != "running" or not self._may_resume(t):
+                return None
+            t["runner"] = self._runner_stamp()
+            self.save_state(state)
+            return t
+
     def claim_task(self, task_id):
         """Atomically flip one queued task to running. Returns the fresh task,
         or None if another loop claimed it first."""
@@ -485,6 +588,7 @@ class Agent:
             if t is None or t["status"] != "queued":
                 return None
             t["status"] = "running"
+            t["runner"] = self._runner_stamp()
             self.save_state(state)
             return t
 
@@ -588,10 +692,12 @@ class Agent:
             pass
 
     def next_task(self, state):
-        # Resume a running task first; otherwise the next queued task whose
-        # course lock is free.
+        # Resume an ABANDONED running task first (crash recovery); otherwise
+        # the next queued task whose course lock is free. A running task whose
+        # owner is still alive belongs to that owner and is skipped — this
+        # loop moves on to work nobody is doing.
         for t in state["tasks"]:
-            if t["status"] == "running":
+            if t["status"] == "running" and self._may_resume(t):
                 return t
         for t in state["tasks"]:
             if t["status"] == "queued" and self.can_lock(state, t):
@@ -2089,8 +2195,19 @@ class Agent:
                     "role": task["role"], "course": task.get("course"),
                 }))
             else:
-                # resumed running task: it already owns (or re-takes) its lock
+                # resumed running task: prove it is abandoned and take
+                # ownership under the mutex before touching it, exactly as
+                # the queued path does. Losing the race is not an error —
+                # it means a sibling got there first, so look for other work.
+                adopted = self.adopt_task(task["id"])
+                if adopted is None:
+                    continue
+                task = adopted
                 self.acquire_lock(task)
+                self.log.info(json.dumps({
+                    "event": "task_resumed", "task": task["id"],
+                    "role": task["role"], "steps": n_steps(task),
+                }))
             while task["status"] == "running":
                 try:
                     self.heartbeat(task, note="working")

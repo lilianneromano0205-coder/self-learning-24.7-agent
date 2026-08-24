@@ -1,5 +1,121 @@
 # Changelog
 
+## v8 — the first run on a computer we do not own (2026-08-23)
+
+v7 shipped with a green suite and an honest limits list whose twelfth entry
+read: *"Windows and OneDrive were the development environment... A CI
+workflow now runs the suite on Linux and Windows across Python 3.11–3.13, but
+it has never been executed on a real runner from here."*
+
+It has now. **Four of the six jobs failed**, and not one failure was a CI
+artefact. Every one was a defect that had been in the codebase the whole
+time, invisible because a single Windows laptop cannot see it.
+
+| Job | Result |
+|---|---|
+| ubuntu-latest 3.11 | **fail** — U15, U16, U17 |
+| ubuntu-latest 3.12 | **fail** — U15, U16, U17 |
+| ubuntu-latest 3.13 | **fail** — U16, U17 |
+| windows-latest 3.11 | pass |
+| windows-latest 3.12 | **fail** — U15 |
+| windows-latest 3.13 | pass |
+
+Each was then reproduced **locally**, in a Linux container on the development
+machine, so every fix was verified against a failing case before it was
+pushed. Running the whole suite in that container found two more defects that
+CI itself had passed by luck.
+
+**U15 — a task was taken from a live loop and executed twice.** `claim_task`
+is a correct cross-process mutex and every *queued* task goes through it.
+`next_task` returned any task marked `running` on the theory that a running
+task must be one a dead loop abandoned — and the running branch skips the
+mutex by design, because a resumed task is already claimed. So a second loop
+picked up its live sibling's work and ran it concurrently: six tasks queued,
+**fourteen `task_end` events**, one loop crashing into the other, and a
+phantom `RETRY` of work that had actually succeeded. A task now records its
+owner (`runner_id`, pid, host, timestamp); resumption is conditional on that
+owner being *gone*; and the check is re-run under the state mutex so two
+loops cannot revive one corpse. On this host liveness is the whole answer —
+a loop parked in a twenty-minute provider call is healthy, not stale — while
+a lease covers the case liveness cannot answer, another host sharing the
+storage. Liveness never calls `os.kill` on Windows, where CPython implements
+it with `TerminateProcess`: the POSIX idiom for *is this alive* would have
+killed the sibling it was asking about.
+
+The old test could not have caught it. Its exactly-once assertion counted
+`task_start` log lines, and the stolen-resume path never logs one — the check
+written to prove exactly-once execution was blind to the only path that broke
+it. The rule is now asserted deterministically, every branch of it, because a
+race that only opens under load is not something to leave to chance.
+
+**U16 — the sandbox handed back a workspace the agent could not write to.**
+`docker run` carried no `--user`, so commands ran as root inside the
+container. On Linux a bind mount is a real host directory, so the agent's own
+`out/` came back owned by `root` and the agent could no longer rewrite,
+gate, archive or clean what it had just produced — in the backend the manual
+recommends for untrusted work. Docker Desktop remaps ownership, which is why
+this was invisible on Windows. Now `--user <uid>:<gid>` on POSIX, with
+`HOME=/tmp` for a uid that has no passwd entry. Dropping root inside a
+container that holds a bind mount is better isolation as well.
+
+**U17 — a secret created world-readable, caught by the platform's own
+preflight.** `preflight.py` exited 2 on Linux with *"ui-token.txt is readable
+by other users (mode 0o644)"*. That check is gated on `os.name != "nt"` and
+had **never executed once** in the project's life. It was right: the platform
+was correct and a *test* had written the token with a bare `open()`. The gap
+underneath was real though — `credentials.py` could recognise a secret but
+had no way to create one, so three modules each rolled their own `open` +
+`chmod` and a fourth writer forgot. `credentials.write_secret()` is now the
+one way: the file is created `0600` rather than corrected afterwards, and the
+replacement is atomic. `federation.py` had the subtler version — it wrote
+through `atomic_write_json` and chmodded after, but `os.replace` carries the
+*temp* file's mode onto the destination, so that chmod was closing a door the
+file had already walked through.
+
+**U18 — an evidence sentence that was false wherever it ran.**
+`test_docker_live.py` printed "on a Windows host" unconditionally, and these
+sentences are quoted verbatim into the published `EVIDENCE.md`. The logic was
+wrong too: a Debian `os-release` proves isolation on a Windows laptop and
+proves nothing on a Debian host. Isolation is now proven by a fact that holds
+anywhere — the container answers under its own hostname, not this machine's —
+and the host's name and absolute paths are deliberately kept out of the
+published report.
+
+**U19 and U20 — staleness decided by comparing two files' timestamps.** Found
+by the local Linux reproduction, not by CI. `conflicts.refresh` rescanned only
+if the newest `notes.md` was modified after `conflicts.json`; `commons.digest`
+re-curated only if `lessons.md` was modified after `lessons.curated.md`. Both
+read like caches and behave like races. Measured inside a container: **200
+files written back to back produced nine distinct timestamps**, and two
+consecutive writes routinely land on the identical `st_mtime_ns`. On
+overlayfs — every container, including this project's own Dockerfile — the
+clock behind file timestamps is cached, not read per write. So new course
+material was silently un-scanned, and new fleet lessons never reached the
+block injected into every agent's context. Both now answer from a SHA-256 of
+the material. A hash cannot be fooled by a clock.
+
+**The class is now barred, not just the two instances.**
+`test_invariants.py` parses every module in the platform and fails the build
+if any comparison has a file timestamp on both sides. Comparing a file's age
+to the wall clock stays allowed — that is how every lock here expires. Run
+against the previous release it names `commons.py:284` and
+`conflicts.py:322`, and nothing else.
+
+**Three mutations added**, two of them declared POSIX-only and skipped out
+loud on Windows rather than reported as passes — modes are not the mechanism
+there, so calling them MISSED would be a false alarm and calling them CAUGHT
+would be a lie.
+
+**A small proof that the proof system is not decorative.** Late in this pass a
+*comment* was edited in `conflicts.py` — no behaviour changed at all. The next
+`python proof.py` reported `memory-institution` at **IMPLEMENTED (expired
+evidence)** rather than OFFLINE VERIFIED, because that file is one of the six
+the capability is built from and the recorded evidence was bound to the old
+code hash. The badge returned only once the evidence had been re-earned by
+re-running it. Nobody could have typed it green: levels bind to 37 source
+files, no endpoint accepts a level, and documentation is deliberately not
+among those files — so editing this changelog cannot move one.
+
 ## v7 — the interface stops being the architecture (2026-08-23)
 
 Implements the **UI/UX Product Redesign Specification v1** end to end, on top

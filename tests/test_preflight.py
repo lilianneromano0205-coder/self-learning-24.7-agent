@@ -30,6 +30,7 @@ from common import AGENT_DIR, PY, agent_setting, make_sandbox
 
 sys.path.insert(0, AGENT_DIR)
 import backup
+import credentials
 import fleet
 import preflight
 
@@ -105,8 +106,15 @@ def main():
     loud = preflight.run(home2, exposed=True)
     acc = [f for f in levels(loud, "access") if f["level"] == preflight.BLOCKER]
     assert acc and "no token" in acc[0]["what"], acc
-    with open(os.path.join(home2, "ui-token.txt"), "w", encoding="utf-8") as f:
-        f.write("tok\n")
+    # write it the way the platform does. Writing it by hand with a bare
+    # open() left it at 0644 on Linux, and preflight was RIGHT to call a
+    # world-readable fleet token a blocker: the test manufactured the very
+    # finding it went on to assert was absent. This is why the writer now
+    # lives in one place -- see credentials.write_secret.
+    credentials.write_secret(os.path.join(home2, "ui-token.txt"), "tok\n")
+    if os.name != "nt":
+        mode = os.stat(os.path.join(home2, "ui-token.txt")).st_mode & 0o777
+        assert mode == 0o600, f"the authority wrote a secret at {oct(mode)}"
     loud2 = preflight.run(home2, exposed=True)
     assert not [f for f in levels(loud2, "access")
                 if f["level"] == preflight.BLOCKER]

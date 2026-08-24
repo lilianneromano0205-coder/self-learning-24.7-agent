@@ -8,6 +8,11 @@ context_token_threshold = 50000     # past this, oldest turns get compacted
 context_keep_recent_messages = 10
 max_malformed_tool_calls = 3
 lock_stale_minutes = 30             # single-writer course lock staleness
+# A task marked running is either being worked on now or was
+# abandoned by a loop that died. Ownership is recorded on the task
+# and a live owner is protected; this is only the backstop for when
+# liveness cannot be checked (another host, or a recycled pid).
+runner_lease_seconds = 900
 reflect_after = ["practitioner"]    # roles that get a Reflector task on finish
 daily_budget_usd = 10               # circuit breaker: pause when today's spend
                                     # hits this (0 disables). Provider spend

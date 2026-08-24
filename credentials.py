@@ -199,6 +199,53 @@ def is_secret(path, root=None):
     return False
 
 
+def write_secret(path, text):
+    """THE way to create a credential file. Returns the path.
+
+    This module could always RECOGNISE a secret (is_secret, looks_like_key)
+    but had no way to CREATE one, so every writer rolled its own `open` and
+    its own chmod: three in the platform, and a fourth in a test that forgot.
+    On Linux the forgotten one landed at mode 0644 — a fleet access token
+    readable by every account on the box — and the platform's own preflight
+    caught it, on the only operating system where the check means anything.
+    The lesson this codebase keeps relearning is that a control repeated at
+    each call site is a control missing from the next one.
+
+    Two properties the hand-rolled versions did not have:
+
+    The mode is set as the file is CREATED, not corrected afterwards, so the
+    secret is never world-readable on disk — not even for the microsecond
+    between the write and the chmod.
+
+    And the replacement is atomic, so a crash or a full disk mid-write leaves
+    the previous credential intact rather than a truncated one. The temp file
+    is itself created 0600: writing atomically through a temp file the umask
+    made 0644 and chmodding the destination afterwards protects nothing,
+    because os.replace carries the TEMP file's mode onto the destination.
+    """
+    path = os.fspath(path)
+    d = os.path.dirname(path) or "."
+    os.makedirs(d, exist_ok=True)
+    tmp = os.path.join(d, f".{os.path.basename(path)}.{os.getpid()}.tmp")
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.chmod(tmp, 0o600)     # belt and braces; Windows ACLs differ
+        except OSError:              # pragma: no cover
+            pass
+        os.replace(tmp, path)
+    finally:
+        try:
+            os.remove(tmp)           # only survives if replace never ran
+        except OSError:
+            pass
+    return path
+
+
 _INLINE_RE = re.compile(r'^(\s*api_key\s*=\s*)(["\']).*?\2\s*$', re.M)
 
 

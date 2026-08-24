@@ -549,6 +549,109 @@ def check_documented_cli_exists():
           f"non-UTF-8 console")
 
 
+def check_no_file_clock_comparisons():
+    """No module may decide "did this change?" by comparing one file's
+    timestamp to another file's timestamp.
+
+    U19 and U20 were the same defect in two modules, and both were found by
+    enumeration rather than by noticing:
+
+        if newest_notes <= ledger_mtime:  return False   # conflicts.py
+        if lessons_mtime > curated_mtime: curate(home)   # commons.py
+
+    It reads like a cache and behaves like a race. On overlayfs -- what every
+    container runs on, including this project's own Dockerfile -- the clock
+    behind file timestamps is cached rather than read per write: measured in
+    a python:3.11-slim container, 200 files written back to back produced
+    NINE distinct timestamps, and two consecutive writes routinely land on
+    the identical st_mtime_ns. Both comparisons then say "unchanged" about
+    material that changed, silently, with no error anywhere.
+
+    Comparing a file's age to the WALL CLOCK (`time.time() - getmtime(p) >
+    stale`) is sound and stays allowed -- that is how every lock in this
+    codebase expires. What is banned is one file's stamp against another's.
+    """
+    import ast
+
+    def is_mtime(node):
+        """os.path.getmtime(...), os.stat(...).st_mtime, or .st_mtime_ns"""
+        if isinstance(node, ast.Call):
+            f = node.func
+            if isinstance(f, ast.Attribute) and f.attr in ("getmtime", "getctime"):
+                return True
+        if isinstance(node, ast.Attribute) and node.attr in (
+                "st_mtime", "st_mtime_ns", "st_ctime", "st_ctime_ns"):
+            return True
+        return False
+
+    def is_wall_clock(node):
+        return (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in ("time", "monotonic"))
+
+    def taint(node, tainted):
+        """Does this expression carry a file timestamp, and no wall clock?"""
+        if any(is_wall_clock(n) for n in ast.walk(node)):
+            return False                      # an age, not a stamp
+        for n in ast.walk(node):
+            if is_mtime(n):
+                return True
+            if isinstance(n, ast.Name) and n.id in tainted:
+                return True
+        return False
+
+    offenders = []
+    for fn in sorted(os.listdir(AGENT_DIR)):
+        if not fn.endswith(".py"):
+            continue
+        path = os.path.join(AGENT_DIR, fn)
+        with io.open(path, encoding="utf-8") as f:
+            src = f.read()
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:                   # pragma: no cover
+            continue
+        for scope in ast.walk(tree):
+            if not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                      ast.Module)):
+                continue
+            tainted = set()
+            for node in ast.walk(scope):
+                if isinstance(node, ast.Assign) and taint(node.value, tainted):
+                    for t in node.targets:
+                        if isinstance(t, ast.Name):
+                            tainted.add(t.id)
+            for node in ast.walk(scope):
+                if not isinstance(node, ast.Compare):
+                    continue
+                sides = [node.left] + list(node.comparators)
+                if sum(1 for s in sides if taint(s, tainted)) >= 2:
+                    offenders.append(
+                        f"{fn}:{node.lineno} compares two file timestamps")
+    assert not offenders, (
+        "a file timestamp compared against another file timestamp:\n  "
+        + "\n  ".join(sorted(set(offenders)))
+        + "\nTwo files written in the same filesystem tick get the SAME "
+          "stamp, so this silently reports 'unchanged'. Compare the "
+          "material instead (see conflicts.material_fingerprint), or "
+          "compare against time.time() if you want an age.")
+    # and the two modules that had the defect now answer from content
+    import conflicts
+    import commons
+    assert hasattr(conflicts, "material_fingerprint") and \
+        hasattr(commons, "_curation_is_stale"), \
+        "the content-based staleness checks are gone"
+    n_mtime = sum(
+        1 for fn in os.listdir(AGENT_DIR) if fn.endswith(".py")
+        for line in io.open(os.path.join(AGENT_DIR, fn), encoding="utf-8")
+        if "getmtime(" in line and "time.time()" not in line
+        and not line.lstrip().startswith("#"))
+    print(f"[clocks] every .py in the platform parsed: no file timestamp is "
+          f"compared against another file's — the {n_mtime} remaining "
+          f"getmtime sites are sorting or age-against-the-wall-clock, which "
+          f"a coarse filesystem tick cannot corrupt (U19, U20)")
+
+
 def main():
     sb = make_sandbox("invariants", providers={"m": {"script": "s.json"}},
                       roles={"practitioner": "m"},
@@ -566,6 +669,7 @@ def main():
     check_exam_readers_agree(sb)
     check_sandbox_names_are_unique()
     check_documented_cli_exists()
+    check_no_file_clock_comparisons()
     print("PASS test_invariants")
 
 

@@ -29,7 +29,9 @@ Run from the agent/ directory:  python tests/test_docker_live.py
 import io
 import json
 import os
+import platform
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -86,16 +88,32 @@ def check_it_runs_somewhere_else(root):
     rc, out, err = sandbox.run("cat /etc/os-release; echo ---; hostname",
                                root, {}, 90, _cfg(root))
     assert rc == 0, (rc, out, err)
-    assert "debian" in out.lower(), (
-        f"the command did not run in the {sandbox.DOCKER_IMAGE} image; this "
-        f"machine is Windows, so a Debian os-release is the proof:\n{out}")
+    inside_os, _sep, inside_host = out.partition("---")
+    assert "debian" in inside_os.lower(), (
+        f"the command did not run in the {sandbox.DOCKER_IMAGE} image:\n{out}")
+    # "a Debian os-release" was written as the proof of isolation on a
+    # Windows laptop, where it is one. On a Debian or Ubuntu host it proves
+    # nothing at all — the host would answer the same way — and the sentence
+    # printed "on a Windows host" wherever it ran, which is a false claim in
+    # a report whose whole point is that claims are quoted from real runs.
+    # The hostname is the fact that holds everywhere: a container gets its
+    # own, and it is never this machine's.
+    host_name, in_name = socket.gethostname(), inside_host.strip()
+    assert in_name and in_name != host_name, (
+        f"the sandbox reported this machine's own hostname ({host_name!r}) — "
+        f"the command did not run in a container at all")
     rc2, out2, _e = sandbox.run("python -c \"import sys;print(sys.version)\"",
                                 root, {}, 90, _cfg(root))
     assert rc2 == 0 and out2.startswith("3.12"), (
         f"the container's python should be 3.12 from the image, got {out2!r}")
+    host_py = ".".join(platform.python_version_tuple()[:2])
+    # The host's own name is deliberately NOT printed: these sentences are
+    # quoted verbatim into EVIDENCE.md, which is published, and a machine
+    # name identifies a person's computer. The container's is random.
     print(f"[isolated] the command ran inside a Debian container on python "
-          f"{out2.split()[0]}, on a Windows host — this is not the host "
-          f"backend wearing a different name")
+          f"{out2.split()[0]}, under its own hostname {in_name!r} which is "
+          f"not this machine's, on a {platform.system()} host running python "
+          f"{host_py} — this is not the host backend wearing a different name")
 
 
 def check_the_mount_is_the_expert_root(root):
@@ -113,6 +131,21 @@ def check_the_mount_is_the_expert_root(root):
         "mount is the entire reason to use this backend")
     with io.open(landed, encoding="utf-8") as f:
         assert f.read() == marker
+    # The agent has to be able to MAINTAIN what its sandbox produced, not
+    # just read it. With no --user the container ran as root, so on Linux
+    # `out/` came back owned by root and the agent — an ordinary user —
+    # could not write into its own workspace: the next line raised
+    # PermissionError. Docker Desktop hides this by remapping ownership, so
+    # it was invisible until CI ran the suite on Linux for the first time.
+    if os.name != "nt":
+        owner = os.stat(os.path.join(root, "out")).st_uid
+        assert owner == os.getuid(), (
+            f"the container created out/ as uid {owner}, but this agent runs "
+            f"as uid {os.getuid()} and can no longer maintain its own "
+            f"workspace — pass --user to docker run")
+    os.remove(landed)            # the agent can delete what the sandbox made
+    with io.open(landed, "w", encoding="utf-8") as f:
+        f.write(marker)          # ...and rewrite it
     # and the container can read what the host put there
     with io.open(os.path.join(root, "out", "from_host.txt"), "w",
                  encoding="utf-8") as f:
@@ -127,8 +160,16 @@ def check_the_mount_is_the_expert_root(root):
 
 def check_the_host_filesystem_is_not_visible(root):
     """Everything outside the expert's root must be gone."""
+    # The first probe was the Windows C: drive on every platform. On Linux
+    # that asks whether a path nobody has is absent, which it always is —
+    # a check that cannot fail, dressed as containment. Probe a directory
+    # that really exists on THIS host and really is outside the mount.
+    outside = "/c" if os.name == "nt" else os.path.expanduser("~")
+    # named, not spelled out: an absolute host path carries the operator's
+    # username, and this sentence is published in EVIDENCE.md
+    outside_desc = "a drive root" if os.name == "nt" else "the host's home directory"
     probes = [
-        ("ls /c 2>/dev/null | head -3", "the Windows C: drive"),
+        (f"ls '{outside}' 2>/dev/null | head -3", f"the host path {outside}"),
         (f"ls '{AGENT_DIR}' 2>/dev/null | head -3", "the platform's own code"),
         ("ls /work/.. 2>/dev/null | grep -c experts", "the fleet home"),
     ]
@@ -136,9 +177,10 @@ def check_the_host_filesystem_is_not_visible(root):
         rc, out, _e = sandbox.run(cmd, root, {}, 90, _cfg(root))
         assert not out.strip() or out.strip() == "0", (
             f"{what} was visible from inside the container:\n{out[:300]}")
-    print(f"[containment] {len(probes)} probes for the host filesystem — the "
-          f"C: drive, the platform's own source, and the fleet home above the "
-          f"mount — all came back empty from inside the container")
+    print(f"[containment] {len(probes)} probes for the host filesystem — "
+          f"{outside_desc}, the platform's own source directory, and the "
+          f"fleet home above the mount — all came back empty from inside "
+          f"the container")
 
 
 def check_the_network_is_off_by_default(root):
@@ -237,6 +279,11 @@ def check_the_resource_ceilings_are_real(root):
     assert "--memory" in argv and argv[argv.index("--memory") + 1] == "1g"
     assert "--pids-limit" in argv
     assert "--rm" in argv, "without --rm every run leaks a stopped container"
+    if os.name != "nt":
+        assert "--user" in argv and \
+            argv[argv.index("--user") + 1] == f"{os.getuid()}:{os.getgid()}", \
+            ("on POSIX the container must run as the host user, or every "
+             "file it writes into the mount comes back owned by root")
     limit = int(argv[argv.index("--pids-limit") + 1])
     # The ceiling has to BITE, not merely be present on the argv. Ask the
     # container to exceed it and count what it actually managed: a limit

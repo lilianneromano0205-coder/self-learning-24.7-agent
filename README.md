@@ -3,7 +3,7 @@
 **A file-backed, stdlib-only platform for building expert AI agents that work
 continuously, prove what they did, and remember what they learned.**
 
-70 Python modules · 99 acceptance tests · one HTML control panel · no
+71 Python modules · 99 acceptance tests · one HTML control panel · no
 database, no framework, no build step. Python 3.11+ and your own API keys.
 
 ```bash
@@ -77,22 +77,29 @@ are in the window.
 
 ## Why you should believe any of it
 
-Four kinds of evidence, weakest first.
+Five kinds of evidence, weakest first — and the last is the only one produced
+on a computer this project does not own.
 
-**The suite passes.** 99 acceptance tests, green twice consecutively from
-clean. Each prints a sentence describing what it observed; `EVIDENCE.md`
-quotes them verbatim.
+**The suite passes — on three platform/version pairs now, not one.** 99
+acceptance tests, green on Windows under Python 3.14 and on Linux under
+Python 3.11 and 3.13. Each test prints a sentence describing what it
+observed; `EVIDENCE.md` quotes them verbatim. CI runs the same suite on
+Ubuntu and Windows × 3.11/3.12/3.13 — check the badge on the repository
+rather than this sentence, because the last time this paragraph and the CI
+result disagreed, the paragraph was wrong.
 
 **The tests enumerate rather than exemplify.** `tests/test_invariants.py`
 does not test through an example — it walks the tree: every subprocess call
 site in 71 modules, every declared control file, 12 traversal spellings, all
 4 credential sources against every subsystem that must exclude them, all 9
 provider-call purposes, all 9 roles, every module that mints an expert, every
-reader of the exam file, all 139 sandbox names across 99 test files, and all
-61 CLI subcommands the manual promises.
+reader of the exam file, all 144 sandbox names across 99 test files, all
+61 CLI subcommands the manual promises, and — parsing every module — every
+comparison that puts a file timestamp on both sides, which is how two
+silent staleness bugs were found at once rather than one at a time.
 
-**Mutation testing — 10 of 10 caught.** A passing test proves nothing unless
-it would fail with the feature removed. `mutate_check.py` breaks each
+**Mutation testing — 0 missed.** A passing test proves nothing unless it
+would fail with the feature removed. `mutate_check.py` breaks each
 load-bearing behaviour and requires its test to fail:
 
 ```
@@ -106,18 +113,38 @@ CAUGHT  package: ship the credential file
 CAUGHT  endurance: never archive finished work
 CAUGHT  rbac: every write allowed
 CAUGHT  fleet: creation stops seeding the home
+CAUGHT  loop: a running task is stolen from a live sibling
+SKIP    credentials: a secret written under the umask      (POSIX-only)
+SKIP    docker: the container runs as root in the mount    (POSIX-only)
 
-10 mutations: 10 caught, 0 missed
+13 mutations: 11 caught, 0 missed, 2 skipped     [on Windows]
 ```
 
+The two `SKIP` rows are honest rather than green: file modes are not the
+mechanism on Windows, so nothing there could catch them. Reporting them as
+MISSED would be a false alarm and reporting them as CAUGHT would be a lie.
+Run on Linux, `credentials: a secret written under the umask` is **CAUGHT**;
+the docker one needs a runner with a daemon, and CI is where it executes.
+
 **The paths that touch something real.** Docker containers actually start —
-isolation is proven by reading a Debian `os-release` from inside a container
-on a Windows host. The provider HTTP client is driven against a loopback
+isolation is proven by the container answering under its own hostname and a
+Debian `os-release` from the image, and by the agent being able to rewrite
+what the container wrote. The provider HTTP client is driven against a loopback
 server that speaks the protocol and can be told to misbehave, so the ~90
 lines that used to first run when somebody spent money now run offline. The
 first day is rehearsed end to end: bootstrap → `loop.py check` → first gated
 task. Endurance is measured over 120 real tasks: latency flat at 0.13 s,
 context window flat at 1083 tokens, nothing lost to the archive.
+
+**Computers we do not own — and what they found.** Everything above was
+produced on one Windows laptop, which is the flaw in all of it. The first CI
+run on Ubuntu and Windows × Python 3.11/3.12/3.13 **failed four of six jobs**,
+and every failure was a real defect that four audit passes had not found —
+the worst being two loops executing the same task at once (six queued,
+fourteen completions logged). Six defects later the suite is green on both
+platforms. The point is not that they were fixed; it is that **no amount of
+care on one machine would have found them**, and this project had been
+disclosing that limit in writing without being able to act on it.
 
 ---
 
@@ -130,6 +157,20 @@ Stated plainly, because a README that only reports wins is marketing.
   live probe, and until somebody runs it with a real key the honest ceiling
   for every capability here is **OFFLINE VERIFIED** — which is what
   `python proof.py` reports.
+- **One machine is one machine.** Everything above was developed and proven
+  on a single Windows laptop. The first time CI ran the suite on computers
+  this code had never touched — Ubuntu and Windows × Python 3.11/3.12/3.13 —
+  **four of the six jobs failed**, and every failure was a real defect: a
+  task could be taken from a live sibling loop and executed twice; a
+  container ran as root and handed back a workspace the agent could not
+  write to; a secret was created world-readable; an evidence sentence
+  asserted the host was Windows wherever it ran. Reproducing those locally in
+  a Linux container found two more, where "has this changed?" was decided by
+  comparing two files' timestamps — unsound on overlayfs, which is what every
+  container uses. All six are fixed and held closed
+  ([U15–U20](GAPS_RISKS_AND_UNFINISHED.md)). The suite is now green on Linux
+  and Windows. The lesson stands: a green suite on one machine is evidence
+  about that machine.
 - **The UI has been used by nobody but its author.** The spec asks for a
   five-person test at ≥90 % task completion; that has not happened.
 - **No gradient updates.** The Training Lab governs promotion and exports
@@ -201,7 +242,7 @@ the panel teaches the terminal instead of hiding it.
 | **[ARCHITECTURE.md](ARCHITECTURE.md)** | **the complete technical account — start here** |
 | [MANUAL.md](MANUAL.md) | the operator's guide: every command, every setting |
 | [REFERENCE.md](REFERENCE.md) | every system end to end, and an honest list of limits |
-| [GAPS_RISKS_AND_UNFINISHED.md](GAPS_RISKS_AND_UNFINISHED.md) | the audit record — four passes, 14 numbered defects |
+| [GAPS_RISKS_AND_UNFINISHED.md](GAPS_RISKS_AND_UNFINISHED.md) | the audit record — five passes, 20 numbered defects |
 | [REMEDIATION.md](REMEDIATION.md) | what was done about each, and the residual risk |
 | [ARCHITECTURE_DECISIONS.md](ARCHITECTURE_DECISIONS.md) | each decision, the alternative rejected, the price paid |
 | [SYSTEM_DIAGRAMS.md](SYSTEM_DIAGRAMS.md) | execution, memory, trust boundaries, and where the defects lived |
@@ -224,10 +265,13 @@ contents.
 ## A note on the audit record
 
 `GAPS_RISKS_AND_UNFINISHED.md` is kept in the audit's own present tense, and
-`REMEDIATION.md` records what was done about each finding. Fourteen numbered
+`REMEDIATION.md` records what was done about each finding. Twenty numbered
 defects, each with reproduction and the test that holds it closed — **and
-three of them are defects in code written during those same passes**, because
+five of them are defects in code written during those same passes**, because
 a report that finds faults only in other people's work is not an audit.
+
+The fifth pass is the one worth reading: it is what happened when the suite
+ran on computers this project does not own.
 
 ---
 
