@@ -84,9 +84,10 @@ on a computer this project does not own.
 acceptance tests, green on Windows under Python 3.14 and on Linux under
 Python 3.11 and 3.13. Each test prints a sentence describing what it
 observed; `EVIDENCE.md` quotes them verbatim. CI runs the same suite on
-Ubuntu and Windows × 3.11/3.12/3.13 — check the badge on the repository
-rather than this sentence, because the last time this paragraph and the CI
-result disagreed, the paragraph was wrong.
+Ubuntu and Windows × 3.11/3.12/3.13 and **all six jobs are green** — but
+check the badge on the repository rather than this sentence, because the
+first three times this paragraph and the CI result disagreed, the paragraph
+was wrong.
 
 **The tests enumerate rather than exemplify.** `tests/test_invariants.py`
 does not test through an example — it walks the tree: every subprocess call
@@ -144,13 +145,15 @@ Three scores, because where a mutation ran changes what it means:
 |---|---|
 | Windows | 15 mutations: **12 caught, 0 missed**, 3 refused (POSIX-only) |
 | Linux container, no docker daemon | **11 caught, 0 missed**, 4 refused (the docker rows skip themselves rather than pass) |
-| CI on ubuntu, with a daemon | last run scored **14 caught, 0 missed, 0 skipped** on the fourteen rows it had — nothing is refused there |
+| CI on ubuntu, with a daemon | **15 caught, 0 missed, 0 skipped** — nothing is refused there, because nothing needs to be |
 
-The fifteenth row was added after that CI run, and is confirmed CAUGHT in the
-Linux container above. Splitting that hair is the point: writing "15 caught
-on Linux" before a machine had said so was the first thing typed into this
-paragraph, and it is exactly the reflex [U21](GAPS_RISKS_AND_UNFINISHED.md)
-is about.
+That last row is the one that counts, and it is the only one no machine here
+could produce: the docker mutations need a real daemon, and a container
+without one refuses to score rather than passing. Splitting that hair is the
+point — "15 caught on Linux" was written into this paragraph *before* any
+runner had said so, and had to be taken back out. It is exactly the reflex
+[U21](GAPS_RISKS_AND_UNFINISHED.md) is about, and writing the entry does not
+make you immune to it.
 
 **The paths that touch something real.** Docker containers actually start —
 isolation is proven by the container answering under its own hostname and a

@@ -1649,8 +1649,11 @@ Things this platform does **not** do, that you might reasonably assume it does:
     ran as root and handed the agent back a workspace it could not write to;
     a secret was created world-readable by a path that never called chmod;
     and one test asserted isolation with a fact that is only a fact on
-    Windows. All four are fixed and each is held closed by a test and a
-    mutation. See U15–U18 in `GAPS_RISKS_AND_UNFINISHED.md`. The standing
+    Windows. All are fixed and each is held closed by a test and a
+    mutation. It took **four CI runs** to stop finding defects: each run's
+    failures had been masking the next one's, and runs two and three failed
+    on the mutation harness and the inbox rather than on the suite. All six
+    jobs are green as of the fourth, with 15 of 15 mutations caught. See U15–U18 in `GAPS_RISKS_AND_UNFINISHED.md`. The standing
     lesson: **one machine is one machine**, and a green suite on it says
     nothing about the next one.
 13. **The panel's master token is still a master key.** Members hold personal
