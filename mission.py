@@ -504,6 +504,16 @@ def main():
     p.add_argument("id"); p.add_argument("dimension", choices=sorted(GAPS))
     p.add_argument("detail")
     p.add_argument("--criterion", default=None); p.add_argument("--root", default=".")
+    # `block` could raise a blocker and NOTHING could clear it. resolve_blocker
+    # existed in this module, fully written, and no CLI, panel route or other
+    # module ever called it -- so a mission that hit a gap stayed blocked for
+    # the life of the fleet, and the gap router's whole promise ("this routes
+    # to X") had no closing move. Raising a flag nobody can lower is not a
+    # workflow.
+    p = sub.add_parser("unblock")
+    p.add_argument("id"); p.add_argument("index", type=int)
+    p.add_argument("--how", default="", help="what actually resolved it")
+    p.add_argument("--root", default=".")
     p = sub.add_parser("close"); p.add_argument("id")
     p.add_argument("--why", default=""); p.add_argument("--root", default=".")
     a = ap.parse_args()
@@ -538,6 +548,17 @@ def main():
         blocked(root, a.id, a.dimension, a.detail, a.criterion)
         g = GAPS[a.dimension]
         print(f"blocked ({a.dimension}): {g['user_sees']} -> {g['routes_to']}")
+        return
+    if a.cmd == "unblock":
+        try:
+            resolve_blocker(root, a.id, a.index, a.how)
+        except KeyError:
+            print(f"no blocker #{a.index} on {a.id}")
+            raise SystemExit(1)
+        rec = load(root, a.id)
+        left = sum(1 for b in rec["blockers"] if not b.get("resolved"))
+        print(f"blocker #{a.index} resolved" +
+              (f"; {left} still open" if left else "; nothing blocks it now"))
         return
     if a.cmd == "close":
         try:

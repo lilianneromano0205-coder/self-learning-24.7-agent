@@ -160,21 +160,81 @@ def load_policy(cfg):
     return extra, allow
 
 
+def rule_problems(cfg=None):
+    """Every policy pattern that does not COMPILE. -> [(where, error)].
+
+    A deny rule that does not compile is not a rule. `check` used to swallow
+    re.error and `continue`, so an owner who wrote
+
+        [agent.command_policy]
+        deny = ["rm -rf ["]              # unterminated character set
+
+    got a settings.toml that reads like the delete is blocked, a fleet where
+    it is not, and no message anywhere saying so. The rules on either side of
+    it kept working, which is what made it invisible: the deny list was
+    partially enforced and looked entirely enforced.
+
+    The allowlist branch had the OPPOSITE failure in the same function — no
+    guard at all, so an uncompilable allow pattern raised re.error straight
+    out of check() into whichever caller happened to ask. One function, two
+    incompatible answers to "what if the owner's regex is malformed".
+
+    BUILTIN_DENY is validated here too. It is ours and it is covered by tests,
+    but "our patterns are fine" is an assumption, and this is the function
+    whose whole job is to stop assuming that about patterns.
+    """
+    extra, allow = load_policy(cfg)
+    out = []
+    for pattern, _why in BUILTIN_DENY:
+        try:
+            re.compile(pattern)
+        except re.error as e:
+            out.append((f"BUILTIN_DENY {pattern!r}", str(e)))
+    for pattern, _why in extra:
+        try:
+            re.compile(str(pattern))
+        except re.error as e:
+            out.append((f"command_policy.deny {pattern!r}", str(e)))
+    for role, spec in (allow or {}).items():
+        for pattern in ((spec or {}).get("allow") or []):
+            try:
+                re.compile(str(pattern))
+            except re.error as e:
+                out.append((f"command_policy.{role}.allow {pattern!r}", str(e)))
+    return out
+
+
 def check(cmd, role="default", cfg=None):
     """Return None if allowed, else a refusal string explaining the rule."""
     text = cmd if isinstance(cmd, str) else " ".join(map(str, cmd))
     low = text.lower()
     extra, allow = load_policy(cfg)
+
+    # A broken rule set fails CLOSED, and says which rule. The alternative --
+    # run the command because we could not read the rule meant to stop it --
+    # is the one outcome nobody would choose if asked. It is loud rather than
+    # silent because a typo that quietly disables a safety control is worth
+    # more noise than a typo that stops work: preflight.check_policy reports
+    # this as a BLOCKER, so it is normally caught before the fleet starts,
+    # not at three in the morning.
+    broken = rule_problems(cfg)
+    if broken:
+        detail = "; ".join(f"{where} -> {err}" for where, err in broken[:3])
+        more = f" (and {len(broken) - 3} more)" if len(broken) > 3 else ""
+        return (f"COMMAND REFUSED by policy: this fleet's command policy does "
+                f"not compile, so it cannot be enforced: {detail}{more}. "
+                f"Nothing runs under a rule set that cannot be read — fix the "
+                f"pattern in settings.toml under [agent.command_policy] and "
+                f"re-run `python preflight.py`.")
+
     for pattern, why in BUILTIN_DENY + extra:
-        try:
-            if re.search(pattern, low if pattern.islower() else text,
-                         re.IGNORECASE):
-                return (f"COMMAND REFUSED by policy ({why}). This is a hard "
-                        f"rule of the harness, not a suggestion: find a "
-                        f"legitimate route inside your own directory, or "
-                        f"ask_human if the task truly needs this.")
-        except re.error:
-            continue
+        # No try/except: rule_problems has just compiled every one of these.
+        if re.search(pattern, low if pattern.islower() else text,
+                     re.IGNORECASE):
+            return (f"COMMAND REFUSED by policy ({why}). This is a hard "
+                    f"rule of the harness, not a suggestion: find a "
+                    f"legitimate route inside your own directory, or "
+                    f"ask_human if the task truly needs this.")
     rules = (allow.get(role) or {}).get("allow") if allow else None
     if rules:
         if not any(re.search(r, text, re.IGNORECASE) for r in rules):

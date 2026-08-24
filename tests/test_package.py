@@ -85,19 +85,65 @@ def check_no_credential_ships(zpath):
             continue
         if SECRET in body:
             suspicious.append((n, "the planted secret"))
-        for line in body.splitlines():
-            # an ASSIGNED key value, not the word "key" in prose or a
-            # placeholder like <your key> / sk-... in documentation
-            if credentials.looks_like_key(line.strip()) and \
-                    "=" in line and "example" not in line.lower() and \
-                    "your" not in line.lower():
-                suspicious.append((n, line.strip()[:60]))
-    assert not suspicious, (
+        # credentials.keys_in_text, NOT looks_like_key: the latter takes a
+        # PATH and begins with os.path.getsize(), so calling it on a LINE OF
+        # TEXT raised OSError inside the function and returned False for
+        # every line of every member. This loop reported nothing because it
+        # was incapable of reporting anything — while the line below printed
+        # that the archive had been "checked four ways ... by reading every
+        # text file". Three ways worked. A dead check and a clean check both
+        # return False, which is why it survived every run.
+        for line_no, excerpt in credentials.keys_in_text(body):
+            suspicious.append((n, f"line {line_no}: {excerpt}"))
+    # Fake credentials this platform's own tests are BUILT from. A package
+    # that ships its tests ships these, and that is correct: each one exists
+    # to prove a control catches it. They are enumerated rather than
+    # pattern-matched, because "looks like a fixture" is exactly the judgement
+    # an attacker would want the scanner to make.
+    #
+    # The table is checked in BOTH directions. An unlisted hit fails, so a
+    # real key cannot arrive quietly. A listed member with no hit ALSO fails,
+    # so a renamed or deleted fixture cannot leave a standing exemption behind
+    # for some future file to inherit — which is how allowlists rot into
+    # blindfolds.
+    FIXTURE_KEYS = {
+        "mutate_check.py":
+            "the mutation that plants a key in agent.env to prove the "
+            "packaging scan catches it",
+        "tests/test_backup.py":
+            "SECRET — planted to prove a backup excludes credentials",
+        "tests/test_bootstrap.py":
+            "SECRET — planted to prove setup never echoes a key",
+        "tests/test_guardrails.py":
+            "a fake DEEPSEEK_API_KEY written into a test agent.env",
+        "tests/test_invariants.py":
+            "the inline api_key fixture for the credential-source invariant",
+        "tests/test_url.py":
+            "a fake DEEPSEEK_API_KEY proving a fetched URL cannot carry "
+            "a key into the transcript",
+        "tests/test_secrets.py":
+            "SECRET — planted to prove the redaction path",
+    }
+    unexpected = [(n, w) for n, w in suspicious if n not in FIXTURE_KEYS]
+    assert not unexpected, (
         "credential-shaped content in the archive:\n  "
-        + "\n  ".join(f"{n}: {w}" for n, w in suspicious[:6]))
+        + "\n  ".join(f"{n}: {w}" for n, w in unexpected[:6])
+        + "\nIf this is a deliberate test fixture, add it to FIXTURE_KEYS "
+          "with the reason. If it is a real key, it just shipped.")
+    stale = sorted(set(FIXTURE_KEYS) - {n for n, _w in suspicious})
+    assert not stale, (
+        f"FIXTURE_KEYS exempts {stale} but the scan found nothing there — "
+        f"remove the entry. A standing exemption for a file that no longer "
+        f"contains a fixture is a hole waiting for the next edit.")
+    for n, _w in suspicious:                # the fixtures must be FAKE
+        assert "sk-" in _w or "sk_" in _w, (n, _w)
     print(f"[secrets] {len(names)} archive members checked four ways — by "
-          f"basename, by containing directory, by extension and by reading "
-          f"every text file — and none carries a credential")
+          f"basename, by containing directory, by extension, and by READING "
+          f"every text member for assigned credential values. The content "
+          f"scan was calling a path-taking function on a line of text, so it "
+          f"had never evaluated true; now live, it finds exactly the "
+          f"{len(suspicious)} synthetic fixtures the tests are built from and "
+          f"nothing else, and an unlisted hit or a stale exemption both fail")
 
 
 def check_no_private_data_ships(zpath):

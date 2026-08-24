@@ -142,6 +142,112 @@ _KEY_PREFIXES = ("sk-", "sk_", "pk-", "pk_", "api-", "api_", "xoxb-", "xoxp-",
                  "hf_", "gsk_", "nvapi-", "Bearer ")
 
 
+def key_shaped(tok):
+    """Is this TOKEN credential-shaped? The single-token judgement, factored
+    out so the whole-file test and the content scan cannot disagree."""
+    tok = (tok or "").strip().strip('"').strip("'").strip()
+    if not tok:
+        return False
+    if any(tok.startswith(p) for p in _KEY_PREFIXES):
+        return True
+    return bool(_KEYISH_RE.fullmatch(tok)) and any(c.isdigit() for c in tok)
+
+
+# A name that means "this value is a credential", and the value it is set to.
+_ASSIGN_RE = re.compile(
+    r"""(?ix)
+    \b ( [A-Z0-9_.\-]* (?: KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|APIKEY )
+         [A-Z0-9_.\-]* )
+    \s* [:=] \s*
+    ["']? ( [^\s"',;]{16,200} ) ["']?
+    """)
+# Values that are obviously not a live credential. Kept deliberately short:
+# every entry here is a hole, so it holds only spellings that CANNOT be a
+# working key rather than anything that merely looks harmless.
+_PLACEHOLDER_MARKS = ("example", "your", "changeme", "change-me", "redacted",
+                      "placeholder", "xxxx", "...", "<", ">", "${", "{{",
+                      "dummy", "notreal", "not-real", "fake", "sample")
+
+
+_IDENTIFIER_RE = re.compile(r"^[A-Z][A-Z0-9_]{3,}$")
+
+
+def _is_identifier(value):
+    """`R2_SECRET_ACCESS_KEY` is the NAME of a place a key lives, not a key.
+
+    Configuration maps one name to another all over this platform --
+    S3_KEY_SECRET = "R2_SECRET_ACCESS_KEY" in backup.py, api_key_env in every
+    settings.toml -- and every one of those is a screaming-snake-case
+    identifier. Real credentials are not: they carry a vendor prefix or mixed
+    case, because they are random. Without this rule the content scan reports
+    the platform's own configuration as a leak, and a scanner that cries wolf
+    on documentation gets switched off.
+    """
+    return bool(_IDENTIFIER_RE.fullmatch(value.strip().strip('"').strip("'")))
+
+
+def _is_path(value):
+    """`snapshots/fleet-2026-08-24-013000-cf-one.zip` is a filename."""
+    v = value.strip().strip('"').strip("'")
+    return ("/" in v or "\\" in v) and bool(re.search(r"\.[A-Za-z0-9]{1,5}$", v))
+
+
+def keys_in_text(text, max_hits=50):
+    """Assigned credential VALUES inside a document. -> [(line_no, excerpt)].
+
+    This exists because the packaging test's "by CONTENT" scan was calling
+    looks_like_key() -- which takes a PATH and starts with os.path.getsize()
+    -- on a LINE OF TEXT. Every call raised OSError inside the function and
+    returned False, so the loop could not report anything, while the test
+    printed "228 archive members checked four ways ... and by reading every
+    text file". Three of the four ways worked. The fourth was the one that
+    would catch a key pasted somewhere nobody thought to name, and it had
+    never once evaluated true.
+
+    A file-shaped test cannot answer a content-shaped question, and the type
+    error was invisible because both a dead check and a passing check return
+    False.
+    """
+    hits = []
+    for i, line in enumerate(str(text or "").splitlines(), 1):
+        if len(line) > 4000:
+            continue
+        low = line.lower()
+        for name, value in _ASSIGN_RE.findall(line):
+            # Judge the VALUE, not the whole line. Matching the line meant a
+            # single "<" anywhere on it switched the scan off — and "<" is
+            # ordinary punctuation in markdown, HTML and comments, so
+            #     api_key = "sk-live-realkey..."   <!-- ours -->
+            # was silently not a finding. A placeholder is a property of the
+            # value; a stray angle bracket forty characters away is not.
+            if any(m in value.lower() for m in _PLACEHOLDER_MARKS):
+                continue
+            if _is_identifier(value) or _is_path(value):
+                continue
+            if key_shaped(value):
+                hits.append((i, f"{name}={value[:12]}..."))
+                break
+        else:
+            for tok in line.split():
+                t = tok.strip('"\'',).strip(",;")
+                # A bare token must clear the prefix AND the shape: prefix
+                # alone matches the setting NAMES `api_key_env` and
+                # `api_key_file`, because "api_" is in _KEY_PREFIXES. Those
+                # appear in the manual, the reference, backup.py and the
+                # build manifest, so a prefix-only rule reported six members
+                # of the platform's own documentation as leaked credentials.
+                # A key that is 11 characters long is not a key.
+                if (any(t.startswith(p) for p in _KEY_PREFIXES)
+                        and _KEYISH_RE.fullmatch(t)
+                        and any(c.isdigit() for c in t)):
+                    if not any(m in t.lower() for m in _PLACEHOLDER_MARKS):
+                        hits.append((i, f"bare token {t[:12]}..."))
+                    break
+        if len(hits) >= max_hits:
+            break
+    return hits
+
+
 def looks_like_key(path, max_bytes=4096):
     """A file whose ENTIRE content is one credential-shaped token.
 
@@ -153,17 +259,37 @@ def looks_like_key(path, max_bytes=4096):
     try:
         if os.path.getsize(path) > max_bytes:
             return False
+    except OSError:
+        return False
+    try:
         with open(path, "r", encoding="utf-8", errors="strict") as f:
             body = f.read(max_bytes)
-    except (OSError, UnicodeDecodeError):
+    except OSError:
         return False
+    except UnicodeDecodeError:
+        # A file this cannot DECODE used to be declared not-a-secret, which
+        # is the wrong way round: "I could not read it" is not "I read it and
+        # it was fine". A UTF-16 or otherwise non-UTF-8 credential file — the
+        # default when a key is pasted into Notepad on Windows, or written by
+        # PowerShell's Out-File — therefore sailed past is_secret() and into
+        # every backup and package. The detector's whole job is to keep
+        # credentials out of archives that get emailed and synced.
+        #
+        # So decode it lossily and judge THAT. A real credential is ASCII, so
+        # a lossy decode of a key file still yields the key; prose in another
+        # encoding still yields prose with spaces and newlines, which the
+        # single-token test rejects. Failing closed here costs a false
+        # positive at worst; failing open costs a leak.
+        try:
+            with open(path, "rb") as f:
+                body = f.read(max_bytes).decode("utf-8", errors="replace")
+        except OSError:
+            return False
+        body = body.replace("�", "").replace("\x00", "")
     lines = [ln.strip() for ln in body.splitlines() if ln.strip()]
     if len(lines) != 1:
         return False
-    tok = lines[0]
-    if any(tok.startswith(p) for p in _KEY_PREFIXES):
-        return True
-    return bool(_KEYISH_RE.fullmatch(tok)) and any(c.isdigit() for c in tok)
+    return key_shaped(lines[0])
 
 
 def is_secret(path, root=None):

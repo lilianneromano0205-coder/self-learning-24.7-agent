@@ -839,7 +839,7 @@ class Handler(BaseHTTPRequestHandler):
         # every mutating verb must be same-origin, token or no token
         if self.command in ("POST", "PUT", "DELETE", "PATCH") \
                 and not self._same_origin(path):
-            self._json({"error": "cross-origin request refused (CSRF): the "
+            self._fail({"error": "cross-origin request refused (CSRF): the "
                                  "panel only accepts same-origin writes"}, 403)
             return False
         presented = ""
@@ -853,7 +853,7 @@ class Handler(BaseHTTPRequestHandler):
             return True
         if presented == self.token or member:
             return True
-        self._json({"error": "auth required — send Authorization: Bearer <token>"}, 401)
+        self._fail({"error": "auth required — send Authorization: Bearer <token>"}, 401)
         return False
 
     def _resolve_actor(self, presented):
@@ -916,7 +916,7 @@ class Handler(BaseHTTPRequestHandler):
                       permission, obj)
             return True
         except Exception as e:
-            self._json({"error": str(e), "permission": permission,
+            self._fail({"error": str(e), "permission": permission,
                         "actor": getattr(self, "actor", OWNER_ACTOR)}, 403)
             return False
 
@@ -1002,13 +1002,48 @@ class Handler(BaseHTTPRequestHandler):
         except (OSError, ConnectionError, ValueError):
             return                                 # the tab went away
 
+    def handle_one_request(self):
+        # One flag per REQUEST, not per connection: keep-alive reuses this
+        # handler instance for every request arriving on the same socket, so
+        # a flag set in __init__ would make the second request think it had
+        # already answered.
+        self._responded = False
+        return super().handle_one_request()
+
     def _json(self, obj, code=200):
+        # Serialise BEFORE committing to a status line. A non-serialisable
+        # object raising here leaves the connection untouched and recoverable;
+        # raising after send_response would leave half a response on the wire.
         body = json.dumps(obj).encode("utf-8")
+        self._responded = True
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _fail(self, obj, code):
+        """Send an error response, unless one has already been sent.
+
+        Every route body sits inside a try whose last clause is a bare
+        `except Exception` that answers with a 500. That try also wraps the
+        SUCCESSFUL _json call — so when a client closed the tab mid-write,
+        wfile.write raised BrokenPipeError (an OSError, so Exception), the
+        handler caught it, and called _json a second time. That writes a
+        second status line and a second set of headers onto a connection that
+        had already received a 200. On a keep-alive socket the next response
+        is then read as the body of the previous one, and the panel shows
+        stale or garbled data for reasons no log explains.
+
+        The handler cannot know whether the body reached the client, but it
+        can know whether it already started answering. This is that memory.
+        """
+        if getattr(self, "_responded", False):
+            return
+        try:
+            self._json(obj, code)
+        except (OSError, ConnectionError):
+            pass                       # the client is gone; nothing to tell it
 
     def _body(self):
         n = int(self.headers.get("Content-Length") or 0)
@@ -1333,7 +1368,7 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     self._json(proof.evaluate(HOME, m.group(1)))
                 except KeyError:
-                    self._json({"error": "unknown capability"}, 404)
+                    self._fail({"error": "unknown capability"}, 404)
             elif path == "/api/workers":
                 # UI spec §7 Resources -> Computers
                 import workers
@@ -1361,7 +1396,7 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({**st, "record": rec,
                                 "contract": mission.render(st)})
                 except KeyError:
-                    self._json({"error": "unknown mission"}, 404)
+                    self._fail({"error": "unknown mission"}, 404)
             elif (m := re.fullmatch(r"/api/experts/([a-z0-9-]+)/acquisitions",
                                     path)):
                 import acquire
@@ -1471,7 +1506,7 @@ class Handler(BaseHTTPRequestHandler):
                 if tid:
                     man = ctx.load_manifest(root, tid)
                     if not man:
-                        self._json({"error": "no compiled window for that task"},
+                        self._fail({"error": "no compiled window for that task"},
                                    404)
                     else:
                         self._json(man)
@@ -1530,7 +1565,7 @@ class Handler(BaseHTTPRequestHandler):
                         q.get("kind", [None])[0],
                         q.get("expert", [None])[0])})
                 else:
-                    self._json({"error": "unknown view"}, 404)
+                    self._fail({"error": "unknown view"}, 404)
             elif path == "/api/goals":
                 import goal
                 self._json(goal.list_goals(self.home))
@@ -1545,9 +1580,9 @@ class Handler(BaseHTTPRequestHandler):
                 expert = (q.get("expert", [None])[0] or "").strip()
                 want = (q.get("goal", [""])[0] or "").strip()
                 if not expert or not want:
-                    self._json({"error": "expert and goal are both required"}, 400)
+                    self._fail({"error": "expert and goal are both required"}, 400)
                 elif not os.path.isdir(os.path.join(self.home, "experts", expert)):
-                    self._json({"error": f"no expert '{expert}'"}, 404)
+                    self._fail({"error": f"no expert '{expert}'"}, 404)
                 else:
                     self._json(universal.resolve(
                         self.home, expert, want,
@@ -1581,7 +1616,7 @@ class Handler(BaseHTTPRequestHandler):
                     # handoff files are the messages
                     one = next((r for r in runs if r["id"] == want), None)
                     if not one:
-                        self._json({"error": "no such run"}, 404)
+                        self._fail({"error": "no such run"}, 404)
                         return
                     ws = os.path.join(self.home, "teamwork", want)
                     msgs = []
@@ -1712,15 +1747,15 @@ class Handler(BaseHTTPRequestHandler):
                             "truncated": len(content) >= MAX_FILE_CHARS,
                             "content": content})
             else:
-                self._json({"error": "not found"}, 404)
+                self._fail({"error": "not found"}, 404)
         except NoSuchExpert as e:
-            self._json({"error": f"no expert called {e.args[0]!r}"}, 404)
+            self._fail({"error": f"no expert called {e.args[0]!r}"}, 404)
         except KeyError as e:
-            self._json({"error": f"the request is missing {e.args[0]!r}"}, 400)
+            self._fail({"error": f"the request is missing {e.args[0]!r}"}, 400)
         except ValueError as e:
-            self._json({"error": str(e)}, 400)
+            self._fail({"error": str(e)}, 400)
         except Exception as e:
-            self._json({"error": str(e)}, 500)
+            self._fail({"error": str(e)}, 500)
 
     def _put_owner_text(self, path, data):
         """Two things the OWNER edits by hand: an agent's identity, and the
@@ -1732,7 +1767,7 @@ class Handler(BaseHTTPRequestHandler):
                 root = expert_root(self.home, m.group(1))
                 text = str(data.get("identity") or "")
                 if len(text) > 100_000:
-                    self._json({"error": "identity too long (100 KB max)"}, 400)
+                    self._fail({"error": "identity too long (100 KB max)"}, 400)
                     return
                 p = os.path.join(root, "identity.md")
                 stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -1760,7 +1795,7 @@ class Handler(BaseHTTPRequestHandler):
                 import commons
                 text = str(data.get("pins") or "")
                 if len(text) > 20_000:
-                    self._json({"error": "pins too long (20 KB max) — pins are "
+                    self._fail({"error": "pins too long (20 KB max) — pins are "
                                          "meant to be a few binding lines"}, 400)
                     return
                 p = os.path.join(commons.commons_dir(self.home), "pins.md")
@@ -1807,7 +1842,7 @@ class Handler(BaseHTTPRequestHandler):
                 d = self._data
                 topic = (d.get("topic") or "").strip()
                 if not topic:
-                    self._json({"error": "a learner needs a topic"}, 400)
+                    self._fail({"error": "a learner needs a topic"}, 400)
                     return
                 dest = fleet.create(self.home, d["name"],
                                     d.get("identity") or f"learning {topic} to mastery")
@@ -1937,7 +1972,7 @@ class Handler(BaseHTTPRequestHandler):
                     tpl = next((t for t in templates.TEMPLATES
                                 if t["slug"] == d["template"]), None)
                     if not tpl:
-                        self._json({"error": "unknown template"}, 404)
+                        self._fail({"error": "unknown template"}, 404)
                         return
                 dest = quick.create(self.home, d["name"],
                                     d.get("specialty") or (tpl or {}).get("specialty", ""))
@@ -1966,7 +2001,7 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/team":
                 experts = [s for s in self._data.get("experts", []) if s]
                 if len(experts) < 2:
-                    self._json({"error": "pick at least two experts"}, 400)
+                    self._fail({"error": "pick at least two experts"}, 400)
                     return
                 run_id = time.strftime("t-%Y%m%d-%H%M%S")
                 cmd = [sys.executable, os.path.join(HOME, "team.py"), "run",
@@ -1989,31 +2024,31 @@ class Handler(BaseHTTPRequestHandler):
             elif (m := re.fullmatch(r"/api/experts/([a-z0-9-]+)/(\w+)", path)):
                 out = self._expert_action(m)
                 if out is None:
-                    self._json({"error": "unknown action"}, 404)
+                    self._fail({"error": "unknown action"}, 404)
                 else:
                     status = out.pop("_status", 200) if isinstance(out, dict) else 200
                     self._json(out, status)
             else:
-                self._json({"error": "not found"}, 404)
+                self._fail({"error": "not found"}, 404)
         except NoSuchExpert as e:
-            self._json({"error": f"no expert called {e.args[0]!r}"}, 404)
+            self._fail({"error": f"no expert called {e.args[0]!r}"}, 404)
         except KeyError as e:
-            self._json({"error": f"the request is missing {e.args[0]!r}"}, 400)
+            self._fail({"error": f"the request is missing {e.args[0]!r}"}, 400)
         except ValueError as e:
             # a refused gate spec is the caller's mistake, not a server fault
-            self._json({"error": str(e)}, 400)
+            self._fail({"error": str(e)}, 400)
         except SystemExit as e:
-            self._json({"error": str(e)}, 400)
+            self._fail({"error": str(e)}, 400)
         except subprocess.TimeoutExpired:
-            self._json({"error": "command timed out"}, 504)
+            self._fail({"error": "command timed out"}, 504)
         except Exception as e:
             # an authorisation refusal is a 403, not a server fault: a 500
             # tells the reader the platform broke when in fact it worked
             if type(e).__name__ == "Denied":
-                self._json({"error": str(e),
+                self._fail({"error": str(e),
                             "actor": getattr(self, "actor", OWNER_ACTOR)}, 403)
             else:
-                self._json({"error": str(e)}, 500)
+                self._fail({"error": str(e)}, 500)
 
     def do_PUT(self):
         path, q = self._route()
@@ -2027,7 +2062,7 @@ class Handler(BaseHTTPRequestHandler):
                 # owner-authored text (identity, pins) arrives as JSON
                 if self._put_owner_text(path, json.loads(self._body() or b"{}")):
                     return
-                self._json({"error": "not found"}, 404)
+                self._fail({"error": "not found"}, 404)
                 return
             if (m := re.fullmatch(r"/api/experts/([a-z0-9-]+)/file", path)):
                 root = expert_root(self.home, m.group(1))
@@ -2049,13 +2084,13 @@ class Handler(BaseHTTPRequestHandler):
                 os.utime(dst, (st.st_atime, st.st_mtime - 60))
                 self._json({"saved": name})
             else:
-                self._json({"error": "not found"}, 404)
+                self._fail({"error": "not found"}, 404)
         except NoSuchExpert as e:
-            self._json({"error": f"no expert called {e.args[0]!r}"}, 404)
+            self._fail({"error": f"no expert called {e.args[0]!r}"}, 404)
         except KeyError as e:
-            self._json({"error": f"the request is missing {e.args[0]!r}"}, 400)
+            self._fail({"error": f"the request is missing {e.args[0]!r}"}, 400)
         except Exception as e:
-            self._json({"error": str(e)}, 500)
+            self._fail({"error": str(e)}, 500)
 
     def do_DELETE(self):
         path, q = self._route()
@@ -2067,7 +2102,7 @@ class Handler(BaseHTTPRequestHandler):
             if (m := re.fullmatch(r"/api/experts/([a-z0-9-]+)", path)):
                 slug = m.group(1)
                 if is_running(slug):
-                    self._json({"error": "stop the loop before deleting"}, 409)
+                    self._fail({"error": "stop the loop before deleting"}, 409)
                 else:
                     purge = q.get("purge", ["0"])[0] in ("1", "true")
                     res = fleet.delete_expert(
@@ -2076,13 +2111,13 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"retired": slug, "purged": purge,
                                 "preserved": not purge, "detail": res})
             else:
-                self._json({"error": "not found"}, 404)
+                self._fail({"error": "not found"}, 404)
         except NoSuchExpert as e:
-            self._json({"error": f"no expert called {e.args[0]!r}"}, 404)
+            self._fail({"error": f"no expert called {e.args[0]!r}"}, 404)
         except KeyError as e:
-            self._json({"error": f"the request is missing {e.args[0]!r}"}, 400)
+            self._fail({"error": f"the request is missing {e.args[0]!r}"}, 400)
         except Exception as e:
-            self._json({"error": str(e)}, 500)
+            self._fail({"error": str(e)}, 500)
 
 
 # The page itself lives in ui.html so the frontend can be edited on its own.

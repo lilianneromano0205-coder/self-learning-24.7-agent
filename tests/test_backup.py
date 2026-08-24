@@ -315,6 +315,45 @@ def main():
           "feature advertised now actually runs, having previously crashed "
           "on every archive and, once unpacked, trusted a damaged one")
 
+    # ---- verify() NEVER raises, whichever layer notices the damage --------
+    # The flipped-byte case above is real but it is not a CONTROLLED one: the
+    # same tampered archive raised BadZipFile on Windows and CPython 3.11 and
+    # zlib.error on Linux 3.12/3.13, so the platform decided which except
+    # clause ran, and CI was green on three runners while the fourth threw a
+    # raw traceback out of pull(). A test that only ever sees one of the two
+    # paths cannot defend the contract. So inject each failure directly.
+    import zlib
+    good = os.path.join(home, "pulled", "fleet-good.zip")
+    real_open = zipfile.ZipFile.open
+    for exc in (zlib.error("invalid distance too far back"),
+                zipfile.BadZipFile("Bad CRC-32"),
+                OSError("disk went away mid-read"),
+                MemoryError("member too large")):
+        def boom(self, name, *a, **kw):
+            if str(name).endswith(".json") or "backup-manifest" in str(name):
+                return real_open(self, name, *a, **kw)   # manifest still reads
+            raise exc
+        zipfile.ZipFile.open = boom
+        try:
+            ok, rep = backup.verify(good)
+        except Exception as e:                          # noqa: BLE001
+            raise AssertionError(
+                f"verify() raised {backup._exc_name(e)} — its docstring promises "
+                f"it never does, and every caller treats a raise as an outage "
+                f"rather than as a blocker it can report") from e
+        finally:
+            zipfile.ZipFile.open = real_open
+        assert ok is False, f"{backup._exc_name(exc)} was reported as a GOOD archive"
+        assert rep.get("corrupt"), (
+            f"{backup._exc_name(exc)}: nothing was named as corrupt, so an "
+            f"operator is told the archive is bad but not which part")
+        assert backup._exc_name(exc) in str(rep.get("error", "")), (
+            f"the report does not carry the reason: {rep.get('error')!r}")
+    print("[never-raises] verify() reports zlib.error, BadZipFile, OSError and "
+          "MemoryError as a NAMED corrupt member instead of raising — the "
+          "layer that notices damage differs by platform, and the narrow "
+          "except list was green on 4 of 6 runners")
+
     print("PASS test_backup")
 
 

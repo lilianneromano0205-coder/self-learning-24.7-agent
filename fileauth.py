@@ -45,6 +45,24 @@ CONTROL_FILES = {
     "routines.json", "org.json",
 }
 CONTROL_DIRS = {"prompts", "approvals", "variants", "effects", "org"}
+# Root-relative paths that are CONTROL wherever they sit, because the
+# DIRECTORY around them is legitimately the agent's own workspace.
+#
+# skills/graph.json is the promotion ledger. skills.provenance_of says in as
+# many words: "Trust comes from the GRAPH, which only the owner writes" — and
+# the File Authority did not enforce it, because `skills` is a WORKSPACE_DIR
+# (correctly: the agent must be able to write its own skill files) and zone_of
+# judged only the head directory and the basename. So an agent could write
+# skills/graph.json and record `provenance: own` against its own skill, which
+# is the exact self-claim skills.py had already been hardened to refuse in the
+# frontmatter — the module closed the front door and left the ledger writable.
+# Bundled scripts run on that verdict.
+#
+# The general shape of the bug: four of harness.LEDGERS were control and the
+# fifth was not, and nothing compared the two lists. test_fileauth now walks
+# harness.LEDGERS and asserts every one lands in ZONE_CONTROL, so a ledger
+# added later cannot quietly land in the workspace.
+CONTROL_PATHS = {"skills/graph.json"}
 RUNTIME_DIRS = {"logs", "contexts", "checkpoints", "events", "archive"}
 # the agent's own workspace: everything it is FOR
 WORKSPACE_DIRS = {
@@ -75,6 +93,8 @@ def zone_of(rel):
     parts = [p for p in r.split("/") if p]
     head = parts[0].lower()
     name = parts[-1].lower()
+    if r.lower() in CONTROL_PATHS:
+        return ZONE_CONTROL
     if head in CONTROL_DIRS or name in CONTROL_FILES:
         return ZONE_CONTROL
     if head in RUNTIME_DIRS:

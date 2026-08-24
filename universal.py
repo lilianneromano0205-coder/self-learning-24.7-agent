@@ -289,10 +289,23 @@ def resolve(home, expert, goal, criteria="", apply=False):
                    f"--why {json.dumps(g['why'])}")
             rec = None
             if apply:
+                # `acquire.request(root, name, source, need, ...)` — the
+                # first version of this omitted `source`, so every call
+                # raised TypeError, and the broad `except` below recorded it
+                # as an error nobody read. The acquisition path was dead the
+                # day it was written: exactly the silent-failure shape this
+                # platform keeps finding, committed while fixing another one.
+                #
+                # The exception is still caught, because an acquisition that
+                # cannot start must not take the whole assessment down with
+                # it — but the reason is now surfaced in the returned action
+                # rather than swallowed, and the test asserts a real record
+                # comes back rather than merely that nothing raised.
                 try:
                     import acquire
-                    rec = acquire.request(root, g["what"], need=g["why"])
-                except Exception as e:                # pragma: no cover
+                    rec = acquire.request(root, g["what"], "pypi",
+                                          g["why"], version="")
+                except Exception as e:
                     rec = {"error": f"{type(e).__name__}: {e}"}
             actions.append({"gap": g["what"], "action": "acquire the capability",
                             "command": cmd, "done": bool(rec and "error" not in rec),

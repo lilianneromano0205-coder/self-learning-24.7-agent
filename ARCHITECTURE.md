@@ -397,7 +397,7 @@ decided by *who wrote the string*:
 |---|---|---|---|---|---|
 | `model_command` | the model | yes | ✅ | ✅ | on risk |
 | `gate` | the model (a done-check) | yes | ✅ | ✅ | — |
-| `capability_probe` | the model | yes | ✅ | ✅ | ✅ |
+| `capability_probe` | the model | yes | ✅ | ✅ | — (sandboxed) |
 | `converter` | the platform | **no — argv only** | — | — | — |
 | `platform_spawn` | the platform | **no — argv only** | — | — | — |
 

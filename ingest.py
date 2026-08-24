@@ -633,15 +633,32 @@ def _blocked_ip(ip):
     return ""
 
 
-def _check_host(url):
+def _check_host(url, root=None):
     """Resolve the host and refuse private/loopback/metadata destinations.
 
+    Two deliberate overrides, and no others:
+
     ALLOW_PRIVATE_INGEST=1 turns this off for an operator who genuinely wants
-    to ingest an intranet page — a deliberate, visible choice rather than a
-    silent hole.
+    to ingest an intranet page — a visible choice, made per process.
+
+    org policy `agents_may_reach_internal_network` is the same decision made
+    once for the whole workspace, by the owner, in a file with an audit trail.
+    That flag has existed in org.json since the first workspace was created
+    and nothing had ever read it, so the organization-level answer to "may my
+    agents reach my intranet?" was decorative while the process-level one
+    worked. Defaulting to False here means an expert with no organization is
+    never MORE permissive than one whose owner said no.
     """
     if os.environ.get("ALLOW_PRIVATE_INGEST") == "1":
         return
+    if root:
+        try:
+            import org
+            if org.policy_flag(root, "agents_may_reach_internal_network",
+                               False):
+                return
+        except Exception:
+            pass
     host = urllib.parse.urlsplit(str(url)).hostname or ""
     if not host:
         raise ValueError(f"no host in {url!r}")
@@ -692,12 +709,12 @@ def _check_scheme(url):
     return url
 
 
-def fetch_url(url, dst):
+def fetch_url(url, dst, root=None):
     """Fetch any URL to lesson text: HTML is stripped to clean text, PDFs go
     through pymupdf, plain text is saved as-is. Downloads are capped so one
     huge link cannot fill the disk."""
     _check_scheme(url)
-    _check_host(url)
+    _check_host(url, root)
     req = urllib.request.Request(url, headers={
         "User-Agent": "Mozilla/5.0 (compatible; learning-agent/1.0)"})
     with _opener().open(req, timeout=60) as r:
@@ -831,7 +848,7 @@ def add_url(root, url, course=None, crawl=0, max_items=200):
     # --- fetch the page/book/PDF itself
     try:
         dst = os.path.join(lesson_dir, "lesson.md")
-        fetch_url(url, dst)
+        fetch_url(url, dst, root)
         doc_rel = os.path.relpath(dst, root).replace(os.sep, "/")
         ids = [_queue_watcher(agent, root, cname, lesson_dir, nn, url, doc_rel)]
         print(f"{url}: fetched -> lesson {nn}, queued watcher task {ids[0]}")
@@ -866,7 +883,7 @@ def add_url(root, url, course=None, crawl=0, max_items=200):
                 try:
                     sd, snn = next_lesson_dir(course_dir)
                     sdst = os.path.join(sd, "lesson.md")
-                    fetch_url(sub, sdst)
+                    fetch_url(sub, sdst, root)
                     ids.append(_queue_watcher(
                         agent, root, cname, sd, snn, sub,
                         os.path.relpath(sdst, root).replace(os.sep, "/")))

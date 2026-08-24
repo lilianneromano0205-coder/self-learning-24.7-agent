@@ -1057,23 +1057,32 @@ class Agent:
     # owner's sign-off; writing prospective.json stored a shell command that
     # the gate later ran. Capability removal only works if the file listing
     # the capabilities is out of reach.
-    PROTECTED_WRITES = (
-        "settings.toml", "mcp.json", "state.json", "prospective.json",
-        "variants/manifest.json",
-    )
-    PROTECTED_WRITE_DIRS = ("prompts", "approvals", "variants", "effects")
-
     def _protected_for_write(self, rel):
+        """Why the File Authority would refuse this write, or None.
+
+        This used to carry its OWN copy of the control tables — a tuple of
+        five filenames and four directory names — and it was never called by
+        anything: _safe_path delegates to fileauth, and has since the File
+        Authority was introduced. So it was a second, unreachable definition
+        of which files are protected, sitting in the module a reader checks
+        first when asking "what can the agent write?".
+
+        Being dead was not the danger; being STALE was. Its copy predated
+        `org/` and predated skills/graph.json becoming a control path, so
+        anyone who wired it up — it reads exactly like the live check — would
+        have silently handed back the skill trust graph. Two tables that must
+        agree and no third thing comparing them is the same defect this
+        codebase has now hit four times.
+
+        One table, in fileauth. This asks it.
+        """
+        import fileauth
         r = str(rel).replace("\\", "/").strip("/")
-        low = r.lower()
-        if low in self.PROTECTED_WRITES:
-            return f"{r} defines what this agent may do"
-        first = low.split("/")[0]
-        if first in self.PROTECTED_WRITE_DIRS:
-            return (f"{first}/ is harness-owned (charters, approvals, "
-                    f"variants, the effects ledger)")
-        if low.endswith("/skill.md") or low == "skill.md":
-            return None          # skills are the agent's own to write
+        zone = fileauth.zone_of(r)
+        if zone == fileauth.ZONE_CONTROL:
+            return f"{r} is a CONTROL file: it defines what this agent may do"
+        if zone == fileauth.ZONE_RUNTIME:
+            return f"{r} is runtime state the harness owns"
         return None
 
     def _safe_path(self, rel, write=False):
@@ -1589,24 +1598,75 @@ class Agent:
             s["usd"] = round(s["usd"] + usd, 6)
             atomic_write_json(self._spend_path(), s)
 
+    def _org_spend_ceiling(self):
+        """The organization's `require_approval_over_usd`, or 0 for none.
+
+        This flag has been in org.json since the first workspace was created
+        and read by nothing — an owner who set a $5 ceiling got no ceiling.
+        It is enforced HERE rather than in a new subsystem because the loop
+        already owns the day's spend ledger and already knows how to pause an
+        expert and say why; a second mechanism for the same question is how
+        the two would come to disagree.
+
+        It composes with settings.toml's daily_budget_usd rather than
+        replacing it: the org ceiling binds the whole workspace, the expert's
+        own ceiling binds one expert, and the LOWER of the two wins, which is
+        the only combination that cannot be escaped by editing the file the
+        agent's own owner does not control.
+        """
+        try:
+            import org
+            v = float(org.policy_flag(self.root, "require_approval_over_usd", 0)
+                      or 0)
+            return v if v > 0 else 0.0
+        except Exception:
+            return 0.0
+
     def _budget_exceeded(self):
-        if self.daily_budget_usd <= 0:
+        """Has this expert hit a spend ceiling today?
+
+        Two ceilings, one rule: the LOWER binds. The expert's own
+        daily_budget_usd lives in a settings.toml the expert's operator can
+        edit; the organization's require_approval_over_usd lives in org.json
+        and only the owner can change it. Taking the minimum is what stops the
+        workspace ceiling being escaped by editing the file below it.
+
+        Either being unset (0 or absent) simply removes that ceiling; both
+        unset means no breaker, which is the historical behaviour.
+        """
+        org_cap = self._org_spend_ceiling()
+        own_cap = self.daily_budget_usd if self.daily_budget_usd > 0 else 0.0
+        caps = [c for c in (own_cap, org_cap) if c > 0]
+        if not caps:
             return False
+        cap = min(caps)
         s = load_json(self._spend_path(), {"usd": 0.0, "notified": False})
-        if s["usd"] < self.daily_budget_usd:
+        if s["usd"] < cap:
             return False
         if not s.get("notified"):
-            with open(os.path.join(self.root, "blocked.md"), "a", encoding="utf-8") as f:
-                f.write(f"\n## {time.strftime('%Y-%m-%d %H:%M')} — BUDGET BREAKER\n"
-                        f"Daily budget of ${self.daily_budget_usd} reached "
-                        f"(${s['usd']} spent today). The agent is paused until "
-                        f"tomorrow. Raise daily_budget_usd in settings.toml to "
-                        f"resume sooner.\n")
+            if org_cap and cap == org_cap:
+                why = (f"ORG SPEND CEILING\nThis workspace requires owner "
+                       f"approval over ${org_cap} and ${s['usd']} has been "
+                       f"spent today, so this expert is paused.\nRaise it "
+                       f"with `python org.py policy --set "
+                       f"require_approval_over_usd=<amount> "
+                       f"--as <owner-email>`.")
+            else:
+                why = (f"BUDGET BREAKER\nDaily budget of ${own_cap} reached "
+                       f"(${s['usd']} spent today). The agent is paused until "
+                       f"tomorrow. Raise daily_budget_usd in settings.toml to "
+                       f"resume sooner.")
+            with open(os.path.join(self.root, "blocked.md"), "a",
+                      encoding="utf-8") as f:
+                f.write(f"\n## {time.strftime('%Y-%m-%d %H:%M')} — {why}\n")
             s["notified"] = True
             atomic_write_json(self._spend_path(), s)
             self.log.error(json.dumps({"event": "budget_exceeded",
                                        "spent_usd": s["usd"],
-                                       "budget_usd": self.daily_budget_usd}))
+                                       "budget_usd": cap,
+                                       "ceiling": "org" if (org_cap and
+                                                            cap == org_cap)
+                                                  else "expert"}))
         return True
 
     # --------------------------------------------------- provider check

@@ -402,8 +402,22 @@ def integrity(root=None):
 
     try:
         import sandbox
-        ok, why = sandbox.available(cfg.get("agent", {})
-                                    if isinstance(cfg, dict) else {})
+        # sandbox.available() takes the WHOLE config and reads cfg["agent"]
+        # ["sandbox"] itself. This passed cfg["agent"], so the lookup became
+        # cfg["agent"]["agent"]["sandbox"], found nothing, and fell back to
+        # the "host" default -- which is the one backend that is always
+        # available. The check therefore returned OK for every fleet ever
+        # run, including one configured for docker on a machine with no
+        # docker. It could not fail; a health check that cannot fail is not
+        # a health check, it is a line of output.
+        #
+        # Now that acquire.install() routes pip through sandbox.run, a
+        # missing backend is not cosmetic: installs fail at the moment the
+        # agent needs a tool, and this is the check that was supposed to say
+        # so first. policy.check(cmd, role, cfg) takes the [agent] TABLE and
+        # sandbox.available(cfg) takes the ROOT -- neighbouring modules with
+        # opposite conventions and nothing that would notice a mix-up.
+        ok, why = sandbox.available(cfg if isinstance(cfg, dict) else {})
         if not ok:
             problems.append(f"sandbox unavailable: {why}")
     except Exception:

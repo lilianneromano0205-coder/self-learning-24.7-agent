@@ -98,6 +98,111 @@ def create(home, name, owner_email, owner_name=""):
     return rec
 
 
+# The organization's policy flags, and what enforces each one. Every key in
+# `create()`'s policy block must appear here, and every entry must name a
+# module that actually reads it — check_org_policy_is_enforced() in
+# tests/test_invariants.py asserts both directions.
+#
+# These three were written into org.json at creation, returned by summary(),
+# rendered in the panel, and read by NOTHING. An owner looking at
+# "agents_may_install: false" in their own workspace settings had every
+# reason to believe agents could not install packages — and after
+# acquire.install() became a real pip install, that belief was load-bearing
+# and false. A setting the product displays is a promise the product makes.
+POLICY_ENFORCERS = {
+    "agents_may_install":
+        "acquire.install() refuses when this is false",
+    "agents_may_reach_internal_network":
+        "ingest._check_host() permits private/loopback destinations only "
+        "when this is true",
+    "require_approval_over_usd":
+        "loop.Agent._budget_exceeded() pauses the expert once the day's "
+        "spend reaches this, and says so in blocked.md",
+}
+
+
+def home_for(root):
+    """experts/<slug> -> the fleet home two levels up; a standalone root ->
+    itself. Organization policy lives at the fleet home, and most subsystems
+    are handed an expert root, so this is the bridge between them."""
+    root = os.path.abspath(root)
+    parent = os.path.dirname(root)
+    if os.path.basename(parent) == "experts":
+        return os.path.dirname(parent)
+    return root
+
+
+def policy(home):
+    """The organization's policy block, or {} when there is no organization.
+
+    Never raises: an expert running standalone has no org.json, and policy
+    lookups must not turn that into an error on every call.
+    """
+    try:
+        rec = load(home)
+    except Exception:
+        return {}
+    return (rec or {}).get("policy") or {}
+
+
+def policy_flag(root, name, default=False):
+    """One policy value, looked up from an expert root OR a fleet home.
+
+    The default is returned only when there is no organization at all, and
+    each caller chooses it deliberately, because "no workspace has been
+    formed here" is a different statement from "the workspace says no" and
+    the right reading differs per flag:
+
+      agents_may_install                 default True  — the install is
+          already sandbox-only, inspected and capability-tested; this flag is
+          the organization's SEPARATE veto, and defaulting it closed would
+          disable acquisition for every fleet that never ran `org.py create`.
+      agents_may_reach_internal_network  default False — reaching a private
+          address is a capability nothing else restricts, so absent an
+          organization the answer stays no, exactly as it is today.
+
+    An organization that DOES exist starts with both False, from create().
+    """
+    val = policy(home_for(root)).get(name)
+    return default if val is None else val
+
+
+def set_policy(home, actor, name, value):
+    """Change one organization policy flag. Owner-only, and audited.
+
+    There was no way to change these at all: create() wrote them and no CLI,
+    API or function ever touched them again. So the three flags were
+    unreachable in both directions — nothing enforced them, and nobody could
+    have altered them if it had. `transfer_owner` is the permission because
+    every one of these decides what agents may do to the outside world, which
+    is the owner's call and not an administrator's.
+    """
+    if name not in POLICY_ENFORCERS:
+        raise Denied(f"unknown policy flag {name!r}; known flags: "
+                     f"{', '.join(sorted(POLICY_ENFORCERS))}")
+    check(home, actor, "transfer_owner", name)
+    rec = load(home)
+    pol = rec.setdefault("policy", {})
+    if isinstance(value, str):
+        low = value.strip().lower()
+        if low in ("true", "yes", "on", "1"):
+            value = True
+        elif low in ("false", "no", "off", "0"):
+            value = False
+        else:
+            try:
+                value = float(value)
+            except ValueError:
+                raise Denied(f"{name} takes true/false or a number, not "
+                             f"{value!r}")
+    before = pol.get(name)
+    pol[name] = value
+    _save(home, rec)
+    audit(home, actor, "set_policy", "organization", name,
+          f"{name}: {before!r} -> {value!r}")
+    return pol
+
+
 def add_user(home, actor, email, role, name="", budget_usd=None):
     check(home, actor, "manage_users")
     if role not in ROLES:
@@ -170,6 +275,15 @@ def check(home, actor, permission, obj=""):
             f"{actor} is a {u['role']}; {permission!r} needs {needed} or "
             f"above. Ask an admin to raise the role, or ask someone with it "
             f"to do this step.")
+
+    # PER-USER BUDGET IS NOT ENFORCED HERE, DELIBERATELY. See the note on
+    # spend_by_user(): `budget_usd` is denominated in DOLLARS and the only
+    # per-user figure this module can currently compute is a COUNT OF
+    # CHARGEABLE ACTIONS. Comparing the two would be a control that fires at
+    # the wrong time in both directions, which is worse than the admitted gap
+    # — and this file has just finished removing three controls that did not
+    # do what they said. `--budget` is accepted and recorded so the intent
+    # survives; org.py policy and doctor report it as recorded-not-enforced.
     return True
 
 
@@ -307,8 +421,23 @@ def trail(home, limit=200, actor=None, obj=None):
 
 
 def spend_by_user(home, days=1):
-    """Per-user spend, so a budget can mean something. Reads the model
-    gateway's own ledger rather than keeping a second count."""
+    """CHARGEABLE ACTIONS per user in the last `days` — a COUNT, not dollars.
+
+    The docstring here used to read "per-user spend ... reads the model
+    gateway's own ledger", and the body counts rows in the ORG AUDIT whose
+    action is `run` or `start_mission`. It has never opened the gateway
+    ledger and has never produced a dollar figure. Nothing called it, so the
+    two never had to agree.
+
+    That is why `budget_usd` is still not enforced. Attributing real spend to
+    a PERSON needs the task to carry who queued it: the panel knows (the
+    request has a token), the loop spends the money hours later and does not,
+    and modelgateway.record() takes no actor. Threading identity from the
+    request through the queue into the meter is the fix, and it is a feature
+    rather than a correction — so the honest state is written down here and
+    in doctor's report instead of being papered over with a control that
+    compares a count against a currency.
+    """
     rec = load(home)
     if not rec:
         return {}
@@ -345,6 +474,9 @@ def main():
     p.add_argument("--owner", required=True); p.add_argument("--home", default=".")
     p = sub.add_parser("invite"); p.add_argument("email")
     p.add_argument("--role", default="operator", choices=ROLES[:-1])
+    p.add_argument("--budget", type=float, default=None,
+                   help="daily spend ceiling in USD for this person; over it, "
+                        "'run' is refused while reading and approving still work")
     p.add_argument("--as", dest="actor", required=True)
     p.add_argument("--home", default=".")
     p = sub.add_parser("who"); p.add_argument("--home", default=".")
@@ -364,6 +496,11 @@ def main():
     p = sub.add_parser("revoke"); p.add_argument("email")
     p.add_argument("--as", dest="actor", required=True)
     p.add_argument("--home", default=".")
+    p = sub.add_parser("policy", help="show or change organization policy")
+    p.add_argument("--set", dest="assign", default="",
+                   help="flag=value, e.g. agents_may_install=true")
+    p.add_argument("--as", dest="actor", default="")
+    p.add_argument("--home", default=".")
     a = ap.parse_args()
     if a.cmd == "roles":
         print("least to most:", " -> ".join(ROLES))
@@ -371,6 +508,31 @@ def main():
             print(f"  {perm:<18} needs {need}")
         return
     home = os.path.abspath(a.home)
+    if a.cmd == "policy":
+        if a.assign:
+            if "=" not in a.assign:
+                print("--set takes flag=value"); raise SystemExit(2)
+            if not a.actor:
+                print("--as <owner-email> is required to change policy")
+                raise SystemExit(2)
+            name, _, value = a.assign.partition("=")
+            pol = set_policy(home, a.actor, name.strip(), value.strip())
+            print(f"{name.strip()} = {pol[name.strip()]!r}")
+            return
+        pol = policy(home)
+        if not pol:
+            print("no organization here (no org.json)"); return
+        for k in sorted(POLICY_ENFORCERS):
+            print(f"  {k:<36} {pol.get(k)!r}")
+            print(f"    enforced by: {POLICY_ENFORCERS[k]}")
+        capped = [u for u in (load(home) or {}).get("users", [])
+                  if u.get("budget_usd")]
+        if capped:
+            print(f"  {'per-user budget_usd':<36} "
+                  f"{len(capped)} user(s): RECORDED, NOT ENFORCED")
+            print(f"    attributing real spend to a person needs the task to "
+                  f"carry who queued it; see org.spend_by_user")
+        return
     if a.cmd == "create":
         r = create(home, a.name, a.owner)
         print(f"organization {r['name']!r} created; {a.owner} is the owner")
@@ -400,8 +562,9 @@ def main():
         print(f"{a.email}: {'token revoked' if had else 'had no token'}")
         return
     if a.cmd == "invite":
-        add_user(home, a.actor, a.email, a.role)
-        print(f"{a.email} added as {a.role}")
+        add_user(home, a.actor, a.email, a.role, budget_usd=a.budget)
+        cap = f", ${a.budget:.2f}/day" if a.budget else ""
+        print(f"{a.email} added as {a.role}{cap}")
         return
     if a.cmd == "can":
         print(f"{a.email}: " + ", ".join(permissions_of(home, a.email)) or "nothing")

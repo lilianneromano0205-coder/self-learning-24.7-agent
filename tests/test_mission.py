@@ -285,6 +285,32 @@ def main():
     check_gap_router(sb, mid)
     check_contract_reaches_every_role(sb)
     check_close_requires_evidence(sb)
+    # ---- a raised blocker can be lowered again --------------------------
+    # mission.resolve_blocker existed, fully written, and no CLI, panel route
+    # or other module in the repository ever called it. So `mission.py block`
+    # could raise a blocker and nothing on any surface could clear it: a
+    # mission that hit a gap stayed blocked for the life of the fleet, and
+    # the gap router's promise ("this routes to X") had no closing move.
+    # Driven through the CLI, because the CLI is what was missing.
+    ub = mission.create(sb, "prove a blocker can be cleared",
+                        ["the blocker is resolved with a reason"])["id"]
+    mission.blocked(sb, ub, "authority", "needs a login nobody granted")
+    assert [b.get("resolved") for b in mission.load(sb, ub)["blockers"]] == [False]
+    r = subprocess.run([sys.executable, os.path.join(AGENT_DIR, "mission.py"),
+                        "unblock", ub, "0", "--how", "the owner granted it",
+                        "--root", sb], capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, f"unblock failed: {r.stdout}{r.stderr}"
+    b0 = mission.load(sb, ub)["blockers"][0]
+    assert b0.get("resolved") is True and "owner granted" in b0.get("how", ""), b0
+    # and an index that does not exist fails loudly rather than silently
+    r2 = subprocess.run([sys.executable, os.path.join(AGENT_DIR, "mission.py"),
+                         "unblock", ub, "9", "--root", sb],
+                        capture_output=True, text=True, timeout=120)
+    assert r2.returncode != 0, "unblocking a blocker that does not exist succeeded"
+    print("[unblock] a raised blocker can be resolved through the CLI with "
+          "the reason recorded, and a bad index fails loudly — resolve_blocker "
+          "was written but unreachable from every surface")
+
     print("PASS test_mission")
 
 

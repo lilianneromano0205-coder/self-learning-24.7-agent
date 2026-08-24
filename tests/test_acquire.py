@@ -53,7 +53,7 @@ def _local_package(sb, name="fleetprobe", version="1.0.0"):
     nothing is resolved from a registry, so the name cannot be typosquatted
     and the bytes cannot change between the inspection and the install.
     """
-    src = os.path.join(sb, "_pkgsrc", name)
+    src = os.path.join(sb, "pkgsrc", name)
     os.makedirs(os.path.join(src, name), exist_ok=True)
     with open(os.path.join(src, "pyproject.toml"), "w", encoding="utf-8") as f:
         f.write("\n".join([
@@ -69,8 +69,61 @@ def _local_package(sb, name="fleetprobe", version="1.0.0"):
     return src
 
 
+def _sandbox_available(sb):
+    """Is there anywhere isolated to install into on THIS machine?
+
+    The module's first absolute rule is that an install never runs on the
+    host. That makes a real install untestable without a real sandbox — so
+    the refusal is asserted always, and the install itself is exercised only
+    where isolation exists, and SKIPPED OUT LOUD where it does not. A test
+    that quietly installs on the host to stay green would be asserting the
+    opposite of the rule it is meant to protect.
+    """
+    import sandbox
+    cfg = _cfg_of(sb)
+    if sandbox.backend_name(cfg) == "host":
+        return False
+    ok, _why = sandbox.available(cfg)
+    return ok
+
+
+def _cfg_of(sb):
+    import tomllib
+    try:
+        with open(os.path.join(sb, "settings.toml"), "rb") as f:
+            return tomllib.loads(f.read().decode("utf-8-sig"))
+    except Exception:
+        return {}
+
+
+def _use_docker(sb):
+    """Point this expert at the docker sandbox, if the daemon is there."""
+    import shutil as _sh
+    import subprocess as _sp
+    if not _sh.which("docker"):
+        return False
+    try:
+        if _sp.run(["docker", "info"], capture_output=True,
+                   timeout=25).returncode != 0:
+            return False
+    except Exception:
+        return False
+    p = os.path.join(sb, "settings.toml")
+    with open(p, "r", encoding="utf-8-sig") as f:
+        text = f.read()
+    if "sandbox = " not in text:
+        text = text.replace("[agent]", "[agent]\n" + 'sandbox = "docker"', 1)
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(text)
+    return True
+
+
 def _install_local(sb, rec_id, src):
-    """Point an acquisition at the local path, then install it for real."""
+    """Point an acquisition at the local path, then install it for real.
+
+    `src` must be INSIDE the expert root: the command runs with the root
+    mounted elsewhere, so a path outside it is not visible to pip.
+    """
     rows = acquire.load(sb)
     for r in rows:
         if r["id"] == rec_id:
@@ -217,6 +270,46 @@ def check_test_is_mandatory(sb):
           "promoted: the capability test is required, needs evidence, and a "
           "failing one blocks trust")
 
+    # ---- and the CLI must enforce the same thing the library does --------
+    # `acquire.py test <id>` used to pass `not a.failed` — a bool on every
+    # path — and capability_test only runs the probe when passed is None. So
+    # the entry point a human or a script actually uses took the
+    # owner-override branch every time and recorded a PASS for a tool nothing
+    # had run. The library above was already correct; the CLI was not, and
+    # nothing tested the CLI. So drive the CLI, not the function.
+    import subprocess
+    empty = acquire.request(sb, "nothinginstalled", "pypi", "a need",
+                            version="1.0.0")
+    rows = acquire.load(sb)
+    for r in rows:                       # fake a clean install, install NOTHING
+        if r["id"] == empty["id"]:
+            r["stage"] = "installed"
+            r["install_path"] = "capabilities/nothinginstalled"
+    acquire._save(sb, rows)
+    proc = subprocess.run(
+        [sys.executable, os.path.join(AGENT_DIR, "acquire.py"), "test",
+         empty["id"], "--root", sb],
+        capture_output=True, text=True, timeout=180)
+    assert proc.returncode != 0, (
+        "the CLI marked an acquisition TESTED with nothing installed — the "
+        "default path is taking a verdict on trust instead of running the "
+        f"probe (stdout={proc.stdout!r})")
+    after = next(r for r in acquire.load(sb) if r["id"] == empty["id"])
+    assert after["stage"] != "tested", (
+        f"stage reached {after['stage']!r} without the probe ever running")
+    # the override still exists, but you have to ask for it BY NAME
+    proc2 = subprocess.run(
+        [sys.executable, os.path.join(AGENT_DIR, "acquire.py"), "test",
+         empty["id"], "--root", sb, "--owner-asserts-pass"],
+        capture_output=True, text=True, timeout=180)
+    assert proc2.returncode == 2 and "evidence" in (proc2.stdout + proc2.stderr), (
+        "an owner-asserted pass with no evidence must be refused: "
+        f"rc={proc2.returncode} out={proc2.stdout!r}")
+    print("[cli-test] `acquire.py test` RUNS the probe by default and failed "
+          "an acquisition with nothing installed; recording a pass on the "
+          "owner's word now requires --owner-asserts-pass AND evidence — the "
+          "library had this control and its only entry point did not")
+
 
 def check_ladder_and_rollback(sb):
     src = _local_package(sb, "goodlib", "1.2.3")
@@ -251,6 +344,37 @@ def main():
                                            "args": {"summary": "ok"}}]})
     workers.register(sb, "Local Docker", "local-docker",
                      ["docker", "install", "node"])
+
+    # THE RULE, asserted before anything else: with the default sandbox
+    # ("host"), an install must be REFUSED. This is the module's first
+    # absolute refusal, and it was violated the moment install() became real
+    # — pip ran through the platform's own argv path, which is not
+    # sandboxed, so a package's build backend would have executed on this
+    # machine at install time. --target isolates where files LAND; it does
+    # not isolate pip.
+    _probe = acquire.request(sb, "hostcheck", "pypi", "zzz qqq unrelated",
+                             version="1.0")
+    try:
+        acquire.install(sb, sb, _probe["id"])
+        raise AssertionError(
+            "an install ran with sandbox = 'host' — the one rule this module "
+            "says it will not bend")
+    except acquire.Refused as e:
+        assert "host" in str(e).lower(), str(e)
+    acquire.remove(sb, _probe["id"], why="probe")
+    print("[no-host-install] with sandbox = \"host\" there is nowhere isolated "
+          "to run pip, so acquisition REFUSED rather than installing on this "
+          "machine — a dependency's build backend executes at install time")
+
+    # A real install therefore needs a real sandbox. Where one exists, the
+    # ladder is walked for real; where it does not, that part SKIPS OUT LOUD
+    # rather than quietly installing on the host to stay green.
+    if not _use_docker(sb) or not _sandbox_available(sb):
+        print("SKIP test_acquire: no isolated sandbox on this machine "
+              "(docker not available), so the install rungs cannot be "
+              "exercised without breaking the rule they protect. The "
+              "refusals above were all checked.")
+        return
     check_search_first(sb)
     check_malicious_fixture(sb)
     check_dependency_confusion(sb)

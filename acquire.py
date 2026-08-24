@@ -107,6 +107,17 @@ def _import_name(name):
     return re.sub(r"[^A-Za-z0-9_]", "_", str(name)).strip("_") or "sys"
 
 
+def _expert_cfg(root):
+    """The expert's own [agent] settings, so the sandbox backend it declares
+    is the one that governs its installs."""
+    try:
+        import tomllib
+        with open(os.path.join(root, "settings.toml"), "rb") as f:
+            return tomllib.loads(f.read().decode("utf-8-sig"))
+    except Exception:
+        return {}
+
+
 def load(root):
     try:
         with open(_path(root), "r", encoding="utf-8") as f:
@@ -273,6 +284,39 @@ def install(root, home, acq_id, worker_id=None, task_text=""):
     fails — because "just this once, on the host" is how a governed pipeline
     stops being one.
     """
+    # The ORGANIZATION's answer comes first, before the worker is chosen and
+    # before anything is fetched. org.json has carried
+    # `agents_may_install: false` since the first workspace was created, it is
+    # returned by org.summary() and rendered in the panel, and until now
+    # nothing read it. An owner who saw that flag and left it alone believed
+    # agents could not install software; once install() became a real pip
+    # install, that belief was both load-bearing and false.
+    #
+    # The default applies only when there is NO organization, and it is True:
+    # "nobody has formed a workspace here" is not the same statement as "the
+    # workspace forbids this". Defaulting it to False looked prudent and was
+    # simply wrong — it made acquisition impossible for every standalone
+    # fleet, which is most of them, by reading an absent file as a refusal.
+    #
+    # Nothing is lost by that, because this flag is not what makes installing
+    # safe: the install runs pip inside a disposable sandbox and never on the
+    # host, the manifest is inspected first, a capability test must pass, and
+    # only the owner grants the last rung. This flag is the ORGANIZATION's
+    # separate veto, and an organization that exists starts with it False.
+    try:
+        import org
+        may_install = org.policy_flag(root, "agents_may_install", True)
+    except Exception:
+        may_install = True
+    if not may_install:
+        raise Refused(
+            "this organization does not permit agents to install software "
+            "(org policy agents_may_install = false). An owner can change it "
+            "with `python org.py policy --set agents_may_install=true "
+            "--as <owner-email>`; it is false by default because installing "
+            "a package is the one acquisition step that runs somebody else's "
+            "code.")
+
     rows = load(root)
     rec = next((r for r in rows if r["id"] == acq_id), None)
     if rec is None:
@@ -326,14 +370,84 @@ def install(root, home, acq_id, worker_id=None, task_text=""):
     else:
         spec = rec["name"] if not rec.get("version") else \
             f"{rec['name']}=={rec['version']}"
-    argv = [sys.executable, "-m", "pip", "install", "--no-input",
+    # RELATIVE paths, because the command runs with the expert root mounted
+    # somewhere else. sandbox.run bind-mounts root at /work and runs with
+    # cwd=/work, so an absolute host path inside this argv would simply not
+    # exist in the container — pip would report "file not found" and the
+    # acquisition would be rejected for a reason that has nothing to do with
+    # the package. The cwd is the expert root in every backend, so relative
+    # paths are the ones that mean the same thing everywhere.
+    rel_target = os.path.relpath(target, root).replace(os.sep, "/")
+    rel_spec = spec
+    if local:
+        try:
+            rel_spec = "./" + os.path.relpath(spec, root).replace(os.sep, "/")
+        except ValueError:                   # a different drive on Windows
+            raise Refused(
+                f"local_path {spec!r} is outside the expert root, so it is "
+                f"not visible inside the sandbox. Copy it under the expert "
+                f"first.")
+    argv = ["python", "-m", "pip", "install", "--no-input",
             "--disable-pip-version-check", "--no-warn-script-location",
-            "--target", target, spec]
+            "--target", rel_target, rel_spec]
     if rec.get("index_url"):
         argv += ["--index-url", str(rec["index_url"])]
-    import execution
-    rc, out, err = execution.run("converter", argv, root, timeout=600,
-                                 reason=f"acquire {spec}")
+
+    # WHERE pip RUNS, not just where its files land.
+    #
+    # The first version of this ran execution.run("converter", ...), which is
+    # the platform's own argv path and is NOT sandboxed. That satisfied
+    # "--target keeps the package out of the host interpreter" and violated
+    # the rule at the top of this module — "an install never runs on the host
+    # or on the control plane" — because pip ITSELF then executed on the
+    # host, and a package's build backend runs arbitrary code at install
+    # time. Making a fake control real is worth nothing if it breaks a real
+    # one on the way; before that change nothing ran at all, so the rule was
+    # at least vacuously true.
+    #
+    # sandbox.py is the thing that actually isolates, and it already FAILS
+    # CLOSED: a backend that is configured but unavailable returns 127 and
+    # says what is missing rather than quietly running on the host. The
+    # worker registry says WHICH computer; the sandbox backend is what makes
+    # that mean anything.
+    import sandbox
+    cfg = _expert_cfg(root)
+    backend = sandbox.backend_name(cfg)
+    if backend == "host":
+        raise Refused(
+            "refusing to install: [agent] sandbox = \"host\", so there is no "
+            "isolated place to run pip. A new dependency is untrusted code by "
+            "definition and its build backend executes at install time, so it "
+            "does not run on this machine. Set [agent] sandbox = \"docker\" "
+            "(or e2b/daytona) and try again — this is the one rule this "
+            "module will not bend.")
+    avail, why = sandbox.available(cfg)
+    if not avail:
+        raise Refused(
+            f"refusing to install: the {backend!r} sandbox is configured but "
+            f"unavailable ({why}). Acquisition does NOT fall back to the "
+            f"host.")
+    # EGRESS, deliberately, and only here.
+    #
+    # The docker sandbox runs --network none by default, which is right for
+    # model-written commands and wrong for this one: pip cannot fetch a
+    # package, or even its build backend, without a network. Discovered by
+    # running it — the first isolated install died on
+    # "pip subprocess to install build dependencies did not run successfully
+    #  ... connection broken", which is the sandbox working exactly as
+    # designed and the acquisition being impossible inside it.
+    #
+    # So the install container gets egress while the command containers do
+    # not. The trade is explicit: the container is disposable, its filesystem
+    # is the expert root and nothing else, and sandbox.run has already
+    # SCRUBBED every credential-shaped variable out of its environment — so
+    # what egress buys an attacker here is the ability to download the
+    # package we asked for. That is the job.
+    install_cfg = {**cfg, "agent": {**(cfg.get("agent") or {}),
+                                    "sandbox_network": True}}
+    cmd = " ".join(f'"{a}"' if (" " in str(a) or "\\" in str(a)) else str(a)
+                   for a in argv)
+    rc, out, err = sandbox.run(cmd, root, dict(os.environ), 900, install_cfg)
     ok = (rc == 0)
     rec["worker"] = w["id"]
     rec["install_path"] = os.path.relpath(target, root).replace(os.sep, "/")
@@ -568,11 +682,27 @@ def _main():
     p.add_argument("--root", default="."); p.add_argument("--home", default=".")
     p.add_argument("--worker", default=None); p.add_argument("--for", dest="task",
                                                              default="")
+    # By DEFAULT this runs the probe. It used to pass `not a.failed`, which is
+    # a bool on every path, and capability_test only runs the real probe when
+    # `passed is None` — so the CLI, the door a human or a script actually
+    # uses, took the owner-override branch every single time and recorded a
+    # PASS for a tool nothing had executed. The library was fixed (U25) and
+    # its only entry point kept the old hole; a control is worth what its
+    # entry points enforce, not what its internals do.
     p = sub.add_parser("test"); p.add_argument("id")
-    p.add_argument("--root", default="."); p.add_argument("--evidence", required=True)
+    p.add_argument("--root", default=".")
+    p.add_argument("--evidence", default="",
+                   help="required only with --owner-asserts-pass; otherwise "
+                        "the probe's own output IS the evidence")
     p.add_argument("--command", default="")
     p.add_argument("--failed", action="store_true",
                    help="record that the capability test did NOT pass")
+    p.add_argument("--owner-asserts-pass", action="store_true",
+                   dest="owner_asserts_pass",
+                   help="record a PASS on the owner's word WITHOUT running "
+                        "the probe — for a capability no probe can reach. "
+                        "Requires --evidence, and the record says a human "
+                        "asserted it rather than that anything was observed")
     a = ap.parse_args()
     if a.cmd == "search":
         rows = search_known(os.path.abspath(a.root), a.need)
@@ -604,13 +734,31 @@ def _main():
         print("  a capability test must still pass before this is usable")
         return
     if a.cmd == "test":
-        rec = capability_test(os.path.abspath(a.root), a.id, not a.failed,
+        if a.failed and a.owner_asserts_pass:
+            print("--failed and --owner-asserts-pass contradict each other")
+            raise SystemExit(2)
+        if a.owner_asserts_pass and not a.evidence.strip():
+            print("--owner-asserts-pass records a verdict nothing observed, "
+                  "so it requires --evidence saying what you checked")
+            raise SystemExit(2)
+        # None => RUN the probe. False => the owner asserts it failed (safe:
+        # it can only ever block a promotion). True => the owner asserts a
+        # pass, which is the only branch that takes a verdict on trust and is
+        # now the only one you have to ask for by name.
+        verdict = None
+        if a.failed:
+            verdict = False
+        elif a.owner_asserts_pass:
+            verdict = True
+        rec = capability_test(os.path.abspath(a.root), a.id, verdict,
                               a.evidence, a.command)
         print(f"{rec['name']}: {rec['stage']}")
         if rec["stage"] != "tested":
             raise SystemExit(1)
-        print("  a tool that installed has proven it installs; this proves it "
-              "does the job")
+        how = ("on your assertion, unverified" if a.owner_asserts_pass
+               else "by running it")
+        print(f"  a tool that installed has proven it installs; this proves "
+              f"it does the job — {how}")
         return
     if a.cmd == "stages":
         print("requested -> inspected -> installed -> tested -> trusted")

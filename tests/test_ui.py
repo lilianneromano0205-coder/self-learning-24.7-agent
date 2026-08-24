@@ -181,6 +181,55 @@ def main():
         assert not os.path.isdir(os.path.join(home, "retired", "purge-me"))
         print("[danger] deletion retires and preserves the whole world; "
               "only an explicit purge destroys it")
+        # ---- one request, one response, even when the write fails ---------
+        # Every route body sits in a try ending with `except Exception ->
+        # 500`. That try also wraps the SUCCESSFUL _json call, so a client
+        # closing the tab mid-write raised BrokenPipeError (an OSError, hence
+        # Exception), the handler caught it, and answered a second time — a
+        # second status line and headers on a connection that had already
+        # received a 200. On keep-alive the following response is then read as
+        # the previous one's body.
+        #
+        # Driven directly against the handler class rather than over a socket,
+        # because "make the kernel drop the connection at exactly the right
+        # microsecond" is not a test, it is a coin toss.
+        sys.path.insert(0, AGENT_DIR)
+        import ui as ui_mod
+
+        class _Boom(ui_mod.Handler):
+            def __init__(self):                      # no socket, no server
+                self.home = home
+                self._responded = False
+                self.sent = []
+                self.wfile = self
+                self.headers = {}
+            def write(self, _b):
+                raise BrokenPipeError("the tab was closed")
+            def send_response(self, code, *a):
+                self.sent.append(code)
+            def send_header(self, *a, **k):
+                pass
+            def end_headers(self):
+                pass
+
+        h = _Boom()
+        try:
+            h._json({"ok": True})                    # the success path...
+        except BrokenPipeError:
+            h._fail({"error": "boom"}, 500)          # ...as the handler does
+        assert h.sent == [200], (
+            f"the handler sent {h.sent} — a failed write turned one request "
+            f"into two responses on the same connection")
+
+        fresh = _Boom()                              # and a REAL error still answers
+        fresh.write = lambda _b: None
+        fresh._fail({"error": "genuine"}, 404)
+        assert fresh.sent == [404], (
+            f"the guard swallowed a legitimate error response: {fresh.sent}")
+        print("[one-response] a write that fails after the headers are sent "
+              "does not produce a second status line, and an error that "
+              "happens before any response still reports normally")
+
         print("PASS test_ui")
     finally:
         # graceful: the panel terminates its own child drivers first (a bare

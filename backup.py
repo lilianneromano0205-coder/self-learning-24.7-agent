@@ -202,6 +202,15 @@ def read_manifest(archive):
             return None
 
 
+def _exc_name(e):
+    """`zlib.error`, not `error`. The bare __name__ of zlib.error is the word
+    "error", which tells an operator reading a damage report nothing and makes
+    any test asserting on it a substring match that passes on anything."""
+    mod = type(e).__module__
+    name = type(e).__name__
+    return name if mod in ("builtins", "__main__") else f"{mod}.{name}"
+
+
 def verify(archive):
     """Recompute every checksum inside the archive. -> (ok, report).
 
@@ -210,8 +219,15 @@ def verify(archive):
     the caller can treat it as a blocker instead of an exception."""
     try:
         return _verify_inner(archive)
-    except (zipfile.BadZipFile, OSError, EOFError, ValueError) as e:
-        return False, {"error": f"unreadable archive: {type(e).__name__}: {e}",
+    except Exception as e:
+        # "Never raises" is the whole contract, so the net is Exception and
+        # not a hand-written list of the failures imagined at writing time.
+        # The list used to be (BadZipFile, OSError, EOFError, ValueError) and
+        # a decompressor error -- zlib.error, and lzma/bz2 have their own --
+        # is in none of those trees. Every caller here treats a raise as a
+        # crash and a False as a blocker, so a narrow net converts a handled
+        # blocker into an outage.
+        return False, {"error": f"unreadable archive: {_exc_name(e)}: {e}",
                        "corrupt": [os.path.basename(str(archive))],
                        "missing": [], "secrets_leaked": [], "files": 0,
                        "experts": [], "taken": None}
@@ -223,7 +239,7 @@ def _verify_inner(archive):
         return False, {"error": "no backup-manifest.json — not one of ours",
                        "corrupt": [], "missing": [], "secrets_leaked": [],
                        "files": 0, "experts": [], "taken": None}
-    bad, missing = [], []
+    bad, missing, first_error = [], [], ""
     with zipfile.ZipFile(archive) as z:
         names = set(z.namelist())
         for e in man["entries"]:
@@ -231,21 +247,45 @@ def _verify_inner(archive):
                 missing.append(e["path"])
                 continue
             h = hashlib.sha256()
-            with z.open(e["path"]) as f:
-                while True:
-                    b = f.read(1 << 20)
-                    if not b:
-                        break
-                    h.update(b)
+            try:
+                with z.open(e["path"]) as f:
+                    while True:
+                        b = f.read(1 << 20)
+                        if not b:
+                            break
+                        h.update(b)
+            except Exception as ex:
+                # A damaged member is DATA about the archive, not a crash.
+                # Corruption surfaces at whichever layer notices first, and
+                # that layer is not stable across platforms: the same tampered
+                # bytes raise BadZipFile (CRC) on Windows and CPython 3.11 but
+                # zlib.error ("invalid distance too far back") on Linux 3.12
+                # and 3.13, because the decompressor gives up before the CRC
+                # is ever reached. Catching only the zipfile-level error meant
+                # this function -- whose contract is NEVER RAISES -- threw a
+                # raw zlib traceback out of pull() on exactly the platform the
+                # container runs on, and the caller's "archive is DAMAGED and
+                # was NOT trusted" refusal never ran.
+                #
+                # Recorded per MEMBER and the scan continues, so the report
+                # names WHICH files are damaged. Aborting at the first bad
+                # entry would tell an operator the archive is bad without
+                # telling them how much of it they still have.
+                bad.append(e["path"])
+                first_error = first_error or f"{e['path']}: {_exc_name(ex)}: {ex}"
+                continue
             if h.hexdigest() != e["sha256"]:
                 bad.append(e["path"])
         leaked = sorted(n for n in names
                         if os.path.basename(n) in SECRET_NAMES)
     ok = not bad and not missing and not leaked
-    return ok, {"taken": man["taken"], "files": man["files"],
-                "experts": man["experts"], "corrupt": bad, "missing": missing,
-                "secrets_leaked": leaked,
-                "platform_version": man.get("platform_version")}
+    rep = {"taken": man["taken"], "files": man["files"],
+           "experts": man["experts"], "corrupt": bad, "missing": missing,
+           "secrets_leaked": leaked,
+           "platform_version": man.get("platform_version")}
+    if first_error:
+        rep["error"] = first_error
+    return ok, rep
 
 
 def restore(archive, dest, force=False):

@@ -387,8 +387,43 @@ def check_governance(home):
     return out
 
 
+def check_policy(home):
+    """The command policy must COMPILE, or it is not enforcing anything.
+
+    This is a preflight rather than only a runtime refusal because the failure
+    it catches is silent: an owner deny rule with a bad regex used to be
+    skipped, leaving a settings.toml that reads like the rule is active and a
+    fleet where it is not. Caught here, it costs a message before the run;
+    caught at runtime it costs the run.
+    """
+    import policy
+    out = []
+    for root, label in ([(home, "fleet")] +
+                        [(os.path.join(home, "experts", s), s)
+                         for s in _experts(home)]):
+        try:
+            import tomllib
+            with open(os.path.join(root, "settings.toml"), "rb") as f:
+                agent_cfg = (tomllib.loads(f.read().decode("utf-8-sig"))
+                             .get("agent") or {})
+        except (OSError, ValueError, ImportError):
+            continue
+        for where, err in policy.rule_problems(agent_cfg):
+            out.append(_finding(
+                BLOCKER, "policy",
+                f"{label}: command policy does not compile — {where}: {err}",
+                f"fix the pattern in {os.path.join(root, 'settings.toml')} "
+                f"under [agent.command_policy]; until then EVERY command is "
+                f"refused, because a rule set that cannot be read cannot be "
+                f"enforced"))
+    if not out:
+        out.append(_finding(OK, "policy",
+                            "every command-policy pattern compiles", ""))
+    return out
+
+
 CHECKS = (
-    ("cost", check_spend), ("secrets", check_secrets),
+    ("cost", check_spend), ("secrets", check_secrets), ("policy", check_policy),
     ("backups", check_backups), ("capacity", check_disk),
     ("resilience", check_resilience), ("verification", check_verification),
     ("critic", check_critic),

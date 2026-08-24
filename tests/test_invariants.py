@@ -160,9 +160,47 @@ def check_filesystem_zones(sb):
             raise AssertionError(f"control dir {d}/ must not be writable")
         except fileauth.Denied:
             pass
-    print(f"[zones] {len(cases)} paths + every declared control file/dir "
+    for rel in fileauth.CONTROL_PATHS:
+        try:
+            fileauth.resolve(sb, rel, "write", "agent")
+            raise AssertionError(f"control path {rel} must not be writable")
+        except fileauth.Denied:
+            pass
+
+    # EVERY LEDGER IS A CONTROL FILE — checked against harness's list, not
+    # fileauth's own.
+    #
+    # The three loops above enumerate fileauth's tables against themselves,
+    # which proves each entry is enforced and can never prove an entry is
+    # MISSING. It was: four of the five ledgers in harness.LEDGERS were
+    # control and skills/graph.json was not, so the agent could write the
+    # ledger that decides which of its own skills are trusted, while
+    # skills.provenance_of documented that only the owner writes it. Two lists
+    # in two modules with no third thing comparing them is how that survived.
+    #
+    # A ledger is a durable record the platform's own integrity depends on —
+    # doctor.py and harness.py both refuse to proceed when one is corrupt.
+    # Anything worth halting the fleet over is not workspace.
+    import harness
+    for rel, label in harness.LEDGERS:
+        zone = fileauth.zone_of(rel)
+        assert zone == fileauth.ZONE_CONTROL, (
+            f"harness.LEDGERS lists {rel} ({label}) but fileauth puts it in "
+            f"{zone!r} — the agent can rewrite a ledger the platform treats "
+            f"as an integrity invariant. Add it to fileauth.CONTROL_PATHS.")
+        try:
+            fileauth.resolve(sb, rel, "write", "agent")
+            raise AssertionError(f"ledger {rel} ({label}) is agent-writable")
+        except fileauth.Denied:
+            pass
+    print(f"[zones] {len(cases)} paths + every declared control file/dir/path "
           f"({len(fileauth.CONTROL_FILES)} files, {len(fileauth.CONTROL_DIRS)} "
-          f"dirs) classified and enforced by zone")
+          f"dirs, {len(fileauth.CONTROL_PATHS)} paths) classified and enforced "
+          f"by zone")
+    print(f"[ledgers] all {len(harness.LEDGERS)} ledgers harness treats as "
+          f"integrity invariants are CONTROL and refused to the agent — "
+          f"including skills/graph.json, the skill trust graph, which sat in "
+          f"the workspace because `skills/` is legitimately the agent's own")
 
 
 def check_traversal_spellings(sb):
@@ -774,6 +812,202 @@ def check_capability_report_matches_reality():
           f"{', '.join(f'{b} via {how}' for b, how in checked) or 'none present'}")
 
 
+def check_org_policy_is_enforced(sb):
+    """Every organization policy flag is READ by something, and BITES.
+
+    All three were written into org.json by create(), returned by summary(),
+    rendered in the panel — and referenced by no other module in the
+    repository. An owner reading "agents_may_install: false" in their own
+    workspace had every reason to believe agents could not install software.
+    They could. There was also no way to change any of them: no CLI, no API,
+    no function. Inert in both directions.
+
+    Three assertions, because each catches a different way this rots:
+      1. every key create() writes is declared in POLICY_ENFORCERS
+      2. every declared flag is actually read by the module that claims it
+      3. the flags CHANGE BEHAVIOUR — asserted by flipping one and watching
+         a real call refuse, because "the string appears in the file" is the
+         same weak evidence that let this survive in the first place
+    """
+    import org
+    home = os.path.join(sb, "orgcheck")
+    os.makedirs(home, exist_ok=True)
+    rec = org.create(home, "Check Co", "owner@example.com")
+
+    declared = set(org.POLICY_ENFORCERS)
+    written = set(rec["policy"])
+    assert written == declared, (
+        f"org.create() writes {sorted(written)} but POLICY_ENFORCERS declares "
+        f"{sorted(declared)}. A flag with no declared enforcer is a setting "
+        f"the product displays and does not honour.")
+
+    # 2. the named enforcer really reads it
+    for flag, claim in org.POLICY_ENFORCERS.items():
+        module = claim.split(".")[0].split("(")[0].strip()
+        src = os.path.join(AGENT_DIR, f"{module}.py")
+        assert os.path.isfile(src), f"{flag}: no module {module}.py"
+        with io.open(src, encoding="utf-8") as f:
+            assert flag in f.read(), (
+                f"{flag} claims to be enforced by {module}.py, and that file "
+                f"never mentions it")
+
+    # 3. and flipping it changes what the platform DOES
+    import acquire
+    expert = os.path.join(home, "experts", "buyer")
+    os.makedirs(expert, exist_ok=True)
+    org.set_policy(home, "owner@example.com", "agents_may_install", True)
+    assert org.policy_flag(expert, "agents_may_install") is True
+    org.set_policy(home, "owner@example.com", "agents_may_install", False)
+    try:
+        acquire.install(expert, home, "no-such-id")
+        raise AssertionError(
+            "agents_may_install=false did not stop an install — the flag is "
+            "still decorative")
+    except acquire.Refused as e:
+        assert "agents_may_install" in str(e), f"refused for another reason: {e}"
+    except KeyError:
+        raise AssertionError(
+            "install() reached the acquisition lookup, so the org policy gate "
+            "did not run before it")
+
+    # and only the owner may change it
+    org.add_user(home, "owner@example.com", "admin@example.com", "admin")
+    try:
+        org.set_policy(home, "admin@example.com", "agents_may_install", True)
+        raise AssertionError("an admin changed owner-level policy")
+    except org.Denied:
+        pass
+    print(f"[org-policy] all {len(declared)} organization policy flags are "
+          f"declared with an enforcer, the named module really reads each "
+          f"one, flipping agents_may_install actually refuses an install, and "
+          f"only the owner can change it — all three were inert, unreachable "
+          f"and shown in the panel")
+
+
+def check_architecture_table_matches_code():
+    """ARCHITECTURE.md's control table is checked against execution.describe().
+
+    The table gave `capability_probe` an Approval tick. The code declares
+    approval=False. Nobody was lying — the row was written when the design
+    called for it — but a reader deciding whether this platform is safe reads
+    the table, not the catalogue, and the table said a control existed that
+    did not. This repository has now produced that same defect four times
+    (U24's approval flag, loop's stale protected-writes copy, harness's
+    ledger list vs fileauth's, and this), always the same shape: two
+    descriptions of one truth, and nothing comparing them.
+
+    So the doc is now a test fixture. Edit the table without editing the code
+    and this fails.
+    """
+    import execution
+    doc = os.path.join(AGENT_DIR, "ARCHITECTURE.md")
+    if not os.path.isfile(doc):
+        print("[arch-table] ARCHITECTURE.md absent — skipped")
+        return
+    with io.open(doc, encoding="utf-8") as f:
+        text = f.read()
+
+    def truth(cell):
+        c = cell.strip().lower()
+        if "✅" in c or c.startswith("yes") or c.startswith("on risk"):
+            return True
+        return False
+
+    rows = {}
+    for line in text.splitlines():
+        m = re.match(r"^\|\s*`([a-z_]+)`\s*\|(.+)\|\s*$", line.strip())
+        if not m:
+            continue
+        cells = [c.strip() for c in m.group(2).split("|")]
+        if len(cells) != 5:          # written by, shell, policy, sandbox, approval
+            continue
+        rows[m.group(1)] = {"shell": truth(cells[1]), "policy": truth(cells[2]),
+                            "sandbox": truth(cells[3]),
+                            "approval": truth(cells[4])}
+    ops = {o["op"]: o for o in execution.describe()}
+    documented = {k: v for k, v in rows.items() if k in ops}
+    assert len(documented) == len(ops), (
+        f"ARCHITECTURE.md documents {sorted(documented)} but the execution "
+        f"catalogue holds {sorted(ops)} — an operation with no row is an "
+        f"operation no reader knows exists")
+    for op, claimed in sorted(documented.items()):
+        for flag in ("shell", "policy", "sandbox", "approval"):
+            assert claimed[flag] == bool(ops[op][flag]), (
+                f"ARCHITECTURE.md says {op}.{flag}={claimed[flag]} and the "
+                f"code says {bool(ops[op][flag])}. A table promising a control "
+                f"the code does not have is worse than an admitted gap, "
+                f"because a reader trusts the table.")
+    print(f"[arch-table] all {len(documented)} rows of ARCHITECTURE.md's "
+          f"control table match execution.describe() flag for flag — the doc "
+          f"gave capability_probe an approval the code never implemented")
+
+
+def check_policy_fails_closed():
+    """A command policy that does not compile refuses, and says which rule.
+
+    The old behaviour was `except re.error: continue` — the unreadable rule
+    was skipped and its neighbours kept matching, so a deny list was
+    PARTIALLY enforced while reading as fully enforced. Nothing is more
+    dangerous than a safety control that looks present. The allowlist branch
+    of the same function had no guard at all and raised straight out, so the
+    two halves of check() disagreed about what a malformed pattern means.
+    """
+    import policy
+    assert policy.rule_problems({}) == [], (
+        f"the platform's own BUILTIN_DENY does not compile: "
+        f"{policy.rule_problems({})}")
+
+    valid = "curl .* evil"
+    for label, cfg in (
+            ("deny", {"command_policy": {"deny": [valid, "rm -rf ["]}}),
+            ("allow", {"command_policy": {"r": {"allow": ["ec[ho"]}}}),
+    ):
+        probs = policy.rule_problems(cfg)
+        assert probs, f"{label}: a malformed pattern was not reported"
+        verdict = policy.check("anything at all", role="r", cfg=cfg)
+        assert verdict and "does not compile" in verdict, (
+            f"{label}: a fleet whose policy cannot be read still ALLOWED a "
+            f"command — the rule meant to stop it was skipped in silence "
+            f"(got {verdict!r})")
+        # and it names the rule, so the owner can fix it without bisecting
+        assert "rm -rf [" in verdict or "ec[ho" in verdict, verdict
+
+    # a clean policy is untouched in BOTH directions — the guard must not
+    # become a blanket refusal, which would pass the assertions above while
+    # making the platform useless
+    clean = {"command_policy": {"deny": [valid]}}
+    assert policy.check("echo hello", cfg=clean) is None, (
+        "a valid policy refused an innocent command")
+    assert policy.check("curl x evil", cfg=clean), (
+        "a valid deny rule stopped firing")
+    print("[policy] an uncompilable deny OR allow pattern refuses every "
+          "command and names the rule, instead of being skipped in silence "
+          "while the rules around it keep working; a valid policy is "
+          "unaffected in both directions")
+
+
+def check_health_checks_can_fail():
+    """Every health check must be able to return NOT OK for some input.
+
+    harness's sandbox check passed cfg["agent"] to sandbox.available(), which
+    reads cfg["agent"]["sandbox"] itself — so it looked up agent.agent.sandbox,
+    found nothing, defaulted to "host", and returned OK for every fleet that
+    has ever run. It was structurally incapable of reporting a problem. The
+    generalisable defect is not the typo, it is that nothing ever asked the
+    check to fail.
+    """
+    import sandbox
+    ok, _why = sandbox.available({"agent": {"sandbox": "no-such-backend"}})
+    assert ok is False, (
+        "sandbox.available cannot report an unavailable sandbox — the "
+        "harness health check is decorative")
+    ok2, _ = sandbox.available({"agent": {"sandbox": "host"}})
+    assert ok2 is True, "the host backend must stay available"
+    print("[health] the sandbox health check can actually FAIL: a configured "
+          "backend that does not exist is reported, and `host` still passes "
+          "— it was reading agent.agent.sandbox and defaulting to OK forever")
+
+
 def main():
     sb = make_sandbox("invariants", providers={"m": {"script": "s.json"}},
                       roles={"practitioner": "m"},
@@ -793,6 +1027,10 @@ def main():
     check_documented_cli_exists()
     check_no_file_clock_comparisons()
     check_capability_report_matches_reality()
+    check_org_policy_is_enforced(sb)
+    check_architecture_table_matches_code()
+    check_policy_fails_closed()
+    check_health_checks_can_fail()
     print("PASS test_invariants")
 
 
