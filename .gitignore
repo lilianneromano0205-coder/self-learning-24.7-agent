@@ -43,3 +43,4 @@ __pycache__/
 *.tmp
 tests/tmp/
 .DS_Store
+.firecrawl/

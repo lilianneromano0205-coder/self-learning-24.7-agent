@@ -273,6 +273,7 @@ the panel teaches the terminal instead of hiding it.
 |---|---|
 | **[ARCHITECTURE.md](ARCHITECTURE.md)** | **the complete technical account — start here** |
 | [MANUAL.md](MANUAL.md) | the operator's guide: every command, every setting |
+| **[CLOUDFLARE.md](CLOUDFLARE.md)** | can this run on Cloudflare? what fits, what cannot, and what it costs |
 | [REFERENCE.md](REFERENCE.md) | every system end to end, and an honest list of limits |
 | [GAPS_RISKS_AND_UNFINISHED.md](GAPS_RISKS_AND_UNFINISHED.md) | the audit record — five passes, 21 numbered defects |
 | [REMEDIATION.md](REMEDIATION.md) | what was done about each, and the residual risk |

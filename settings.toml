@@ -92,6 +92,29 @@ api_key_env = "NVIDIA_API_KEY"
 base_url = "https://router.huggingface.co/v1"
 api_key_env = "HF_TOKEN"
 
+# Cloudflare Workers AI. Serverless inference on Cloudflare's own network,
+# with an OpenAI-compatible /v1/chat/completions endpoint — so it is an
+# ordinary provider here, not an integration. There is a standing free
+# allocation of 10,000 Neurons/day, which is roughly 450 agent steps a day
+# on llama-3.1-8b (measured against this platform's own 1083-token window;
+# see CLOUDFLARE.md for the arithmetic).
+#
+# ACCOUNT_ID is not a secret and goes in the URL; the token is a secret and
+# goes in agent.env as CLOUDFLARE_API_TOKEN. Create it at
+# dash.cloudflare.com -> AI -> Workers AI -> "Use REST API", which mints a
+# token scoped to Workers AI alone rather than to the whole account.
+# [providers.cloudflare]
+# base_url = "https://api.cloudflare.com/client/v4/accounts/ACCOUNT_ID/ai/v1"
+# api_key_env = "CLOUDFLARE_API_TOKEN"
+# model names are the @cf/... ids, e.g. "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+
+# The same call routed through AI Gateway instead — identical contract, plus
+# caching, rate limiting, retries, per-request cost analytics and a log of
+# every prompt. One URL change, no code change.
+# [providers.cloudflare_gateway]
+# base_url = "https://gateway.ai.cloudflare.com/v1/ACCOUNT_ID/GATEWAY/workers-ai/v1"
+# api_key_env = "CLOUDFLARE_API_TOKEN"
+
 [providers.openrouter]
 base_url = "https://openrouter.ai/api/v1"
 api_key_env = "OPENROUTER_API_KEY"
