@@ -115,6 +115,34 @@ def available(cfg):
             return False, f"docker is installed but not usable ({e})"
         if r.returncode != 0:
             return False, "the docker daemon is not running"
+        # A REACHABLE daemon is not a USABLE one. Docker Desktop on Windows
+        # runs in one of two modes, and in Windows-container mode the daemon
+        # answers `docker info` perfectly while rejecting every container this
+        # module launches: `--pids-limit` is a Linux cgroup control, so
+        # `docker run` dies with exit 125 and "Windows does not support
+        # PidsLimit" before any command runs.
+        #
+        # This function said "docker is ready (network off)" to that daemon.
+        # The same shape as the harness health check that could never fail:
+        # a readiness answer derived from something adjacent to the question
+        # instead of from the question. Caught on GitHub's windows runners,
+        # where acquisition refused every install and the test that expected
+        # one failed — the platform was right to refuse and wrong to have
+        # promised.
+        ostype = ""
+        try:
+            q = subprocess.run(["docker", "info", "--format", "{{.OSType}}"],
+                               capture_output=True, text=True, timeout=20)
+            ostype = (q.stdout or "").strip().lower()
+        except (OSError, subprocess.SubprocessError):
+            ostype = ""
+        if ostype and ostype != "linux":
+            return False, (
+                f"the docker daemon is in {ostype}-container mode; this "
+                f"platform's sandbox needs Linux containers (it sets "
+                f"--pids-limit, a Linux control, and runs {DOCKER_IMAGE}). "
+                f"Right-click Docker Desktop in the tray and choose "
+                f"'Switch to Linux containers…'")
         return True, f"docker is ready ({DOCKER_IMAGE}, network off)"
     key = {"e2b": "E2B_API_KEY", "daytona": "DAYTONA_API_KEY"}[b]
     if not os.environ.get(key):

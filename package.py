@@ -35,6 +35,19 @@ def should_skip(rel, full=None):
     parts = rel.split("/")
     if any(p in SKIP_DIRS for p in parts):
         return True
+    # ROTATED copies of a skipped directory are still that directory.
+    # `demo.py --force` renames demo-run/ to demo-run.prev-<timestamp>/ before
+    # rebuilding, and only the exact name "demo-run" was skipped — so running
+    # the demo twice and then packaging shipped a previous run's task queue,
+    # exam state and gap ledger. Found by doing exactly that: test_package
+    # caught `demo-run.prev-.../exam/gaps-state.json` in the archive.
+    #
+    # The same shape as U26's backups-inside-backups: a directory the platform
+    # creates for itself, under a name the exclusion list was never told
+    # about. Matched by PREFIX so the next rotation is covered without anyone
+    # remembering to add it.
+    if any(p.split(".prev-")[0] in SKIP_DIRS and ".prev-" in p for p in parts):
+        return True
     name = parts[-1]
     if name in SKIP_FILES or os.path.splitext(name)[1] in SKIP_EXT:
         return True

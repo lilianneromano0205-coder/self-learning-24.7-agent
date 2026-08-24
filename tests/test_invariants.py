@@ -754,6 +754,51 @@ def check_capability_report_matches_reality():
     import ingest
     import toolbox
 
+    # ---- the module-only door, CONSTRUCTED rather than hoped for ---------
+    # The loop below enumerates tools this machine happens to have, and its
+    # assertion — "resolves iff on PATH or importable" — is equally true of a
+    # PATH-only resolver whenever the tool IS on PATH. So on a runner where
+    # pip put yt-dlp on PATH, the mutation that replaces tool_argv with a
+    # bare shutil.which SURVIVED: mutate_check reported MISSED on
+    # ubuntu 3.12 while catching it on the five other runners. A test whose
+    # power depends on where pip happened to drop a script is not measuring
+    # the thing it names.
+    #
+    # This builds the case the gateway exists for: a module that IS
+    # importable and a binary that is certainly NOT on PATH. Now the
+    # module door is exercised on every machine, and the PATH-only mutation
+    # fails everywhere instead of wherever the environment allows.
+    probe_home = tempfile.mkdtemp(prefix="dualdoor-")
+    pkg = os.path.join(probe_home, "fleetdualprobe")
+    os.makedirs(pkg, exist_ok=True)
+    with io.open(os.path.join(pkg, "__init__.py"), "w", encoding="utf-8") as f:
+        f.write("__version__ = '1.0'\n")
+    with io.open(os.path.join(pkg, "__main__.py"), "w", encoding="utf-8") as f:
+        f.write("print('fleetdualprobe 1.0')\n")
+    sys.path.insert(0, probe_home)
+    try:
+        import importlib
+        importlib.invalidate_caches()
+        assert shutil.which("fleetdualprobe") is None, (
+            "the probe name exists on PATH; pick another")
+        # Ask TOOLBOX, not ingest. toolbox._ingest_tool is the function that
+        # decides what the capability REPORT says, and it is the one that
+        # regressed to a PATH-only lookup. Asserting on ingest.tool_argv here
+        # would prove the gateway is right while the report still lies —
+        # which is exactly the disagreement this invariant exists to forbid.
+        argv = toolbox._ingest_tool("fleetdualprobe", "fleetdualprobe")
+        assert argv == [sys.executable, "-m", "fleetdualprobe"], (
+            f"a tool installed ONLY as a module did not resolve through the "
+            f"module door: {argv!r}. shutil.which alone reports MISSING for a "
+            f"capability the machine demonstrably has.")
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=120,
+                           env={**os.environ, "PYTHONPATH": probe_home})
+        assert r.returncode == 0 and "fleetdualprobe" in r.stdout, (
+            f"the module door resolved but does not RUN: rc={r.returncode} "
+            f"out={r.stdout!r} err={r.stderr[:200]!r}")
+    finally:
+        sys.path.remove(probe_home)
+
     # every tool this platform can reach by either door
     DUAL = [("yt-dlp", "yt_dlp")]
     checked = []
@@ -1003,6 +1048,41 @@ def check_health_checks_can_fail():
         "harness health check is decorative")
     ok2, _ = sandbox.available({"agent": {"sandbox": "host"}})
     assert ok2 is True, "the host backend must stay available"
+
+    # A REACHABLE daemon is not a USABLE one. Docker Desktop in
+    # Windows-container mode answers `docker info` perfectly and rejects
+    # every container this platform launches, because --pids-limit is a Linux
+    # cgroup control: `docker run` exits 125 with "Windows does not support
+    # PidsLimit" before any command runs. available() reported "docker is
+    # ready (network off)" to that daemon, so acquisition promised a sandbox
+    # it did not have and CI failed on three of six runners. Simulated, since
+    # the daemon's mode is not ours to change inside a test.
+    import subprocess as _sp
+
+    class _R:
+        def __init__(self, rc=0, out=""):
+            self.returncode, self.stdout, self.stderr = rc, out, ""
+
+    real_run = _sp.run
+    for ostype, usable in (("windows", False), ("linux", True)):
+        def fake_run(cmd, *a, _t=ostype, **k):
+            if list(cmd[:2]) == ["docker", "info"]:
+                return _R(0, f"{_t}\n" if "--format" in cmd else "Server: x\n")
+            return real_run(cmd, *a, **k)
+        _sp.run = fake_run
+        try:
+            import shutil as _sh
+            if _sh.which("docker") is None:
+                break                       # nothing to simulate against
+            got, why = sandbox.available({"agent": {"sandbox": "docker"}})
+        finally:
+            _sp.run = real_run
+        assert got is usable, (
+            f"a {ostype}-container daemon reported available={got}; this "
+            f"platform can only use Linux containers, and saying otherwise "
+            f"promises a sandbox that fails at exit 125 ({why})")
+        if not usable:
+            assert "linux containers" in why.lower(), why
     print("[health] the sandbox health check can actually FAIL: a configured "
           "backend that does not exist is reported, and `host` still passes "
           "— it was reading agent.agent.sandbox and defaulting to OK forever")
