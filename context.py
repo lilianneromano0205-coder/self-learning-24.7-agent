@@ -365,6 +365,32 @@ def compile(agent, task):
         except Exception:
             pass
 
+    # --- experience: what a SIBLING already paid to learn
+    #
+    # commons.py has always shared the fleet's lessons and corroborated
+    # facts. Its cases and gotchas were per-expert and read by nobody else —
+    # `grep -rn "experts" cases.py gotchas.py` returned nothing — so a second
+    # expert doing similar work started blind to every wall the first one
+    # walked into, and walked into them again at full price. Failure is the
+    # expensive half of what a fleet knows; sharing only the conclusions and
+    # not the scars is the most costly way to run one.
+    #
+    # It rides in the `cases` budget deliberately: a sibling's case competes
+    # for room with this expert's OWN cases and loses ties to them, because
+    # the expert's own history is the better evidence about its own
+    # environment. Attribution is in the rendered text, never merged away.
+    if src["cases"].excluded is None and src["cases"].room() > 0:
+        try:
+            import experience as _experience
+            me = os.path.basename(os.path.abspath(root))
+            sib = _experience.matching(
+                os.path.dirname(os.path.dirname(os.path.abspath(root))),
+                goal, exclude=me)
+            if sib:
+                src["cases"].add_text("experience", _experience.render(sib))
+        except Exception:
+            pass
+
     # --- gotchas: failures this expert already paid for (M4)
     if src["gotchas"].excluded is None and _gotchas:
         try:
