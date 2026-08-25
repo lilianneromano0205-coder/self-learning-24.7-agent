@@ -133,9 +133,21 @@ def main():
           f"same task and drove it to done")
 
     # 5. a second signal does not wait
+    # A LONG step, so the process is certainly still inside one when the
+    # second signal lands. The first version used a 1s step and signalled
+    # 0.3s apart, and on a loaded CI runner the graceful shutdown simply
+    # FINISHED before the second signal arrived — the process exited 0,
+    # correctly, and the assertion failed anyway. A test that goes red when
+    # the system behaved properly is worse than no test: it trains everyone
+    # to ignore the colour.
+    #
+    # So the step is long enough to still be running, the second signal is
+    # sent only after the process is CONFIRMED alive, and if it has already
+    # exited cleanly that is reported as the correct outcome it is rather
+    # than failed.
     sb2 = make_sandbox("shutdown-twice",
                        providers={"m": {"script": "s.json",
-                                        "delay_seconds": 1.0}},
+                                        "delay_seconds": 4.0}},
                        roles={"practitioner": "m"},
                        scripts={"s.json": [
                            {"tool": "write_file",
@@ -144,22 +156,29 @@ def main():
     add_task(sb2, "practitioner", "write slowly")
     p2 = subprocess.Popen([PY, LOOP, "run", "--root", sb2],
                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    time.sleep(2.5)
+    time.sleep(6)                       # well inside a 4s step
     p2.send_signal(signal.SIGTERM)
-    time.sleep(0.3)
-    p2.send_signal(signal.SIGTERM)     # the operator is done waiting
-    try:
-        rc3 = p2.wait(timeout=20)
-    except subprocess.TimeoutExpired:
-        p2.kill()
-        raise AssertionError(
-            "a second SIGTERM was ignored — a graceful shutdown that cannot "
-            "itself be interrupted is a hang wearing a polite name")
-    assert rc3 != 0 or _events(sb2, "shutdown_forced"), (
-        f"the second signal was not honoured distinctly (rc={rc3})")
-    print("[forced] a second SIGTERM exits immediately instead of waiting out "
-          "the step — an operator who signals twice is telling you they are "
-          "done waiting")
+    time.sleep(0.4)
+    if p2.poll() is not None:
+        print(f"[forced] SKIPPED this half: the graceful stop completed "
+              f"before a second signal could be sent (exit {p2.returncode}). "
+              f"That is the correct behaviour, not a failure — there was "
+              f"simply nothing left to interrupt.")
+    else:
+        p2.send_signal(signal.SIGTERM)  # the operator is done waiting
+        try:
+            rc3 = p2.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            p2.kill()
+            raise AssertionError(
+                "a second SIGTERM was ignored — a graceful shutdown that "
+                "cannot itself be interrupted is a hang wearing a polite name")
+        assert rc3 != 0 or _events(sb2, "shutdown_forced"), (
+            f"the process was still running mid-step and a second SIGTERM "
+            f"neither forced an exit nor recorded shutdown_forced (rc={rc3})")
+        print("[forced] a second SIGTERM exits immediately instead of waiting "
+              "out the step — an operator who signals twice is telling you "
+              "they are done waiting")
     print("PASS test_shutdown")
 
 
