@@ -187,8 +187,150 @@ def check_the_retry_ladder(root):
         print(f"[retry] 429 then 503 then success in 3 calls with growing "
               f"backoff; a 400 stopped after exactly 1 call instead of "
               f"burning five")
+
+        # --- Retry-After: when the provider says HOW LONG, believe it
+        # The ladder slept `2 ** attempt * 2` regardless of what the response
+        # said. Both directions of ignoring that header are wrong. Sleeping 2s
+        # when the provider asked for 45 burns the remaining retries against a
+        # window that has not reopened, so the task fails for a reason that
+        # would have cleared by itself; sleeping 30s when it asked for 1 throws
+        # away 29 seconds on every rate limit, all day, on a fleet that runs
+        # all day.
+        #
+        # The fake provider could not emit the header at all until now, which
+        # is exactly why this went untested: a harness that cannot express what
+        # real providers send will certify a client that ignores them.
+        slept2 = []
+        real_sleep2 = time.sleep
+        time.sleep = lambda s: slept2.append(s)
+        try:
+            srv.requests.clear()
+            # the 400 case above queued six failures and one reply, and
+            # consumed a single failure — so both queues still hold its
+            # leftovers. A test that inherits another test's queue is its own
+            # flaky test.
+            srv.fail_next.clear()
+            srv.script.clear()
+            srv.fail(429, retry_after=45).reply(text="after the window")
+            msg2, _u2, _p2 = a.call_model("practitioner",
+                                          [{"role": "user", "content": "x"}])
+        finally:
+            time.sleep = real_sleep2
+        assert msg2["content"] == "after the window", msg2
+        assert slept2, "the ladder did not back off at all"
+        waited = slept2[0]
+        assert 45 <= waited <= 47, (
+            f"the provider asked for 45s and the ladder slept {waited:.1f}s. "
+            f"Anything far below it retries into a window that has not "
+            f"reopened; anything far above it wastes the difference on every "
+            f"rate limit.")
+        assert waited > 45, (
+            f"slept exactly {waited}s with no jitter — several experts rate "
+            f"limited by one provider at the same instant would all return in "
+            f"lockstep and rate-limit each other again")
+
+        # a SHORT Retry-After must not be rounded up to the blind backoff
+        slept3 = []
+        time.sleep = lambda s: slept3.append(s)
+        try:
+            srv.fail(503, retry_after=1).reply(text="quick")
+            a.call_model("practitioner", [{"role": "user", "content": "x"}])
+        finally:
+            time.sleep = real_sleep2
+        assert slept3 and slept3[0] < 3, (
+            f"the provider said 1s and the ladder slept {slept3[0]:.1f}s — the "
+            f"blind backoff would have been 2s or more, and on a fleet that "
+            f"rate-limits often that difference is the whole day")
+        log = io.open(os.path.join(root, "logs", "agent.log"),
+                      encoding="utf-8", errors="replace").read()
+        assert '"provider_retry_after"' in log, (
+            "honouring the header was not recorded, so nobody can tell "
+            "whether it happened")
+        print(f"[retry-after] a 429 asking for 45s slept {waited:.1f}s (the "
+              f"blind backoff would have been 2s and retried into a closed "
+              f"window), a 503 asking for 1s slept {slept3[0]:.1f}s instead "
+              f"of 2s or more, and both carry jitter so simultaneous experts "
+              f"do not return in lockstep")
     finally:
         srv.stop()
+
+
+def check_retry_after_is_parsed_not_guessed(root):
+    """The header itself, across every shape a real provider sends.
+
+    The end-to-end check above proves the ladder HONOURS Retry-After, but it
+    can only drive one header at a time through a live socket. The parser is
+    where the sharp edges are: two legal formats (delta-seconds and an
+    HTTP-date, RFC 9110 10.2.3), plus everything a provider sends that is
+    neither. Each of these has a specific wrong answer that is worse than
+    having no header at all, so each is pinned:
+
+      * a value we cannot read must return None -> BLIND BACKOFF, the old
+        behaviour. Reading "banana" as 0 would turn a rate limit into a hot
+        retry loop against a provider that just asked us to stop.
+      * "99999" must be CAPPED. A provider asking for a 27-hour wait is not
+        asking us to wait; the fallback provider exists for that.
+      * a negative or already-past value must clamp to 0, never a negative
+        sleep and never a rewind.
+      * nan and inf are floats and would pass a naive float() check straight
+        into time.sleep(), which is either an error or an eternity.
+    """
+    import email.utils
+    import datetime
+
+    class Resp:
+        """Just the attribute the real HTTPError carries."""
+        def __init__(self, v):
+            self.headers = {} if v is None else {"Retry-After": v}
+
+    now = 1_700_000_000.0
+    at = lambda off: email.utils.format_datetime(
+        datetime.datetime.fromtimestamp(now + off, datetime.timezone.utc))
+
+    CASES = [
+        # (header, expected seconds or None, why this one matters)
+        ("30",      30.0,  "the ordinary case: delta-seconds"),
+        ("1",        1.0,  "a short window must stay short, not round up"),
+        ("0",        0.0,  "retry immediately is a legal answer"),
+        ("99999",  120.0,  "capped — an hour is the fallback provider's job"),
+        ("30.5",    30.5,  "fractional: int() would have rejected it into "
+                           "blind backoff"),
+        ("1e2",    100.0,  "exponent notation is still a number"),
+        ("-5",       0.0,  "clamped; a negative sleep is an exception"),
+        ("nan",     None,  "a float that is not a duration"),
+        ("inf",     None,  "ditto, and time.sleep(inf) never returns"),
+        ("-inf",    None,  "ditto"),
+        ("banana",  None,  "unreadable -> blind backoff, never 0"),
+        ("",        None,  "empty is absent"),
+        (None,      None,  "absent is absent"),
+        (at(45),    45.0,  "the HTTP-date form, which many providers send"),
+        (at(-600),   0.0,  "a date already past means now, not a rewind"),
+    ]
+    bad = []
+    for raw, want, why in CASES:
+        got = loop.retry_after_seconds(Resp(raw), now=now)
+        ok = (got is None and want is None) or (
+            got is not None and want is not None and abs(got - want) < 0.01)
+        if not ok:
+            bad.append(f"{raw!r} ({why}): expected {want}, got {got}")
+    assert not bad, "Retry-After parsed wrong:\n  " + "\n  ".join(bad)
+
+    # and the cap is a constant a reader can find, not a magic number
+    assert loop.MAX_RETRY_AFTER == 120, loop.MAX_RETRY_AFTER
+    assert (loop.retry_after_seconds(Resp("100000"), now=now)
+            == loop.MAX_RETRY_AFTER)
+
+    # a header-less exception must not raise — the ladder calls this on EVERY
+    # retryable status, including the many that carry nothing
+    class Bare:
+        pass
+    assert loop.retry_after_seconds(Bare()) is None, (
+        "an exception with no headers attribute must read as 'no header', "
+        "not blow up inside the retry ladder")
+    print(f"[retry-after] the header parser pinned across {len(CASES)} shapes: "
+          f"both legal formats, the {loop.MAX_RETRY_AFTER}s cap, negatives and "
+          f"past dates clamped to 0, and every unreadable value falling back "
+          f"to blind backoff rather than to 0")
 
 
 def check_unreachable_fails_over_instantly(root):
@@ -454,6 +596,7 @@ def main():
     check_a_real_http_call_carries_everything(home)
     check_cost_comes_from_the_provider(home)
     check_the_retry_ladder(home)
+    check_retry_after_is_parsed_not_guessed(home)
     check_unreachable_fails_over_instantly(home)
     check_all_four_key_sources_reach_the_wire(home)
     check_a_malformed_response_is_not_a_crash(home)

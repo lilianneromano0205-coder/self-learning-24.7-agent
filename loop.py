@@ -21,8 +21,10 @@ import datetime
 import hashlib
 import json
 import logging
+import math
 import os
 import platform
+import random
 import re
 import subprocess
 import sys
@@ -213,6 +215,57 @@ def parse_content_tool_call(content):
             },
         }
     return None
+
+
+MAX_RETRY_AFTER = 120          # a provider asking for an hour is not a wait
+
+
+def retry_after_seconds(exc, now=None):
+    """What the provider ASKED us to wait, in seconds, or None.
+
+    A 429 or 503 usually carries Retry-After, and this ladder ignored it
+    entirely: it slept `2 ** attempt * 2` regardless. Both directions of that
+    are wrong. Sleeping 2s when the provider said 60 burns the remaining
+    retries against a window that has not reopened, and the task fails for a
+    reason that would have cleared by itself. Sleeping 30s when it said 1
+    throws away 29 seconds on every rate limit, all day.
+
+    The header is either delta-seconds or an HTTP-date (RFC 9110 10.2.3), so
+    both are read. Capped, because a provider asking us to come back in an
+    hour is not a wait — it is a different provider's turn, and the fallback
+    exists for that.
+    """
+    hdrs = getattr(exc, "headers", None)
+    raw = None
+    try:
+        if hdrs is not None:
+            raw = hdrs.get("Retry-After") or hdrs.get("retry-after")
+    except Exception:                        # pragma: no cover
+        raw = None
+    if not raw:
+        return None
+    raw = str(raw).strip()
+    try:
+        # RFC 9110 says delta-seconds is an integer, but providers send
+        # "30.5" and "1e2" too. float() takes both; nan/inf must not become
+        # a sleep duration, and int() would have silently rejected "30.5"
+        # into the blind-backoff fallback below.
+        secs = float(raw)
+        if math.isfinite(secs):
+            return max(0.0, min(secs, MAX_RETRY_AFTER))
+        return None
+    except ValueError:
+        pass
+    try:
+        import email.utils
+        when = email.utils.parsedate_to_datetime(raw)
+        if when is None:
+            return None
+        base = now if now is not None else time.time()
+        delta = when.timestamp() - base
+        return max(0.0, min(delta, MAX_RETRY_AFTER))
+    except Exception:
+        return None
 
 
 def permanent_net_error(exc):
@@ -980,7 +1033,28 @@ class Agent:
                 except urllib.error.HTTPError as e:
                     last_err = f"{prov_name} HTTP {e.code}"
                     if e.code in (429, 500, 502, 503, 504):
-                        time.sleep(min(2 ** attempt * 2, 30))
+                        # WHEN THE PROVIDER SAYS HOW LONG, BELIEVE IT.
+                        #
+                        # This slept `2 ** attempt * 2` regardless, and a 429
+                        # or 503 usually carries Retry-After telling you
+                        # exactly when the window reopens. Both directions of
+                        # ignoring it are wrong: sleeping 2s when the provider
+                        # said 60 burns the remaining retries against a window
+                        # that has not opened, so the task fails for a reason
+                        # that would have cleared by itself; sleeping 30s when
+                        # it said 1 throws away 29 seconds on every rate
+                        # limit, all day, on a fleet that runs all day.
+                        asked = retry_after_seconds(e)
+                        if asked is not None:
+                            self.log.info(json.dumps({
+                                "event": "provider_retry_after",
+                                "provider": prov_name, "status": e.code,
+                                "seconds": round(asked, 2)}))
+                        wait = asked if asked is not None else min(2 ** attempt * 2, 30)
+                        # Jitter, so several experts rate-limited by the same
+                        # provider at the same instant do not return in
+                        # lockstep and rate-limit each other again.
+                        time.sleep(wait + random.uniform(0, min(1.0, wait * 0.25)))
                         continue
                     break  # non-retryable on this provider
                 except (urllib.error.URLError, TimeoutError, OSError) as e:
@@ -996,7 +1070,11 @@ class Agent:
                             "event": "provider_unreachable",
                             "provider": prov_name, "error": str(e)[:200]}))
                         break
-                    time.sleep(min(2 ** attempt * 2, 30))
+                    # Jitter here too: a transport-level wobble that hits
+                    # several experts at once should not bring them all back
+                    # at the same instant.
+                    wait = min(2 ** attempt * 2, 30)
+                    time.sleep(wait + random.uniform(0, min(1.0, wait * 0.25)))
         raise RuntimeError(f"All providers failed. Last error: {last_err}")
 
     def _call_mock(self, prov, messages):

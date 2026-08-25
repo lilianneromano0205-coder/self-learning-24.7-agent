@@ -64,12 +64,18 @@ class FakeProvider:
             def log_message(self, *a):
                 pass
 
-            def _send(self, code, body, ctype="application/json"):
+            def _send(self, code, body, ctype="application/json",
+                      extra_headers=None):
                 raw = body if isinstance(body, bytes) else \
                     json.dumps(body).encode("utf-8")
                 self.send_response(code)
                 self.send_header("Content-Type", ctype)
                 self.send_header("Content-Length", str(len(raw)))
+                # A rate limiter's most useful output is Retry-After, and this
+                # harness could not emit one — so the client's handling of it
+                # was untestable, therefore untested, therefore absent.
+                for k, v in (extra_headers or {}).items():
+                    self.send_header(k, str(v))
                 self.end_headers()
                 self.wfile.write(raw)
 
@@ -92,7 +98,11 @@ class FakeProvider:
                 if outer.fail_next:
                     kind, *rest = outer.fail_next.pop(0)
                     if kind == "http":
-                        self._send(rest[0], {"error": {"message": "injected"}})
+                        hdrs = ({"Retry-After": rest[1]}
+                                if len(rest) > 1 and rest[1] is not None
+                                else None)
+                        self._send(rest[0], {"error": {"message": "injected"}},
+                                   extra_headers=hdrs)
                         return
                     if kind == "garbage":
                         self._send(200, b"not json at all", "text/plain")
@@ -133,9 +143,11 @@ class FakeProvider:
         self.default = self._body(text, tool, args, usage)
         return self
 
-    def fail(self, code=503, times=1):
+    def fail(self, code=503, times=1, retry_after=None):
+        """Queue an HTTP failure. `retry_after` sets the header a real rate
+        limiter sends, so the client's honouring of it can be driven."""
         for _ in range(times):
-            self.fail_next.append(("http", code))
+            self.fail_next.append(("http", code, retry_after))
         return self
 
     def misbehave(self, kind, *rest):
