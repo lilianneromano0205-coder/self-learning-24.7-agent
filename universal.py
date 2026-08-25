@@ -68,16 +68,98 @@ sys.path.insert(0, HOME)
 # What a goal's words imply it will need. Deterministic and inspectable on
 # purpose: a model asked "what tools do you need?" answers plausibly and
 # unfalsifiably, and this platform does not accept plausible.
+def _stems(*words):
+    r"""A pattern matching any of these words AND their ordinary inflections.
+
+    The previous version of this table was written as whole-word alternations
+    and it FAILED OPEN on ordinary English. Measured, 9 everyday phrasings:
+
+        MISSED     log into the supplier portal
+        MISSED     log in to the dashboard
+        MISSED     sign in to the console
+        AUTHORITY  login to the portal
+        MISSED     authenticate with the vendor
+        MISSED     use my credentials
+        AUTHORITY  sign up for an account
+        MISSED     check out the cart
+        AUTHORITY  send an email to the vendor
+
+    Six of nine missed, for three reasons that are all the same reason:
+      * `\blogin\b` matches "login" but not "log into" or "sign in"
+      * `\bauth\b` cannot match "authenticate" — \b needs a boundary after
+        "auth", and "authenticate" continues with a word character
+      * `\bcredential\b` cannot match "credentialS", for the same reason
+
+    That is the token-versus-substring mistake this codebase has now made
+    four times, INVERTED: too strict in the one place whose own comment says
+    it must be generous, because "a false 'go ahead' costs an account, a
+    charge, or a breach".
+
+    So the table is no longer hand-written regex. It is WORDS, and the
+    pattern is generated: each stem matches its own inflections (-s, -ed,
+    -ing, -ion...) and multi-word entries tolerate a space or a hyphen. A
+    corpus of phrasings is asserted in tests/test_universal.py, so this can
+    never quietly narrow again — the failure mode was silence, and only an
+    enumeration turns silence into a red test.
+    """
+    parts = []
+    for w in words:
+        toks = w.split()
+        # "log in" also appears as "login" and "log-in"; a stem may grow a
+        # suffix, so "authenticate" is reached from "auth" + \w*
+        parts.append(r"[\s\-]*".join(re.escape(t) for t in toks) + r"\w*")
+    return r"\b(?:" + "|".join(parts) + r")"
+
+
+# Every entry is a STEM, for the reason written at length on _stems below.
+# This table had the identical plural blindness the authority table had, and
+# it produced the same class of failure in the opposite direction — silent
+# UNDER-detection. Measured before the fix:
+#
+#     summarise these PDFs          -> []            (no capability at all)
+#     describe these screenshots    -> []
+#     download these videos         -> []
+#     convert these spreadsheets    -> []
+#     read the images               -> []
+#     summarise this PDF            -> ['pdf_text']  (singular worked)
+#
+# `\bpdf\b` cannot match "PDFs". So the most natural way anybody phrases a
+# batch job — the plural — asked for nothing, the readiness check found no
+# missing capability, and the goal was reported READY for work the fleet
+# could not do. A requirements detector that only understands the singular is
+# a false-READY generator, and READY is the one verdict this module exists to
+# make honest.
 CAPABILITY_HINTS = [
-    (r"\b(pdf|paper|whitepaper|datasheet|spec sheet)\b", "pdf_text"),
-    (r"\b(docx|word doc|powerpoint|pptx|xlsx|spreadsheet|epub|ebook)\b", "docs_convert"),
-    (r"\b(video|youtube|lecture|webinar|talk|screencast)\b", "video_download"),
-    (r"\b(podcast|audio|transcribe|transcript|recording|interview)\b", "transcribe"),
-    (r"\b(image|screenshot|diagram|chart|photo|figure|scan)\b", "vision"),
-    (r"\b(website|web page|scrape|crawl|online|internet|url|docs site)\b", "web_fetch"),
-    (r"\b(repo|repository|git|github|clone|commit|pull request)\b", "git"),
-    (r"\b(npm|node|javascript|typescript|react|frontend)\b", "node_js"),
-    (r"\b(container|docker|isolate|sandbox|untrusted)\b", "containers"),
+    (_stems("pdf", "paper", "whitepaper", "datasheet", "spec sheet"), "pdf_text"),
+    (_stems("docx", "word doc", "powerpoint", "pptx", "xlsx", "spreadsheet",
+            "epub", "ebook"), "docs_convert"),
+    (_stems("video", "youtube", "lecture", "webinar", "screencast"),
+     "video_download"),
+    (_stems("podcast", "audio", "transcribe", "transcript", "recording",
+            "interview"), "transcribe"),
+    (_stems("image", "screenshot", "diagram", "chart", "photo", "figure",
+            "scan"), "vision"),
+    (_stems("website", "web page", "webpage", "scrape", "crawl", "online",
+            "internet", "url", "docs site"), "web_fetch"),
+    # A REAL BROWSER, not a fetcher. `web_fetch` is stdlib urllib: it cannot
+    # log in, cannot run JavaScript, cannot click, cannot fill a form. Goals
+    # phrased "log into the portal and download each invoice" matched
+    # `website|online|url` above, were answered with web_fetch, and would
+    # have been reported READY for work that cannot begin. Anything naming an
+    # INTERACTION or an authenticated surface needs the browser capability,
+    # which mcp.py's catalog has always been able to provide via playwright.
+    (_stems("log in", "log into", "login", "sign in", "signed in", "logged in",
+            "click", "fill in", "fill out", "submit", "portal", "dashboard",
+            "web app", "webapp", "spa", "add to cart", "checkout",
+            "browse to", "navigate to", "session", "captcha", "dropdown",
+            "on the page", "in the browser"),
+     "browser_control"),
+    (_stems("repo", "repository", "git", "github", "clone", "commit",
+            "pull request"), "git"),
+    (_stems("npm", "node", "javascript", "typescript", "react", "frontend"),
+     "node_js"),
+    (_stems("container", "docker", "isolate", "sandbox", "untrusted"),
+     "containers"),
 ]
 
 # Words that mean the goal needs something only the owner can give. These are
@@ -85,15 +167,26 @@ CAPABILITY_HINTS = [
 # docstring. Matching is deliberately generous: a false "ask the owner" costs
 # a question, a false "go ahead" costs an account, a charge, or a breach.
 AUTHORITY_HINTS = [
-    (r"\b(sign ?up|register|create an? account|onboard)\b", "creating an account"),
-    (r"\b(pay|purchase|buy|subscribe|billing|invoice|checkout)\b", "spending money"),
-    (r"\b(api key|credential|token|password|secret|login|auth)\b",
+    (_stems("sign up", "signup", "register", "registration", "create account",
+            "create an account", "new account", "onboard", "enrol", "enroll"),
+     "creating an account"),
+    (_stems("pay", "payment", "purchase", "buy", "subscribe", "subscription",
+            "billing", "invoice", "checkout", "check out", "card", "refund",
+            "order"),
+     "spending money"),
+    (_stems("api key", "apikey", "credential", "token", "password", "passwd",
+            "secret", "login", "log in", "log into", "sign in", "signin",
+            "auth", "oauth", "sso", "2fa", "mfa", "session cookie",
+            "access key"),
      "a credential only you can issue"),
-    (r"\b(publish|deploy to production|go live|release to)\b",
+    (_stems("publish", "deploy to production", "go live", "release to",
+            "ship to production", "push to production"),
      "publishing something to the world"),
-    (r"\b(email|e-mail|send.*(message|mail)|contact|outreach)\b",
+    (_stems("email", "e mail", "mailbox", "inbox", "reply to", "outreach",
+            "contact", "dm", "message them", "send a message", "notify"),
      "sending something on your behalf"),
-    (r"\b(delete|remove|drop|wipe|purge)\b.*\b(production|database|account|bucket)\b",
+    (r"\b(?:delete|remove|drop|wipe|purge|destroy|terminate)\w*\b.*"
+     r"\b(?:production|database|account|bucket|repo|repository|volume|cluster)\w*",
      "destroying something that cannot be restored"),
 ]
 
@@ -130,6 +223,31 @@ def authority_gaps(goal, criteria=""):
     return out
 
 
+def _scope_of(goal):
+    """The concrete TARGET a goal acts on, for matching against a grant.
+
+    A grant is only a decision if it names something: "may spend money" is a
+    surrender, "may spend up to $200 at acme.com" is a permission somebody
+    can actually reason about. So the scope is taken from the goal's own
+    words — a hostname if it has one, otherwise the most specific noun
+    phrase available — and an owner grants against exactly that string.
+
+    Deliberately narrow and deliberately literal. If this guessed broadly, a
+    grant for one vendor would silently cover another, which is the failure
+    mode that makes standing permissions dangerous in the first place.
+    """
+    text = str(goal or "")
+    m = re.search(r"\b((?:[a-z0-9-]+\.)+[a-z]{2,})\b", text.lower())
+    if m:
+        return m.group(1)
+    m = re.search(r"\b(?:the|our|my)\s+([a-z0-9][a-z0-9 -]{2,30}?)\s+"
+                  r"(?:portal|account|dashboard|vendor|supplier|site|service|"
+                  r"console|inbox|mailbox)\b", text.lower())
+    if m:
+        return re.sub(r"\s+", "-", m.group(1).strip())
+    return "unscoped"
+
+
 def assess(home, expert, goal, criteria=""):
     """What stands between this expert and this goal, by gap dimension.
 
@@ -141,6 +259,7 @@ def assess(home, expert, goal, criteria=""):
     caps = toolbox.scan(root)["capabilities"]
 
     gaps = []
+    granted = []                 # authority the owner has already answered
     for cap, why in required_capabilities(goal, criteria):
         row = caps.get(cap)
         if row is None:
@@ -150,9 +269,33 @@ def assess(home, expert, goal, criteria=""):
                          "detail": row["how"],
                          "routes_to": mission.GAPS["capability"]["routes_to"],
                          "user_sees": mission.GAPS["capability"]["user_sees"]})
+    # An authority gap the OWNER HAS ALREADY ANSWERED is not a gap.
+    #
+    # The rule that authority is never self-resolved is right, and it stopped
+    # every single time — so a fleet meant to run all night parked on a human
+    # at the first invoice, and an owner asked the same question forty times
+    # stops reading the questions. grants.py adds the middle that authority
+    # actually has between people: a scoped, expiring, revocable, logged
+    # permission the owner gives ONCE. Nothing self-grants — grants.grant()
+    # requires owner authority and refuses even an admin — and the moment a
+    # grant expires or is revoked this reverts to asking, with no code change.
+    _grants = None
+    try:
+        import grants as _grants
+    except Exception:                        # pragma: no cover — optional
+        _grants = None
     for what, why in authority_gaps(goal, criteria):
+        covered, note = (False, "")
+        if _grants is not None:
+            kind = next((k for k, v in _grants.KINDS.items() if v == what), None)
+            if kind:
+                covered, note = _grants.check(home, kind, _scope_of(goal))
+        if covered:
+            granted.append({"what": what, "why": why, "grant": note})
+            continue
         gaps.append({"dimension": "authority", "what": what, "why": why,
-                     "detail": "only the owner can grant this",
+                     "detail": ("only the owner can grant this"
+                                + (f" — {note}" if note else "")),
                      "routes_to": mission.GAPS["authority"]["routes_to"],
                      "user_sees": mission.GAPS["authority"]["user_sees"]})
 
@@ -164,7 +307,7 @@ def assess(home, expert, goal, criteria=""):
                      "routes_to": mission.GAPS["knowledge"]["routes_to"],
                      "user_sees": mission.GAPS["knowledge"]["user_sees"]})
     return {"expert": expert, "goal": goal, "criteria": criteria,
-            "gaps": gaps, "knowledge": known,
+            "gaps": gaps, "knowledge": known, "granted": granted,
             "capabilities_required": [c for c, _ in
                                       required_capabilities(goal, criteria)]}
 

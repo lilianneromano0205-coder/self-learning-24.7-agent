@@ -911,7 +911,7 @@ class Agent:
                 # scripted calls are spend too: the suite proves the breaker
                 # by charging mock tokens, and a ledger that skipped them
                 # would make the daily brake untestable
-                cost = self._cost(role, self._mock_usage)
+                cost = self._cost(prov_name, self._mock_usage, role)
                 self._record_spend(cost)
                 self._meter(purpose, role, prov_name, model,
                             self._mock_usage, cost, task_id, t0)
@@ -966,7 +966,7 @@ class Agent:
                         time.sleep(min(2 ** attempt * 2, 30))
                         continue
                     usage = resp.get("usage", {})
-                    _cost = self._cost(role, usage)
+                    _cost = self._cost(prov_name, usage, role)
                     self._meter(purpose, role, prov_name, model, usage,
                                 _cost, task_id, _t0)
                     # EVERY model call is spend, wherever it was made from.
@@ -1039,12 +1039,145 @@ class Agent:
             }] if "tool" in step else None,
         }
 
-    def _cost(self, role, usage):
-        prov = self.provider_cfg(self.role_cfg(role)["provider"])
-        pin = prov.get("input_per_mtok", 0.0)
-        pout = prov.get("output_per_mtok", 0.0)
-        return (usage.get("prompt_tokens", 0) * pin
-                + usage.get("completion_tokens", 0) * pout) / 1_000_000
+    def _stash_attempt(self, task):
+        """Score and keep this attempt so a later one can be compared to it.
+
+        Never raises: test-time compute is an improvement on the outcome, and
+        an improvement that can take the task down with it is not one.
+        """
+        try:
+            import candidates
+        except Exception:                          # pragma: no cover
+            return
+        try:
+            task["candidate_rounds"] = int(task.get("candidate_rounds", 0)) + 1
+            if candidates.attempts_for(task, self.cfg) <= 1:
+                return                             # the owner turned it off
+            paths = candidates.written_paths(task)
+            if not paths:
+                return                             # nothing produced to compare
+            verdict = candidates.score(self, task, paths)
+            candidates.stash(self.root, task["id"], task["candidate_rounds"],
+                             paths, verdict)
+            self.log.info(json.dumps({
+                "event": "candidate_stashed", "task": task["id"],
+                "attempt": task["candidate_rounds"], "files": len(paths),
+                "passed": bool(verdict.get("passed")),
+                "score": round(float(verdict.get("score") or 0), 4)}))
+        except Exception as e:                     # pragma: no cover
+            self.log.info(json.dumps({"event": "candidate_stash_failed",
+                                      "task": task["id"], "error": str(e)[:160]}))
+
+    def _promote_best_attempt(self, task):
+        """Put the BEST attempt back on disk, not the last one.
+
+        Gate first, then composite score — a refused attempt can never beat a
+        passing one. If the last attempt was already the best, nothing moves.
+        """
+        try:
+            import candidates
+        except Exception:                          # pragma: no cover
+            return
+        try:
+            hist = candidates.history(self.root, task["id"])
+            if len(hist) < 2:
+                return
+            best = candidates.rank(hist)[0]
+            n = best.get("attempt") or best.get("n")
+            if n is None or int(n) == int(task.get("candidate_rounds", 0)):
+                return                             # the last one already won
+
+            # PROMOTE ONLY ON EVIDENCE. Measured on a task with no spec and
+            # no citation requirement, score() returned 0.0 for all six
+            # attempts — it had nothing to measure — so rank() degenerated to
+            # a stable sort and "the winner" was simply whichever attempt
+            # came first. Swapping the last attempt for an arbitrary earlier
+            # one is not test-time compute, it is churn, and it can replace a
+            # better answer with a worse one.
+            #
+            # So the winner has to actually WIN: strictly better on the gate,
+            # or equal on the gate and strictly better on the score. A tie
+            # leaves the last attempt exactly where it is. This is the same
+            # rule the platform applies to promoting a prompt variant — it
+            # must beat the incumbent, not merely differ from it.
+            last = next((h for h in hist
+                         if int(h.get("attempt") or -1)
+                         == int(task.get("candidate_rounds", 0))), None)
+            if last is not None:
+                better = ((bool(best.get("passed")), float(best.get("score") or 0))
+                          > (bool(last.get("passed")), float(last.get("score") or 0)))
+                if not better:
+                    self.log.info(json.dumps({
+                        "event": "candidate_tie", "task": task["id"],
+                        "of": len(hist),
+                        "why": "no attempt scored better than the last one, so "
+                               "nothing was swapped — the verifier did not "
+                               "discriminate on this task"}))
+                    return
+            candidates.promote(self.root, task["id"], n)
+            self.log.info(json.dumps({
+                "event": "candidate_promoted", "task": task["id"],
+                "attempt": n, "of": len(hist),
+                "score": round(float(best.get("score") or 0), 4),
+                "why": "best-of-N: the last attempt was not the best one"}))
+        except Exception as e:                     # pragma: no cover
+            self.log.info(json.dumps({"event": "candidate_promote_failed",
+                                      "task": task["id"], "error": str(e)[:160]}))
+
+    def _cost(self, provider_name, usage, role=None):
+        """What this call cost, priced on the provider that ACTUALLY served.
+
+        Two defects lived in six lines, and together they switched off every
+        spend control in the platform.
+
+        WRONG PROVIDER. This took a `role` and resolved the price through
+        `role_cfg(role)["provider"]` — the role's STATIC configuration — while
+        being called from inside `for prov_name, model in attempts:`, the
+        failover ladder, where up to four different providers are tried. A
+        task that failed over from a cheap provider to an expensive one was
+        billed at the cheap one's rate, and vice versa. The ledger recorded
+        the right provider name and the wrong number.
+
+        SILENT ZERO. `prov.get("input_per_mtok", 0.0)` returns 0.0 for a
+        provider that never declared a price — and settings.toml declares
+        prices for deepseek and groq only. openrouter, nvidia and
+        huggingface declare none, and openrouter is the lane the file's own
+        RECOMMENDED and FREE sections point every role at. So cost was 0.0,
+        `_record_spend` returned immediately on `usd <= 0`, and
+        `daily_budget_usd`, `max_task_usd` and the organisation's
+        `require_approval_over_usd` ceiling never accumulated a cent. The
+        brake that makes unattended running safe was disengaged in exactly
+        the configuration the documentation recommends, and nothing said so
+        because a $0 ledger looks like a frugal agent.
+
+        A genuinely free tier really does cost 0, so an unknown price cannot
+        simply be an error — it has to be DISTINGUISHED from free. A provider
+        that is free says `free = true`; one that says nothing is unpriced,
+        and that is reported once per provider so the silence becomes a
+        sentence somebody can read.
+        """
+        prov = self.provider_cfg(provider_name) if provider_name else {}
+        if not prov and role:                    # defensive: keep old callers working
+            prov = self.provider_cfg(self.role_cfg(role)["provider"])
+        pin = prov.get("input_per_mtok")
+        pout = prov.get("output_per_mtok")
+        if pin is None and pout is None and not prov.get("free"):
+            seen = getattr(self, "_unpriced_seen", None)
+            if seen is None:
+                seen = self._unpriced_seen = set()
+            key = str(provider_name or "?")
+            if key not in seen:
+                seen.add(key)
+                self.log.error(json.dumps({
+                    "event": "price_unknown", "provider": key,
+                    "why": "no input_per_mtok/output_per_mtok and not marked "
+                           "free — spend cannot be measured, so the daily "
+                           "budget breaker cannot protect this fleet",
+                    "fix": f"add input_per_mtok/output_per_mtok under "
+                           f"[providers.{key}] in settings.toml, or free = "
+                           f"true if it genuinely costs nothing"}))
+        return (usage.get("prompt_tokens", 0) * float(pin or 0.0)
+                + usage.get("completion_tokens", 0) * float(pout or 0.0)) / 1_000_000
 
     # ------------------------------------------------------------- tools
 
@@ -1372,7 +1505,8 @@ class Agent:
 
         task["tokens_in"] += usage.get("prompt_tokens", 0)
         task["tokens_out"] += usage.get("completion_tokens", 0)
-        step_cost = self._cost(task["role"], usage)
+        # the provider that actually served this step, not the role default
+        step_cost = self._cost(task.get("provider"), usage, task["role"])
         task["cost_usd"] = round(task["cost_usd"] + step_cost, 6)
         # (the daily ledger was already credited inside call_model, which is
         # the only place that knows about EVERY call, not just this one)
@@ -1465,11 +1599,38 @@ class Agent:
                     if task.get("done_check") else "")
             else:
                 task["done_rejects"] = task.get("done_rejects", 0) + 1
+                # TEST-TIME COMPUTE, finally connected to the loop.
+                #
+                # candidates.py is a complete best-of-N engine — snapshot,
+                # stash, score, rank, promote, attempts_for — with its own
+                # passing test file, and NOTHING outside tests/ ever called
+                # it. `task["candidate_rounds"]`, the counter attempts_for
+                # reads to decide how many attempts a task has earned, was
+                # read in candidates.py and written nowhere, so it was always
+                # 0 and the answer was always 1. settings.toml advertises
+                # `candidates_max = 5` and `candidates_on_gate_failure =
+                # true` as if they were live; loop.py mentioned neither.
+                #
+                # So the platform's single largest "a cheap model performs
+                # above its weight" lever was built, tested, documented in
+                # the settings file, and switched off. This is the call site
+                # it was missing.
+                #
+                # What it does here is deliberately the modest half. Each
+                # refused attempt is SCORED by the same verifiers the panel
+                # uses and STASHED; when the attempts run out, the best one
+                # is put back instead of whatever the last attempt happened
+                # to leave on disk. Without this, an agent that tried six
+                # times and got it nearly right on the third shipped the
+                # sixth. Ranking is gate-first, so a failing attempt can
+                # never beat a passing one.
+                self._stash_attempt(task)
                 if task["done_rejects"] >= self.max_done_rejects:
                     task["status"] = "failed"
                     task["error"] = (f"done_check never passed after "
                                      f"{task['done_rejects']} attempts: {evidence}")
                     result = f"TASK FAILED: {task['error']}"
+                    self._promote_best_attempt(task)
                 else:
                     result = (
                         "finish_task REFUSED — your definition of done is not met.\n"

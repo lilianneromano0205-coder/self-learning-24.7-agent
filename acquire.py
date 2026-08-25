@@ -248,6 +248,19 @@ def inspect(name, source, version="", manifest_text="", requires_secrets=None):
 def request(root, name, source, need, version="", manifest_text="",
             requires_secrets=None, requested_by="practitioner"):
     """Steps 1–4: record the gap, check what we already have, inspect."""
+    # The source has to be one this module can actually ACQUIRE. It used to be
+    # a free-text field: `request(root, "express", "npm", ...)` was accepted,
+    # and install() — which never reads rec["source"] at all — ran
+    # `pip install express`, fetching an unrelated PyPI distribution that
+    # happens to share the name. That is dependency confusion manufactured by
+    # the platform itself, out of a branch nobody wrote.
+    src = str(source or "").strip().lower()
+    if src not in SOURCES:
+        raise Refused(
+            f"{source!r} is not a source this platform can acquire from. "
+            f"Known: {', '.join(sorted(SOURCES))}. Guessing would mean "
+            f"resolving the name somewhere it does not live.")
+    source = src
     known = search_known(root, need)
     if known:
         raise Refused(
@@ -387,11 +400,52 @@ def install(root, home, acq_id, worker_id=None, task_text=""):
                 f"local_path {spec!r} is outside the expert root, so it is "
                 f"not visible inside the sandbox. Copy it under the expert "
                 f"first.")
-    argv = ["python", "-m", "pip", "install", "--no-input",
-            "--disable-pip-version-check", "--no-warn-script-location",
-            "--target", rel_target, rel_spec]
-    if rec.get("index_url"):
-        argv += ["--index-url", str(rec["index_url"])]
+    # THE SOURCE DECIDES THE INSTALLER. This function used to run pip
+    # unconditionally, and never read rec["source"] at all — proven with an
+    # AST walk: 5 sources declared in SOURCES, `install() reads rec['source']:
+    # NEVER`. So an npm or apt or mcp acquisition ran `pip install <name>`
+    # against PyPI, which for a name like `express` silently fetches an
+    # unrelated distribution. Four of the five declared sources were not
+    # implemented and none of them said so.
+    #
+    # Two are implemented here. The other two are REFUSED BY NAME, because a
+    # refusal that tells you where to go is worth more than a branch that
+    # pretends: `mcp` is a trust decision the owner makes in mcp.json (and
+    # mcp.py already has the catalog and the `enable` command for it), and
+    # `apt` needs root inside the container, which this sandbox deliberately
+    # does not grant.
+    src = str(rec.get("source") or "pypi").lower()
+    if src == "pypi":
+        argv = ["python", "-m", "pip", "install", "--no-input",
+                "--disable-pip-version-check", "--no-warn-script-location",
+                "--target", rel_target, rel_spec]
+        if rec.get("index_url"):
+            argv += ["--index-url", str(rec["index_url"])]
+    elif src == "npm":
+        # --prefix keeps node_modules inside the expert, the same isolation
+        # --target gives pip, and the same reason: visible to the File
+        # Authority, carried by backup.py, destroyed with the expert.
+        argv = ["npm", "install", "--prefix", rel_target, "--no-fund",
+                "--no-audit", rel_spec]
+    elif src == "mcp":
+        raise Refused(
+            f"an MCP server is a TRUST DECISION, not an install: it runs a "
+            f"command on this machine with the fleet's own permissions, so "
+            f"the owner registers it rather than the agent acquiring it. "
+            f"Run `python mcp.py catalog` to see the vetted list and "
+            f"`python mcp.py enable {rec['name']}` to turn one on — that is "
+            f"the supported route to a browser, a database or GitHub.")
+    elif src == "skill":
+        raise Refused(
+            "a skill is not installed, it is IMPORTED and then earned: put "
+            "the folder under skills/ and let it be promoted through the "
+            "trust graph by working, which is what skills.py exists for.")
+    else:                                    # apt, and anything added later
+        raise Refused(
+            f"acquiring from {src!r} is declared in SOURCES but not "
+            f"implemented, and this refuses rather than falling back to pip "
+            f"— pip would resolve {rec['name']!r} against PyPI, which is a "
+            f"different registry and quite possibly a different package.")
 
     # WHERE pip RUNS, not just where its files land.
     #

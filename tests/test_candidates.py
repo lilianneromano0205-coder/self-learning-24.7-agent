@@ -20,6 +20,7 @@ opinion: candidates are scored by the verifiers that already gate the work.
 Run from the agent/ directory:  python tests/test_candidates.py
 """
 
+import io
 import json
 import os
 import sys
@@ -172,6 +173,74 @@ def main():
     text = candidates.explain([dict(loser, attempt=1), dict(winner, attempt=2)])
     assert "winner: attempt 2" in text and "failed its gate" in text
     print("[explain] the winner is reported with the reason every loser lost")
+
+    # --- 9. AND THE LOOP ACTUALLY CALLS IT.
+    #
+    # Everything above passed for as long as this module has existed while
+    # the engine was reachable from nothing. `grep -rn "import candidates"`
+    # returned confidence.py (which uses it only for written_paths) and this
+    # file. `task["candidate_rounds"]` — the counter attempts_for reads to
+    # decide how many attempts a task has earned — was READ here and WRITTEN
+    # nowhere, so it was always 0 and the answer was always 1. settings.toml
+    # advertised candidates_max and candidates_on_gate_failure as live
+    # settings that loop.py never mentioned.
+    #
+    # A unit-tested engine with no call site is not a feature, and no unit
+    # test can notice that. So this drives the real loop.
+    import json as _json
+    from common import run_drain
+    script = []
+    for body in ("short.", "a much longer and more careful answer.", "x"):
+        script += [{"tool": "write_file",
+                    "args": {"path": "out/answer.md", "content": body}},
+                   {"tool": "finish_task", "args": {"summary": "done"}}]
+    sb2 = make_sandbox("candidates-wired",
+                       providers={"m": {"script": "s.json"}},
+                       roles={"practitioner": "m"}, scripts={"s.json": script})
+    ag = loop.Agent(sb2)
+    tid = ag.add_task("practitioner", "write the answer",
+                      done_check='python -c "import sys; sys.exit(1)"')
+    run_drain(sb2, timeout=240)
+    events = []
+    with io.open(os.path.join(sb2, "logs", "agent.log"),
+                 encoding="utf-8", errors="replace") as f:
+        for line in f:
+            if '"candidate_' in line:
+                try:
+                    events.append(_json.loads(line.split(" ", 2)[-1]))
+                except ValueError:
+                    pass
+    kinds = [e["event"] for e in events]
+    assert "candidate_stashed" in kinds, (
+        "the loop never stashed an attempt — best-of-N is still dead code, "
+        "which every test above would happily keep reporting as green")
+    assert len(candidates.history(sb2, tid)) >= 2, (
+        "fewer than two attempts were kept, so nothing could be compared")
+
+    # AND it must not churn. Measured on ordinary tasks, score() returns 0.0
+    # for every attempt — there is no spec and no interface to measure, so
+    # the composite has nothing to discriminate on. Ranking a set of ties is
+    # a stable sort, so "the winner" would be whichever attempt happened to
+    # be first, and swapping the last attempt for an arbitrary earlier one
+    # can replace a better answer with a worse one. A tie must leave the
+    # last attempt exactly where it is.
+    scores = {float(h.get("score") or 0) for h in candidates.history(sb2, tid)}
+    if len(scores) == 1:
+        assert "candidate_promoted" not in kinds, (
+            "every attempt scored the same and one was promoted anyway — "
+            "that is not test-time compute, it is churn")
+        assert "candidate_tie" in kinds, (
+            "a tie was neither promoted nor reported; silence is how this "
+            "stops being auditable")
+        final = io.open(os.path.join(sb2, "out", "answer.md"),
+                        encoding="utf-8").read()
+        assert final == "x", (
+            f"the last attempt was replaced on a tie: {final!r}")
+    print(f"[wired] the loop stashes every refused attempt "
+          f"({kinds.count('candidate_stashed')} of them here) and promotes "
+          f"one only when it strictly beats the last — on a task where the "
+          f"verifier cannot discriminate it reports a tie and changes "
+          f"nothing, which is the honest answer rather than a shuffle")
     print("PASS test_candidates")
 
 

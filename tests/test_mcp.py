@@ -130,6 +130,46 @@ def main():
               "secret material")
     finally:
         srv.shutdown()
+    # ---- WHERE a tool is pointed, not just WHICH tool it is --------------
+    # guarded_call screened the tool NAME, the effects ledger and the risk
+    # class, and never looked inside `arguments`. ingest.py's _check_scheme
+    # and _check_host exist because a `file:///…/agent.env` URL once carried
+    # a provider key into course material, and because a public URL that
+    # redirects to 169.254.169.254 reaches cloud metadata — and the MCP rail
+    # went round both. That was survivable while nothing could drive a
+    # browser; the catalog ships a playwright server and browser_control is
+    # now a promoted capability, so browser_navigate to a file:// path was a
+    # live route to an incident this repository has already had once.
+    REFUSE = [
+        ({"url": "file:///C:/secrets/agent.env"}, "a file:// URL"),
+        ({"url": "http://169.254.169.254/latest/meta-data/"}, "cloud metadata"),
+        ({"url": "http://127.0.0.1:9/x"}, "loopback"),
+        ({"url": "http://10.0.0.5/internal"}, "a private address"),
+        ({"options": {"url": "file:///etc/passwd"}}, "a NESTED file:// URL"),
+        ({"href": "file:///etc/hosts"}, "an href rather than a url key"),
+    ]
+    for args, what in REFUSE:
+        bad = mcp._bad_url_argument(args, ".")
+        assert bad, (
+            f"{what} was not refused: {args}. An MCP server is not a way "
+            f"around the checks the ingestion path applies.")
+        assert "REFUSED" in bad, bad
+    ALLOW = [
+        {"url": "https://www.rfc-editor.org/rfc/rfc9111"},
+        {"path": "notes/report.md"},
+        {"query": "select 1 from t"},
+        {"content": "a paragraph that merely mentions http and files"},
+    ]
+    for args in ALLOW:
+        assert not mcp._bad_url_argument(args, "."), (
+            f"ordinary arguments were refused: {args} — a guard that blocks "
+            f"real work gets switched off, and then it guards nothing")
+    print(f"[url-args] {len(REFUSE)} tool arguments pointing at file://, "
+          f"loopback, private and link-local addresses are refused BEFORE "
+          f"the server is called — including nested ones, which is how a "
+          f"browser server passes its options — and {len(ALLOW)} ordinary "
+          f"argument shapes still pass")
+
     print("PASS test_mcp")
 
 

@@ -305,6 +305,38 @@ def check_test_is_mandatory(sb):
     assert proc2.returncode == 2 and "evidence" in (proc2.stdout + proc2.stderr), (
         "an owner-asserted pass with no evidence must be refused: "
         f"rc={proc2.returncode} out={proc2.stdout!r}")
+    # ---- the SOURCE decides the installer, and unknown sources are refused
+    # install() never read rec["source"] — AST-proven: 5 sources declared in
+    # SOURCES, "install() reads rec['source']: NEVER", and the only installer
+    # mentioned was pip. So requesting the npm package `express` ran
+    # `pip install express`, which resolves against PyPI and fetches an
+    # unrelated distribution that happens to share the name. Dependency
+    # confusion, manufactured by a branch nobody wrote. request() did not
+    # validate the source either, so any string at all was accepted.
+    try:
+        acquire.request(sb, "some-crate", "cargo", "a rust crate", version="1.0")
+        raise AssertionError("an unknown source was accepted; it would have "
+                             "been resolved against PyPI")
+    except acquire.Refused as e:
+        assert "cargo" in str(e) and "pypi" in str(e), str(e)
+    for src, marker in (("mcp", "TRUST DECISION"), ("skill", "IMPORTED"),
+                        ("apt", "not implemented")):
+        r = acquire.request(sb, f"probe-{src}", src, f"a {src} need",
+                            version="1.0")
+        try:
+            acquire.install(sb, sb, r["id"])
+            raise AssertionError(
+                f"source {src!r} was installed anyway — if that ran pip, it "
+                f"resolved the name against the wrong registry")
+        except acquire.Refused as e:
+            assert marker in str(e), (
+                f"{src} refused for the wrong reason: {str(e)[:120]}")
+        acquire.remove(sb, r["id"], why="probe")
+    print("[sources] the source now chooses the installer: an unknown source "
+          "is refused at request(), and mcp/skill/apt each refuse BY NAME "
+          "with the route to take instead of silently running pip against "
+          "PyPI — which for a name like 'express' is a different package")
+
     print("[cli-test] `acquire.py test` RUNS the probe by default and failed "
           "an acquisition with nothing installed; recording a pass on the "
           "owner's word now requires --owner-asserts-pass AND evidence — the "

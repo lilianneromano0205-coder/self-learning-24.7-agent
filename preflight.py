@@ -387,6 +387,57 @@ def check_governance(home):
     return out
 
 
+def check_pricing(home):
+    """A provider with no declared price disables every spend control.
+
+    `_cost` multiplies tokens by the provider's input/output rate. A provider
+    that declares neither returns 0.0, `_record_spend` returns early on
+    `usd <= 0`, and daily_budget_usd, max_task_usd and the organisation's
+    require_approval_over_usd ceiling all stop accumulating — the brakes are
+    off, and a $0 ledger looks exactly like a frugal agent.
+
+    settings.toml ships prices for deepseek and groq only, while its own
+    RECOMMENDED lane points at openrouter. So the shipped configuration is
+    the unmeasurable one. A genuinely free tier is fine and says `free =
+    true`; silence is not the same claim.
+    """
+    out = []
+    for root, label in ([(home, "fleet")] +
+                        [(os.path.join(home, "experts", s), s)
+                         for s in _experts(home)]):
+        try:
+            import tomllib
+            with open(os.path.join(root, "settings.toml"), "rb") as f:
+                cfg = tomllib.loads(f.read().decode("utf-8-sig"))
+        except (OSError, ValueError, ImportError):
+            continue
+        provs = cfg.get("providers") or {}
+        used = {r.get("provider") for r in (cfg.get("roles") or {}).values()}
+        used |= {r.get("fallback_provider") for r in (cfg.get("roles") or {}).values()}
+        unpriced = sorted(
+            n for n, p in provs.items()
+            if n in used and p.get("type") != "mock" and not p.get("free")
+            and p.get("input_per_mtok") is None
+            and p.get("output_per_mtok") is None)
+        if unpriced:
+            out.append(_finding(
+                RISK, "cost",
+                f"{label}: {', '.join(unpriced)} "
+                f"{'declares' if len(unpriced) == 1 else 'declare'} no price, "
+                f"so spend on "
+                f"{'it' if len(unpriced) == 1 else 'them'} is recorded as $0 "
+                f"and the daily breaker cannot fire",
+                f"add input_per_mtok/output_per_mtok under [providers.<name>] "
+                f"in {os.path.join(root, 'settings.toml')}, or `free = true` "
+                f"if the tier genuinely costs nothing — an unmeasured fleet "
+                f"cannot be a cheap one"))
+    if not out:
+        out.append(_finding(OK, "cost",
+                            "every provider in use declares a price or is "
+                            "marked free, so spend is measurable", ""))
+    return out
+
+
 def check_policy(home):
     """The command policy must COMPILE, or it is not enforcing anything.
 
@@ -423,7 +474,8 @@ def check_policy(home):
 
 
 CHECKS = (
-    ("cost", check_spend), ("secrets", check_secrets), ("policy", check_policy),
+    ("cost", check_spend), ("pricing", check_pricing),
+    ("secrets", check_secrets), ("policy", check_policy),
     ("backups", check_backups), ("capacity", check_disk),
     ("resilience", check_resilience), ("verification", check_verification),
     ("critic", check_critic),

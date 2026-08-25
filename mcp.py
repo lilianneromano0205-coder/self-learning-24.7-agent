@@ -36,6 +36,7 @@ server from steering the agent.
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -304,6 +305,57 @@ def needs_approval(spec, risk, tool):
     return risk == "destructive"
 
 
+_URL_KEYS = ("url", "uri", "href", "link", "src", "endpoint", "address",
+             "target", "page", "location")
+
+
+def _bad_url_argument(arguments, root=None, _depth=0):
+    """The refusal text if any argument points somewhere it must not, else "".
+
+    Reuses ingest.py's guards rather than writing a second pair that can
+    disagree with the first — the failure this codebase keeps finding is two
+    descriptions of one rule. Recurses one level, because browser servers
+    nest their arguments ({"options": {"url": …}}), and a check that only
+    looks at the top level is a check with a documented way around it.
+
+    Never raises: a guard that can crash the call it guards is a new failure
+    mode, not a control. If ingest cannot be imported the call proceeds — the
+    tool-name policy and the approval gate still apply — and that is recorded
+    in the docstring rather than hidden.
+    """
+    try:
+        import ingest
+    except Exception:                            # pragma: no cover
+        return ""
+    if _depth > 2 or not isinstance(arguments, (dict, list)):
+        return ""
+    items = (arguments.items() if isinstance(arguments, dict)
+             else enumerate(arguments))
+    for k, v in items:
+        if isinstance(v, (dict, list)):
+            deeper = _bad_url_argument(v, root, _depth + 1)
+            if deeper:
+                return deeper
+            continue
+        if not isinstance(v, str) or not v.strip():
+            continue
+        looks_urlish = (str(k).lower() in _URL_KEYS
+                        or re.match(r"^[a-z][a-z0-9+.-]*://", v.strip(), re.I))
+        if not looks_urlish:
+            continue
+        try:
+            ingest._check_scheme(v.strip())
+            ingest._check_host(v.strip(), root)
+        except ValueError as e:
+            return (f"REFUSED before the tool ran: argument {k!r} points at "
+                    f"{v.strip()[:120]!r}. {e} This is the same check the "
+                    f"ingestion path applies; an MCP server is not a way "
+                    f"around it.")
+        except Exception:                        # pragma: no cover
+            continue                             # never break the call
+    return ""
+
+
 def guarded_call(s, tool, arguments, root=None, fresh=False):
     """tools/call through the owner's policy AND the effects ledger:
     denied tools never reach the server; identical calls inside one task
@@ -313,6 +365,24 @@ def guarded_call(s, tool, arguments, root=None, fresh=False):
         return {"isError": True, "content": [{"type": "text", "text":
                 f"tool '{tool}' is denied for server '{s.name}' by mcp.json "
                 f"policy"}]}, "denied"
+    # WHERE the tool is being pointed, not just WHICH tool it is.
+    #
+    # This function screened the tool NAME, the effects ledger and the risk
+    # class, and never looked inside `arguments`. ingest.py has carried
+    # _check_scheme and _check_host for a long time — written because a
+    # `file:///…/agent.env` URL once carried a provider key into course
+    # material, and because a public URL that redirects to 169.254.169.254
+    # reaches cloud metadata. Every one of those guards sat on the ingestion
+    # rail, and the MCP rail went round them.
+    #
+    # That was survivable while nothing in the capability model could drive a
+    # browser. It is not now: the catalog ships a playwright server and
+    # `browser_control` is a promoted capability, so `browser_navigate` with
+    # a file:// or link-local URL is a live path to the same incident this
+    # repository has already had once, on a rail with no checks at all.
+    bad = _bad_url_argument(arguments, root or os.environ.get("AGENT_ROOT"))
+    if bad:
+        return {"isError": True, "content": [{"type": "text", "text": bad}]}, "denied"
     root = root or os.environ.get("AGENT_ROOT") or os.getcwd()
     lineage = os.environ.get("AGENT_TASK_LINEAGE") or "manual"
     task_id = os.environ.get("AGENT_TASK_ID", "-")

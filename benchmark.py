@@ -116,7 +116,10 @@ def bare_arm(agent, root, trial):
     try:
         msg, usage, _ = agent.call_model("practitioner", messages,
                                          purpose="benchmark")
-        cost = agent._cost("practitioner", usage)
+        # _cost prices the provider that actually SERVED, so it takes a
+        # provider name; the role is passed only as the fallback lookup.
+        cost = agent._cost(agent.role_cfg("practitioner")["provider"],
+                           usage, "practitioner")
         calls = msg.get("tool_calls") or []
         if not calls:
             tc = loop.parse_content_tool_call(msg.get("content"))

@@ -114,6 +114,22 @@ def _ingest_tool(binary, module=None):
         return [exe] if exe else None
 
 
+def _mcp_server_for(root, names):
+    """Is an MCP server matching any of these names configured here?
+
+    Named servers are the owner's trust decision (mcp.json), so this ASKS
+    rather than assumes: a fleet with `playwright` enabled can drive a
+    browser, and one without it cannot, and the capability report should say
+    which. Never raises — a missing or malformed mcp.json means "no".
+    """
+    try:
+        import mcp as _mcp
+        have = {str(n).lower() for n in _mcp.load_servers(root or ".")}
+    except Exception:
+        return False
+    return any(any(n in h for h in have) for n in names)
+
+
 def scan(root=None):
     env = _env_with_file(root)
     binaries = {b: bool(shutil.which(b)) for b in BINARIES}
@@ -155,6 +171,22 @@ def scan(root=None):
         "git": (binaries["git"], "run_command git …"),
         "node_js": (binaries["node"], "run_command node/npm …"),
         "containers": (binaries["docker"], "run_command docker …"),
+        # DRIVING A REAL BROWSER, reported as its own capability.
+        #
+        # It was reachable and invisible: mcp.py's catalog has shipped a
+        # `playwright` entry ("drive a real browser (navigate, click, fill,
+        # read)") the whole time, and nothing in the capability model knew.
+        # So `universal.assess` matched goals like "log into the portal and
+        # download the invoices" to `web_fetch` — stdlib urllib, which cannot
+        # log in, cannot run JavaScript and cannot click — and reported READY
+        # for work that could not begin. A capability the platform HAS but
+        # cannot see is worse than one it lacks, because the lacking one gets
+        # acquired and the invisible one gets falsely promised.
+        "browser_control": (_mcp_server_for(root, ("playwright", "browser",
+                                                   "puppeteer", "chrome")),
+                            "python mcp.py call <server> browser_navigate "
+                            "--args '{\"url\": \"…\"}'  — turn it on with "
+                            "`python mcp.py enable playwright` (needs node)"),
     }
     custom = custom_tools(root)
     for c in custom:

@@ -216,7 +216,7 @@ SYSTEMS = {
                 "reached, that a dry run writes nothing, and that every gap "
                 "is classified by the platform's own gap router rather than "
                 "by a second opinion",
-        "tests": ["test_universal.py"],
+        "tests": ["test_universal.py", "test_grants.py"],
         "blind": "it reads the goal's WORDS to infer what will be needed, so "
                  "a goal that requires a PDF reader without saying anything "
                  "PDF-shaped is not detected — the inference is a keyword "

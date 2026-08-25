@@ -58,6 +58,90 @@ DEFAULT_BUDGETS = {          # tokens (~4 chars each)
 # course, because they are the rules for reading that material.
 ORDER = ["mission", "self", "commons", "course", "standards", "authority",
          "conflicts", "cases", "gotchas", "premise", "skills", "memory_files"]
+
+# ORDER is the BUDGET order — which source is filled first, and the order the
+# manifest reports. EMIT_ORDER is the order the blocks are WRITTEN into the
+# message. Splitting the two makes an important fact explicit: which blocks
+# are the same for every task and which are chosen FOR this task.
+#
+# WHAT WAS MEASURED, INCLUDING THE PART THAT DISAPPOINTED
+#
+# Providers cache by PREFIX, and only a byte-identical one. So the intent was
+# to put everything fleet-stable first and lengthen that prefix. Measured on
+# an expert with 400 cited atoms and 6 skills, comparing two DIFFERENT goals:
+#
+#     original order       shared prefix 4,769 / 18,342 chars = 26%
+#     stable-first order   shared prefix 4,769 / 18,342 chars = 26%
+#     skills-last order    shared prefix 4,769 / 18,342 chars = 26%
+#
+# Identical. Reordering did NOT lengthen the cacheable prefix, and the reason
+# is worth writing down rather than hiding:
+#
+#   * `skills` is 12,084 of those 18,342 chars — 66% of the window — and it
+#     is ACTIVATED BY KEYWORD against the goal, so it differs per task by
+#     design. It is not stable material and never was.
+#   * `self` (the competence model) also differs: the shared prefix ends 642
+#     chars into it. An earlier check compared byte COUNTS and file paths and
+#     called it stable; comparing the actual text showed it is not.
+#
+# So the binding constraint on caching here is not the order of the blocks —
+# it is that the two largest early blocks are both selected per task. That is
+# a real and useful thing to know: the way to cut token cost on this platform
+# is to make skill activation stable per (expert, course) rather than per
+# goal, NOT to shuffle the window.
+#
+# The split is kept anyway, for the reason that did survive measurement: the
+# task-specific material now sits immediately before the goal instead of at
+# the top, and the middle of a long window is where retrieval is weakest.
+# That is an attention argument, not a cost argument, and it is not claimed
+# as a saving.
+#
+# Safe because trimming is strictly PER SOURCE: each _Source owns its own
+# char budget and there is no global cap after assembly (`total_tokens` is
+# reported, never enforced). "The mission contract is never trimmed" comes
+# from its own budget and from `kinds.add("mission")`, not from its position.
+# Which blocks are the same for every task in a fleet, and which are chosen
+# FOR this task even when their names suggest otherwise. Recorded because it
+# is the useful half of the experiment below; NOT used to reorder the window.
+#   authority  = which SOURCES outrank which, rendered per COURSE
+#   conflicts  = contradictions matched against this GOAL
+#   self       = the competence model, which reads differently per task
+#   skills     = activated by keyword against the goal — 66% of the window
+STABLE_KINDS = ("standards", "commons", "gotchas")
+TASK_KINDS = ("authority", "conflicts", "self", "course", "cases", "premise",
+              "skills", "memory_files", "mission")
+
+# EMIT_ORDER IS ORDER. The experiment is written down rather than shipped.
+#
+# Providers cache by prefix and only a byte-identical one, so putting stable
+# material first should lengthen the cacheable prefix. It does not:
+#
+#     original order       shared prefix 4,769 / 18,342 chars = 26%
+#     stable-first order   shared prefix 4,769 / 18,342 chars = 26%
+#     skills-last order    shared prefix 4,769 / 18,342 chars = 26%
+#
+# Identical, because `skills` is 12,084 of those chars and is activated by
+# keyword against the goal, and `self` differs per task too — the two largest
+# early blocks are both selected per task, so no permutation of them can be
+# shared between tasks. The binding constraint is not the order.
+#
+# And the reorder has a real cost. tests/test_mission.py asserts
+# `window.index("MISSION CONTRACT") < 250` for every role: manual §11 puts
+# the contract at the LEAD of the window, because it is the one thing whose
+# loss makes every other token pointless. Moving it to sit beside the goal
+# broke that invariant, in exchange for a measured zero.
+#
+# So: no change to what the model sees. The way to cut token cost on this
+# platform is to make skill activation stable per (expert, course) instead of
+# per goal — which is a real piece of work with a real relevance trade-off,
+# not a reshuffle.
+EMIT_ORDER = list(ORDER)
+# Two lists that must hold the same names, and a third thing comparing them —
+# the lesson this codebase keeps relearning. A kind added to ORDER and
+# forgotten here would be silently dropped from every context window.
+assert set(EMIT_ORDER) == set(ORDER), (
+    f"EMIT_ORDER and ORDER disagree: "
+    f"{set(ORDER) ^ set(EMIT_ORDER)} is in one and not the other")
 SKILL_INDEX_CAP = 30
 SKILL_INDEX_TOKENS = 600
 
@@ -348,7 +432,7 @@ def compile(agent, task):
             f"into this window: {names} — read_file them if you need them]")
 
     blocks = []
-    for n in ORDER:
+    for n in EMIT_ORDER:            # stable-first, task-last: see EMIT_ORDER
         blocks.extend(src[n].blocks)
     user = ""
     if blocks:

@@ -131,6 +131,105 @@ def check_authority_stops_the_run(home):
           "began and routed to the owner; goal.pursue was never reached; and "
           "an ordinary goal was not falsely escalated")
 
+    # ---- THE CORPUS. Three examples proved the mechanism; they could not
+    # prove its COVERAGE, and coverage was where it was broken.
+    #
+    # The table used to be hand-written whole-word alternations, and it failed
+    # open on ordinary English: `\blogin\b` misses "log into" and "sign in",
+    # `\bauth\b` cannot match "authenticate", `\bcredential\b` cannot match
+    # "credentialS" — \b needs a boundary and the plural's "s" is a word
+    # character. Six of nine everyday phrasings walked straight past the one
+    # boundary this platform says a machine must never cross by itself.
+    #
+    # A test with three examples cannot see that. Only an enumeration can, so
+    # the phrasings are enumerated, and BOTH directions are asserted: a guard
+    # that flags everything is as useless as one that flags nothing, because
+    # a fleet that asks permission to summarise a PDF gets its permissions
+    # turned off.
+    MUST_FLAG = [
+        "log into the supplier portal", "log in to the dashboard",
+        "sign in to the console", "login to the portal",
+        "authenticate with the vendor", "use my credentials",
+        "sign up for an account", "check out the cart",
+        "send an email to the vendor", "register for the service",
+        "pay the invoice", "buy the domain", "publish the report",
+        "deploy to production", "reply to their message",
+        "subscribe to the plan", "get an api key", "store the password",
+        "use oauth", "enable 2fa", "purchase a licence",
+        "delete the production database", "wipe the bucket",
+        "onboarding flow", "create an account on github",
+        "order the parts", "refund the customer", "access keys for s3",
+    ]
+    MUST_NOT_FLAG = [
+        "summarise these PDFs", "write a briefing on HTTP caching",
+        "learn about exponential backoff", "count the rows in this csv",
+        "draw a chart of revenue", "explain the architecture",
+        "refactor the parser", "translate this page",
+        "compare two sorting algorithms", "extract the tables from this report",
+    ]
+    missed = [g for g in MUST_FLAG if not universal.authority_gaps(g)]
+    assert not missed, (
+        f"the authority guard FAILED OPEN on {len(missed)} phrasing(s): "
+        f"{missed[:6]}. Every one of these asks for an account, a payment, a "
+        f"credential, a publication or a deletion, and the guard let it "
+        f"through — which is the only failure here that costs anything.")
+    false_pos = [(g, universal.authority_gaps(g)[0][0])
+                 for g in MUST_NOT_FLAG if universal.authority_gaps(g)]
+    assert not false_pos, (
+        f"ordinary work was escalated to the owner: {false_pos[:4]}. A guard "
+        f"that stops everything gets switched off, and then it stops nothing.")
+    # ---- the CAPABILITY table had the same blindness, inverted ----------
+    # `\bpdf\b` cannot match "PDFs", so the most natural way anyone phrases a
+    # batch job asked for NOTHING: "summarise these PDFs" -> [], "download
+    # these videos" -> [], "read the images" -> []. Under-detection here does
+    # not stop the run, it does something worse — the readiness check finds no
+    # missing capability and reports READY for work the fleet cannot do.
+    # Singular and plural must resolve identically, and prose must still
+    # resolve to nothing.
+    import re as _re
+
+    def _caps(goal):
+        return sorted(c for p, c in universal.CAPABILITY_HINTS
+                      if _re.search(p, goal.lower()))
+
+    for one, many in [("summarise this PDF", "summarise these PDFs"),
+                      ("describe this screenshot", "describe these screenshots"),
+                      ("download this video", "download these videos"),
+                      ("convert this spreadsheet", "convert these spreadsheets"),
+                      ("clone this repo", "clone these repos"),
+                      ("read the image", "read the images"),
+                      ("run it in a container", "run them in containers"),
+                      ("check the website", "check the websites")]:
+        a, b = _caps(one), _caps(many)
+        assert a and a == b, (
+            f"singular/plural disagree: {one!r} -> {a}, {many!r} -> {b}. A "
+            f"requirements detector that only understands the singular "
+            f"reports READY for work it cannot do.")
+    for prose in ("write a summary of the meeting", "explain recursion",
+                  "learn about caching"):
+        assert not _caps(prose), f"{prose!r} demanded {_caps(prose)}"
+
+    # a goal that needs a real BROWSER must not be answered with a fetcher:
+    # web_fetch is stdlib urllib and cannot log in, run JS, click or submit
+    for goal in ("log into the supplier portal and download each invoice",
+                 "click through the dashboard and export the report",
+                 "fill in the vendor form and submit it",
+                 "add the item to cart and checkout"):
+        assert "browser_control" in _caps(goal), (
+            f"{goal!r} resolved to {_caps(goal)} — an interactive goal "
+            f"answered with a static fetcher is a promise that cannot be kept")
+    assert "browser_control" not in _caps("crawl the docs site for the API"), (
+        "a plain crawl was escalated to a full browser")
+    print("[capabilities-corpus] singular and plural resolve identically "
+          "across 8 capability families (they did not: 'these PDFs' asked for "
+          "nothing), prose asks for nothing, and interactive goals now "
+          "require browser_control instead of being answered by urllib")
+
+    print(f"[authority-corpus] {len(MUST_FLAG)} phrasings that must reach the "
+          f"owner all do — including 'log into', 'sign in to', 'authenticate' "
+          f"and 'credentials', which the hand-written whole-word table missed "
+          f"— and {len(MUST_NOT_FLAG)} ordinary goals are still not escalated")
+
 
 def check_a_dry_run_changes_nothing(home):
     """Describing a goal must not start installing things."""
