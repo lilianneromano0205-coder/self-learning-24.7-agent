@@ -40,8 +40,23 @@ BLOG = "https://someseoblog.example/cdn-tips"
 MEDIUM = "https://medium.com/@someone/vacuum"
 
 
-def _notes(root, course, lines):
-    p = os.path.join(root, "courses", course, "notes.md")
+def _notes(root, course, lines, lesson="01"):
+    """Write notes where THE PLATFORM writes them.
+
+    This used to write `courses/<course>/notes.md` — flat — which is exactly
+    the path knowledge.py used to read, and exactly the path nothing in the
+    platform ever produces. ingest.py:792 tells the watcher to write
+    `courses/<c>/lessons/NN/notes.md` and harness.py:241 documents that as
+    the tier. So the code and its test agreed with each other and with
+    nothing else, and the knowledge graph was EMPTY against every real
+    expert while this file went green.
+
+    A test that builds its fixture the wrong way cannot fail on the bug it
+    is shaped like. The fixture now uses the real layout, and
+    check_the_graph_reads_what_the_platform_writes below pins the agreement
+    directly rather than trusting either side.
+    """
+    p = os.path.join(root, "courses", course, "lessons", lesson, "notes.md")
     os.makedirs(os.path.dirname(p), exist_ok=True)
     with open(p, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
@@ -137,7 +152,76 @@ def main():
           f"one RFC underpinning {top['share']}% of everything believed here "
           f"— concentration is a real risk that a flat notes file cannot "
           f"display at all")
+    check_the_graph_reads_what_the_platform_writes()
     print("PASS test_knowledge")
+
+
+def check_the_graph_reads_what_the_platform_writes():
+    """The graph and the citation checker must see THE SAME atoms.
+
+    knowledge.atoms() claimed in its own docstring to read "the same
+    notes.md files citecheck.py validates against". It did not. citecheck
+    walks the whole course tree; knowledge joined one flat path. The
+    platform writes `courses/<c>/lessons/NN/notes.md`, so citecheck saw the
+    atoms and knowledge saw nothing — the knowledge graph was empty for
+    every expert that had ever actually been taught, and no test noticed
+    because the tests wrote the flat layout too.
+
+    Two independent descriptions of one truth is this codebase's most
+    frequent defect. The repair is not a corrected second copy — it is one
+    function, citecheck.notes_files, called by both. This asserts that they
+    agree on a tree laid out the way the platform lays it out, at several
+    depths, so a future edit that reintroduces a private walker fails here.
+    """
+    import tempfile
+    import citecheck
+
+    root = tempfile.mkdtemp(prefix="kg-agree-")
+    LAYOUTS = [
+        ("databases", ["lessons", "01"], "C-01"),
+        ("databases", ["lessons", "02"], "C-02"),
+        ("http", ["lessons", "01"], "P-10"),
+        ("deep", ["lessons", "01", "part", "b"], "U-77"),
+    ]
+    for course, parts, aid in LAYOUTS:
+        d = os.path.join(root, "courses", course, *parts)
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "notes.md"), "w", encoding="utf-8") as f:
+            f.write(f"- {aid} Postgres uses a B-tree index. [src: {PGDOCS}]\n")
+
+    want = {a for _c, _p, a in LAYOUTS}
+    seen_by_cite = set(citecheck.known_atoms(root))
+    seen_by_graph = {a["id"] for a in knowledge.atoms(root)}
+    assert seen_by_cite == want, (
+        f"citecheck missed atoms: expected {sorted(want)}, "
+        f"got {sorted(seen_by_cite)}")
+    assert seen_by_graph == want, (
+        f"the knowledge graph is blind to atoms the platform actually "
+        f"wrote: expected {sorted(want)}, got {sorted(seen_by_graph)}. "
+        f"A graph with no nodes answers every question with silence, and "
+        f"silence is indistinguishable from 'nothing is known'.")
+    assert seen_by_graph == seen_by_cite, (
+        f"the graph and the citation checker disagree about what this "
+        f"expert knows: graph {sorted(seen_by_graph)} vs citecheck "
+        f"{sorted(seen_by_cite)}. An atom the graph cannot see is an atom "
+        f"a citation can still legally reference, so the two must not drift.")
+
+    # the course must be the COURSE, not the deepest directory
+    courses = {a["course"] for a in knowledge.atoms(root)}
+    assert courses == {"databases", "http", "deep"}, (
+        f"lesson directories leaked into the course names: {sorted(courses)}")
+
+    # and the graph must actually be non-empty end to end
+    g = knowledge.build(root)
+    assert len(g["atoms"]) == 4, g["atoms"]
+    assert "b-tree" in g["entities"] and "postgres" in g["entities"], (
+        f"the two terms every claim is about produced no entity: "
+        f"{sorted(g['entities'])}")
+    print(f"[agree] the knowledge graph and the citation checker see the "
+          f"identical {len(want)} atoms across 4 course layouts up to 4 "
+          f"levels deep, because they call one walker rather than two — the "
+          f"flat path this used to join matched nothing the platform writes, "
+          f"and both this test and the code were wrong the same way")
 
 
 if __name__ == "__main__":

@@ -45,6 +45,78 @@ def _env_with_file(root):
     return env
 
 
+# HOW A MISSING CAPABILITY IS OBTAINED.
+#
+# universal.resolve() used to call
+#     acquire.request(root, capability_name, "pypi", why, version="")
+# which is wrong twice over. `pdf_text` is a CAPABILITY LABEL, not a package
+# — PyPI has no project called pdf_text — and `version=""` is refused
+# outright by acquire.inspect ("no version pinned"), so every capability
+# request in the platform's history was rejected before it reached a network.
+# The ladder existed, was tested, and could not be entered.
+#
+# This table is the missing map. It also states the honest thing the old code
+# could not: MOST capability gaps are not pip-installable at all. A missing
+# API key is an AUTHORITY gap wearing a capability's clothes — no amount of
+# installing fixes it, and pretending otherwise sends the agent down a ladder
+# that cannot reach. Those route to the owner by name.
+#
+# Versions are pinned because acquire.inspect requires it, and pinned to
+# releases that existed on 2026-08-25 (resolved from pypi.org/pypi/<p>/json).
+# A pin ages: `python toolbox.py recipes` prints them, and settings.toml's
+# [acquire.versions] table overrides any of them without editing code.
+ACQUIRE = {
+    "pdf_text":       {"source": "pypi", "package": "pymupdf",
+                       "version": "1.28.2"},
+    "docs_convert":   {"source": "pypi", "package": "markitdown",
+                       "version": "0.1.7"},
+    "video_download": {"source": "pypi", "package": "yt-dlp",
+                       "version": "2026.8.19"},
+    # System binaries and hosted keys: an installer cannot supply these, and
+    # saying so is more useful than failing at rung 3 of the ladder.
+    "audio_chunk":    {"owner": "ffmpeg is a system binary, not a Python "
+                                "package. Install it and restart, or set "
+                                "[agent] sandbox = \"docker\" — the shipped "
+                                "image already carries it."},
+    "transcribe":     {"owner": "needs ffmpeg AND a GROQ_API_KEY. The key is "
+                                "a credential, so only you can supply it: put "
+                                "it in agent.env."},
+    "vision":         {"owner": "needs a vision provider key (OPENROUTER_API_KEY "
+                                "by default; VISION_PROVIDER selects the rail). "
+                                "A credential is never self-issued."},
+    "git":            {"owner": "git is a system binary; install it and "
+                                "restart."},
+    "node_js":        {"owner": "node is a system binary; install it and "
+                                "restart. It is what browser_control needs."},
+    "containers":     {"owner": "docker is a system service; install it and "
+                                "restart."},
+    "browser_control": {"command": "python mcp.py enable playwright",
+                        "owner": "driving a real browser is an MCP server, "
+                                 "not a package. It needs node on PATH, and "
+                                 "turning a toolkit on is an approval-gated "
+                                 "action — run the command yourself."},
+}
+
+
+def recipe(capability, cfg=None):
+    """How to obtain `capability`, or None if this platform has no route.
+
+    -> {"source", "package", "version"}  installable
+       {"owner": why[, "command"]}       only the owner can do it
+       None                              unknown capability
+    """
+    r = ACQUIRE.get(capability)
+    if not r:
+        return None
+    r = dict(r)
+    if "package" in r:
+        override = (((cfg or {}).get("acquire", {}) or {})
+                    .get("versions", {}) or {}).get(r["package"])
+        if override:
+            r["version"] = str(override)
+    return r
+
+
 def custom_tools(root=None):
     """Tools YOU provide. Drop a tools.json next to the code (or inside an
     expert) and every agent gains them — each entry:
@@ -147,6 +219,12 @@ def scan(root=None):
                   "huggingface": "HF_TOKEN"}.get(vision_rail, "OPENROUTER_API_KEY")
     caps = {
         "web_fetch": (True, "ingest.py fetch <url> <out> — stdlib, always on"),
+        # FINDING material, as opposed to fetching a URL somebody already
+        # knew. Always on: every rail is a keyless public catalogue, so this
+        # needs no install and no credential.
+        "source_discovery": (True, "discover.py \"<topic>\" — OpenAlex, "
+                             "Crossref, DOAJ, PubMed, Zenodo, Software "
+                             "Heritage, GitHub; no key, no search engine"),
         "site_crawl": (True, "ingest.py add-url <url> --crawl N"),
         "recall_memory": (True, "recall.py \"query\" — search everything ever seen"),
         "verify_spec": (True, "verify.py <course> — mechanical CHECK commands"),

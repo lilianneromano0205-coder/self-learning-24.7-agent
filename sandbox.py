@@ -34,7 +34,28 @@ import shutil
 import subprocess
 import uuid
 
-BACKENDS = ("host", "docker", "e2b", "daytona")
+BACKENDS = ("host", "docker", "e2b", "daytona", "cloudflare")
+
+# The hosted backends, in ONE table. The key name and the default base URL
+# were previously written out twice — once in available() and once in
+# _hosted() — which is the shape of defect this codebase keeps finding: two
+# descriptions of one truth and nothing comparing them. Adding a third backend
+# would have made it three copies.
+#
+# `url` of None means the endpoint has NO default and must be configured.
+# Cloudflare's Sandbox SDK is TypeScript-called-from-a-Worker, so there is no
+# public REST endpoint to default to: the operator deploys the small Worker in
+# deploy/worker/ and points this at their own workers.dev URL. A backend that
+# guessed a URL here would fail with a DNS error instead of an instruction.
+HOSTED = {
+    "e2b":        {"key": "E2B_API_KEY",
+                   "url": "https://api.e2b.dev"},
+    "daytona":    {"key": "DAYTONA_API_KEY",
+                   "url": "https://app.daytona.io/api"},
+    "cloudflare": {"key": "CLOUDFLARE_API_TOKEN",
+                   "url": None,
+                   "url_env": "CLOUDFLARE_SANDBOX_URL"},
+}
 DOCKER_IMAGE = "python:3.12-slim"
 AGENT_ENV_PREFIX = "AGENT_"
 # A model-written command must never be handed the harness's own credentials.
@@ -144,10 +165,30 @@ def available(cfg):
                 f"Right-click Docker Desktop in the tray and choose "
                 f"'Switch to Linux containers…'")
         return True, f"docker is ready ({DOCKER_IMAGE}, network off)"
-    key = {"e2b": "E2B_API_KEY", "daytona": "DAYTONA_API_KEY"}[b]
+    spec = HOSTED[b]
+    key = spec["key"]
     if not os.environ.get(key):
         return False, f"{key} is not set in the environment"
-    return True, f"{b} configured via {key}"
+    url = _hosted_url(b, cfg)
+    if not url:
+        return False, (
+            f"{b} has no endpoint. Its sandbox API is only callable from a "
+            f"Worker, so this platform talks to a small REST Worker you "
+            f"deploy (see deploy/worker/README.md). Set "
+            f"[agent] cloudflare_url, or the {spec['url_env']} environment "
+            f"variable, to your deployed Worker's URL.")
+    return True, f"{b} configured via {key} -> {url}"
+
+
+def _hosted_url(kind, cfg):
+    """Where this hosted backend lives: settings first, then environment,
+    then the documented default. Returns "" when there is none, which is a
+    refusal rather than a guess."""
+    spec = HOSTED.get(kind) or {}
+    configured = _cfg(cfg).get(f"{kind}_url")
+    if not configured and spec.get("url_env"):
+        configured = os.environ.get(spec["url_env"])
+    return str(configured or spec.get("url") or "").rstrip("/")
 
 
 def _agent_env(env):
@@ -251,7 +292,8 @@ def _kill_container(name):
 
 
 def _hosted(kind, cmd, root, env, timeout, cfg):
-    """E2B / Daytona: create a sandbox, run one command, tear it down.
+    """E2B / Daytona / Cloudflare: create a sandbox, run one command, tear
+    it down.
 
     Kept to the documented REST shape and stdlib-only. The platform never
     stores the key: it is read from the environment at call time.
@@ -259,13 +301,13 @@ def _hosted(kind, cmd, root, env, timeout, cfg):
     import json
     import urllib.error
     import urllib.request
-    key = os.environ.get({"e2b": "E2B_API_KEY",
-                          "daytona": "DAYTONA_API_KEY"}[kind])
+    key = os.environ.get(HOSTED[kind]["key"])
     if not key:
         return 127, "", f"sandbox '{kind}' unavailable: key not set"
-    base = (_cfg(cfg).get(f"{kind}_url")
-            or {"e2b": "https://api.e2b.dev",
-                "daytona": "https://app.daytona.io/api"}[kind]).rstrip("/")
+    base = _hosted_url(kind, cfg)
+    if not base:
+        return 127, "", (f"sandbox '{kind}' unavailable: no endpoint "
+                         f"configured. Nothing ran on the host.")
     body = json.dumps({"cmd": cmd, "cwd": "/home/user",
                        "envs": _agent_env(env),
                        "timeoutMs": int(timeout * 1000)}).encode("utf-8")

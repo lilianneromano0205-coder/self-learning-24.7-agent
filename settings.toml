@@ -164,9 +164,29 @@ api_key_env = "HF_TOKEN"
 # Cloudflare Workers AI. Serverless inference on Cloudflare's own network,
 # with an OpenAI-compatible /v1/chat/completions endpoint — so it is an
 # ordinary provider here, not an integration. There is a standing free
-# allocation of 10,000 Neurons/day, which is roughly 450 agent steps a day
-# on llama-3.1-8b (measured against this platform's own 1083-token window;
-# see CLOUDFLARE.md for the arithmetic).
+# allocation of 10,000 Neurons/day.
+#
+# PICK A MODEL THAT SUPPORTS FUNCTION CALLING. This is not a preference.
+# Every step this agent takes is a native tool call, so a model without
+# function calling cannot drive the loop at all — it will emit prose where a
+# tool call belongs and the step is rejected. (There is a fallback:
+# native_tools = false switches to the grounding header's inline-JSON format.
+# It works, it is measurably less reliable, and it is not the default for a
+# reason.) Cloudflare tags this capability per model; verified 2026-08-25
+# against developers.cloudflare.com/workers-ai/models?capabilities=Function+calling
+#
+# Free steps/day on this platform's own MEASURED 1083-token window
+# (test_endurance, median of 42 windows) with a 500-token reply, and the cost
+# once the free allocation is spent, at $0.011/1000 Neurons:
+#
+#   @cf/qwen/qwen3-30b-a3b-fp8                 20.2 N/step   493/day   $0.22/1k
+#   @cf/openai/gpt-oss-20b                     33.3 N/step   300/day   $0.37/1k
+#   @cf/openai/gpt-oss-120b                    68.5 N/step   145/day   $0.75/1k
+#   @cf/meta/llama-3.3-70b-instruct-fp8-fast  131.3 N/step    76/day   $1.44/1k
+#
+# qwen3-30b-a3b-fp8 is the default recommendation: it is the cheapest model
+# on the list that can call tools, by 1.6x, and it carries a 32k context.
+# See CLOUDFLARE.md for the arithmetic and the sensitivity to reply length.
 #
 # ACCOUNT_ID is not a secret and goes in the URL; the token is a secret and
 # goes in agent.env as CLOUDFLARE_API_TOKEN. Create it at
@@ -175,7 +195,9 @@ api_key_env = "HF_TOKEN"
 # [providers.cloudflare]
 # base_url = "https://api.cloudflare.com/client/v4/accounts/ACCOUNT_ID/ai/v1"
 # api_key_env = "CLOUDFLARE_API_TOKEN"
-# model names are the @cf/... ids, e.g. "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+# input_per_mtok = 0.051           # qwen3-30b-a3b-fp8, so the budget breaker
+# output_per_mtok = 0.335          # measures real spend rather than guessing
+# model = "@cf/qwen/qwen3-30b-a3b-fp8"
 
 # The same call routed through AI Gateway instead — identical contract, plus
 # caching, rate limiting, retries, per-request cost analytics and a log of

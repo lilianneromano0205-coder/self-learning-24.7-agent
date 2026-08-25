@@ -249,6 +249,54 @@ PUBLIC_RESEARCH = (
     "astm.org", "ansi.org", "din.de", "bsigroup.com",
 )
 
+# OPEN SCHOLARLY INFRASTRUCTURE — the registries and repositories that
+# discover.py queries. These are not publishers; they are the curated indexes
+# and archives that sit in front of publishers, and every one of them is
+# keyless, public, and run by a non-profit or a public body.
+#
+# They were landing at tier 3 ("unrecognised origin, capped at instructional")
+# because none of them sits on .edu/.gov and none was in PUBLIC_RESEARCH. That
+# put DOAJ — which indexes only peer-reviewed open-access journals — on the
+# same rung as a personal blog, and below LEARN_MIN_TIER, so nothing found
+# through them could ever become a cited atom. The discovery rails would have
+# worked perfectly and produced nothing learnable.
+#
+# Tier 1 (normative/peer-reviewed): the index only admits reviewed work, or
+# the identifier IS the citation.
+SCHOLARLY_REVIEWED = (
+    "doaj.org",                 # only peer-reviewed open-access journals
+    "doi.org", "dx.doi.org",    # the DOI resolver: the citation itself
+    "crossref.org", "api.crossref.org",
+    "datacite.org", "api.datacite.org",
+    "pubmed.ncbi.nlm.nih.gov", "ncbi.nlm.nih.gov", "europepmc.org",
+    "arxiv.org", "export.arxiv.org",
+)
+# Tier 2 (professional): curated aggregators and archives. Real provenance,
+# but they index preprints and datasets alongside reviewed work, so the
+# CONTAINER cannot promise review the way the ones above can.
+SCHOLARLY_ARCHIVE = (
+    "openalex.org", "api.openalex.org",
+    "semanticscholar.org", "api.semanticscholar.org",
+    "core.ac.uk", "openaire.eu", "explore.openaire.eu",
+    "zenodo.org",               # CERN's research repository
+    "osf.io", "hal.science", "biorxiv.org", "medrxiv.org",
+    "repec.org", "ideas.repec.org",
+    "softwareheritage.org", "archive.softwareheritage.org",
+    "loc.gov",                  # Library of Congress
+)
+
+# A SEARCH ENGINE IS NOT A SOURCE. It is a pointer to one, and citing it
+# cites nothing: the result set changes hourly and is personalised. Anything
+# reached THROUGH a search engine must be judged on where it landed, so the
+# engine's own host is pinned to the bottom tier and can never be learned
+# from. This is the mechanical form of "not generic internet trash".
+SEARCH_ENGINE = (
+    "duckduckgo.com", "api.duckduckgo.com", "google.com", "www.google.com",
+    "bing.com", "www.bing.com", "search.yahoo.com", "yandex.com",
+    "baidu.com", "searx.be", "search.marcia.cc", "startpage.com",
+    "ecosia.org", "brave.com", "search.brave.com",
+)
+
 # The bar a source must clear to be LEARNED from -- to become a cited atom --
 # as opposed to merely read. Tier 2 by default: professional or better.
 LEARN_MIN_TIER = 2
@@ -401,6 +449,16 @@ def _github(host, segs, kind):
                      f"is not authority")
 
 
+def _in(host, table):
+    """Host matches a domain in `table`, exactly or as a subdomain.
+
+    One helper, because `host == d or host.endswith("." + d)` written out
+    four times is four chances to write `in` instead and match `evil.com`
+    against `ilo.com`.
+    """
+    return any(host == d or host.endswith("." + d) for d in table)
+
+
 def classify(ref, kind_hint="", cfg=None):
     """-> (kind, tier, why). Deterministic, and it says why."""
     ref = str(ref or "")
@@ -422,6 +480,20 @@ def classify(ref, kind_hint="", cfg=None):
                                f"({TIER_NAMES[tier]})"
         if "stackoverflow.com" in host:
             return "forum", 3, "stackoverflow: high signal, no editorial review"
+        if _in(host, SEARCH_ENGINE):
+            return "forum", 4, (
+                f"{host} is a SEARCH ENGINE, not a source. Its results are "
+                f"personalised and change hourly, so a citation to it cites "
+                f"nothing. Follow the link and rate where it lands.")
+        if _in(host, SCHOLARLY_REVIEWED):
+            return kind, 1, (f"{host} is open scholarly infrastructure that "
+                             f"admits only reviewed work, or is the citation "
+                             f"identifier itself -- tier 1 (normative)")
+        if _in(host, SCHOLARLY_ARCHIVE):
+            return kind, 2, (f"{host} is a curated scholarly index or public "
+                             f"research archive -- tier 2 (professional). It "
+                             f"carries preprints and datasets beside reviewed "
+                             f"work, so the container cannot promise review.")
         if any(host == d or host.endswith("." + d) for d in PUBLIC_RESEARCH):
             return kind, 2, (f"{host} is a public research body, national "
                              f"laboratory, treaty organisation or standards "

@@ -428,7 +428,32 @@ def resolve(home, expert, goal, criteria="", apply=False):
                                    "must never resolve for itself"})
             continue
         if g["dimension"] == "capability":
-            cmd = (f"python acquire.py request {g['what']} --root {root} "
+            # A CAPABILITY IS NOT A PACKAGE NAME. This used to pass the
+            # capability label straight to PyPI with an empty version, so
+            # every request was refused ("no version pinned") before it
+            # reached a network, and the ones that got past that would have
+            # asked PyPI for a project called `pdf_text`. toolbox.recipe()
+            # is the map from what is MISSING to what can be DONE about it.
+            import toolbox as _tb
+            rx = _tb.recipe(g["what"])
+            if rx is None:
+                actions.append({
+                    "gap": g["what"], "action": "ask the owner",
+                    "command": None, "done": False,
+                    "why": f"no acquisition route is known for "
+                           f"{g['what']!r}. The platform will not improvise "
+                           f"an installer for a capability it cannot name."})
+                continue
+            if "owner" in rx:
+                # The honest answer for a missing key or system binary:
+                # this is not something an installer can fix.
+                actions.append({
+                    "gap": g["what"], "action": "ask the owner",
+                    "command": rx.get("command"), "done": False,
+                    "why": rx["owner"]})
+                continue
+            cmd = (f"python acquire.py request {rx['package']} --root {root} "
+                   f"--source {rx['source']} --version {rx['version']} "
                    f"--why {json.dumps(g['why'])}")
             rec = None
             if apply:
@@ -446,8 +471,8 @@ def resolve(home, expert, goal, criteria="", apply=False):
                 # comes back rather than merely that nothing raised.
                 try:
                     import acquire
-                    rec = acquire.request(root, g["what"], "pypi",
-                                          g["why"], version="")
+                    rec = acquire.request(root, rx["package"], rx["source"],
+                                          g["why"], version=rx["version"])
                 except Exception as e:
                     rec = {"error": f"{type(e).__name__}: {e}"}
             actions.append({"gap": g["what"], "action": "acquire the capability",
@@ -460,13 +485,57 @@ def resolve(home, expert, goal, criteria="", apply=False):
         if g["dimension"] == "knowledge":
             cmd = (f"python goal.py pursue {json.dumps('learn: ' + goal)} "
                    f"--expert {expert}")
+            # THE FIRST STEP OF STUDYING IS FINDING SOMETHING TO STUDY, and
+            # until discover.py existed this branch could not take it. It
+            # emitted a command string with done=False and stopped — the
+            # study plan's own first milestone reads "gather real sources
+            # (… / search results the …)", assuming a search nothing
+            # implemented. So "learn it yourself" ended at a human pasting
+            # links, which is the opposite of the claim.
+            #
+            # Discovery is READ-ONLY and free: it queries public catalogues
+            # and fetches nothing. That is why it is safe to run under
+            # apply=True while ingestion — which writes to the expert and
+            # costs a fetch per document — stays an explicit separate act
+            # with its commands printed for the operator.
+            found, cmds, why_more = [], [], ""
+            if apply:
+                try:
+                    import discover
+                    res = discover.search(goal, limit=8)
+                    found = res.get("hits") or []
+                    cmds = discover.add_url_commands(res, root=root)
+                    if not found:
+                        why_more = (
+                            f" Discovery ran and found nothing above tier "
+                            f"{MIN_LEARN_TIER} across {len(res.get('rails') or [])} "
+                            f"catalogue(s) — {res.get('found', 0)} candidate(s) "
+                            f"were seen and {res.get('filtered', 0)} were below "
+                            f"the bar. These catalogues do not index "
+                            f"everything; the alternative, a web search, is "
+                            f"what the platform refuses on purpose.")
+                    else:
+                        why_more = (
+                            f" Discovery found {len(found)} source(s) at tier "
+                            f"{min(h['tier'] for h in found)} or better, "
+                            f"ready to ingest.")
+                except Exception as e:
+                    why_more = (f" Discovery could not run: "
+                                f"{type(e).__name__}: {str(e)[:120]}")
             actions.append({"gap": g["what"], "action": "study the subject",
-                            "command": cmd, "done": False,
+                            "command": cmd,
+                            # done means "this step produced something real",
+                            # and finding the reading list is real progress.
+                            # It does not mean the expert has LEARNED it —
+                            # only a passed closed-book exam means that.
+                            "done": bool(found),
+                            "sources": found,
+                            "ingest_commands": cmds,
                             "why": f"goal.py already seeds a study-shaped plan "
                                    f"for a learning goal: gather sources -> "
                                    f"ingest -> cited notes -> closed-book exam. "
                                    f"Sources are held to tier {MIN_LEARN_TIER} "
-                                   f"or better."})
+                                   f"or better.{why_more}"})
     return {**r, "actions": actions, "applied": bool(apply)}
 
 

@@ -78,7 +78,17 @@ ENTITY_PATTERNS = (
     (re.compile(r"\b([A-Z][A-Za-z0-9]*(?:[- ][A-Z][A-Za-z0-9]*)+)\b"),
      "capitalised phrase"),
     (re.compile(r"\b([A-Z]{2,8})\b"), "acronym"),
-    (re.compile(r"\b([a-z]+(?:-[a-z]+){1,3})\b"), "hyphenated term"),
+    # WAS: r"\b([a-z]+(?:-[a-z]+){1,3})\b" - lowercase only, so "B-tree",
+    # "Cache-Control" and "Q-learning" all fell through every pattern here
+    # and the claims about them produced NO entity at all. Measured on the
+    # repro corpus: "A B-tree keeps its leaves at the same depth" yielded {}.
+    # A graph whose nodes are missing is not a sparse graph, it is no graph.
+    (re.compile(r"\b([A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+){1,3})\b"),
+     "hyphenated term"),
+    # A single capitalised word mid-sentence is a proper noun: Postgres,
+    # Kubernetes, Redis. Sentence-initial words are excluded in code below,
+    # because "The index is hot" must not contribute the entity `the`.
+    (re.compile(r"\b([A-Z][a-z]{2,15})\b"), "proper noun"),
 )
 
 # Words that match a pattern and mean nothing on their own. Kept short: every
@@ -88,6 +98,18 @@ STOP = {
     "CAN", "MAY", "MUST", "SHOULD", "WHEN", "THEN", "THIS", "THAT", "WITH",
     "FROM", "INTO", "ONLY", "SUCH", "SEE", "NOTE", "SRC", "HTTP", "HTTPS",
     "well-known", "so-called", "up-to-date", "state-of-the-art",
+    # Auxiliaries, determiners and bare verbs. These are capitalised at the
+    # front of a claim and are never what a claim is ABOUT, so they are
+    # removed by identity rather than by position — a rule that also catches
+    # them mid-sentence, which a position rule cannot.
+    "IT", "ITS", "THEY", "THEM", "THESE", "THOSE", "EACH", "EVERY", "SOME",
+    "MOST", "BOTH", "EITHER", "NEITHER", "IF", "AS", "AT", "BY", "ON", "IN",
+    "OF", "TO", "OR", "IS", "ARE", "WAS", "WERE", "BE", "BEEN", "BEING",
+    "HAS", "HAVE", "HAD", "DO", "DOES", "DID", "WILL", "WOULD", "COULD",
+    "SET", "GET", "ADD", "RUN", "PUT", "MAKE", "TAKE", "GIVE", "KEEP",
+    "CALL", "READ", "WRITE", "AVOID", "NEVER", "ALWAYS", "AFTER", "BEFORE",
+    "DURING", "WHILE", "SINCE", "UNTIL", "UNLESS", "BECAUSE", "HOWEVER",
+    "THEREFORE", "OTHERWISE", "PREFER", "ENSURE", "CHECK", "CONTROL",
 }
 MIN_ENTITY_ATOMS = 2        # a term used once is a word, not a topic
 _LEADING_ARTICLE = re.compile(r"^(?:an?|the)\s+", re.I)
@@ -102,15 +124,31 @@ def _courses(root):
         return []
 
 
+def _notes_files(root):
+    """Delegate to citecheck, the module that defines what an atom IS."""
+    try:
+        import citecheck
+        return citecheck.notes_files(root)
+    except Exception:                    # pragma: no cover
+        return []
+
+
 def atoms(root):
     """Every cited atom this expert has earned. -> [dict].
 
-    Reads the same notes.md files citecheck.py validates against, so an atom
-    the graph knows about is an atom a citation can legally reference.
+    Reads the same notes.md files citecheck.py validates against — literally
+    the same function, citecheck.notes_files, rather than a second
+    hand-written walker that agreed with it only by luck. It did not: this
+    joined `courses/<course>/notes.md` flat while the platform writes
+    `courses/<course>/lessons/NN/notes.md`, so the graph was EMPTY against
+    every real expert and said so to nobody. Proven by running both against
+    one tree: citecheck saw C-01 and C-02, this saw nothing.
+
+    So an atom the graph knows about is an atom a citation can legally
+    reference, and that is now true by construction instead of by assertion.
     """
     out = []
-    for course in _courses(root):
-        p = os.path.join(root, "courses", course, "notes.md")
+    for course, p in _notes_files(root):
         try:
             with open(p, encoding="utf-8", errors="replace") as f:
                 text = f.read()
@@ -139,6 +177,14 @@ def _tier_of(ref):
 def entities_in(text):
     """Terms this claim is about, by rule. -> {term: how_it_was_found}."""
     found = {}
+    # POSITION IS NOT EVIDENCE. The first attempt dropped every capitalised
+    # word that opened a sentence, on the theory that it was capitalised for
+    # grammar. Measured, it deleted `postgres` from "Postgres uses a B-tree"
+    # and `kubernetes` from "Kubernetes schedules pods" — atoms are one-line
+    # claims, so the SUBJECT is usually first, and the subject is usually
+    # exactly the entity the claim is about. STOP already removes the
+    # articles and auxiliaries that motivated the rule, and it removes them
+    # wherever they appear rather than only at the front.
     for pat, how in ENTITY_PATTERNS:
         for m in pat.findall(text):
             term = m.strip()
@@ -152,6 +198,16 @@ def entities_in(text):
             if len(term) < 3 or term in STOP or term.upper() in STOP:
                 continue
             found.setdefault(term.lower(), how)
+    # "Cache-Control" is one entity, not three. The proper-noun rule also
+    # matches `Cache` and `Control` inside it, and those halves are not
+    # topics — nothing else in the corpus is about `control`. Drop any term
+    # that is merely a component of a compound already found.
+    compounds = [t for t in found if "-" in t]
+    for t in list(found):
+        if "-" in t:
+            continue
+        if any(t in c.split("-") for c in compounds):
+            del found[t]
     return found
 
 

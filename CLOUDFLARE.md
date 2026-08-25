@@ -283,17 +283,52 @@ api_key_env = "CLOUDFLARE_API_TOKEN"
 allocation allows anyone to use a total of 10,000 Neurons per day at no
 charge."* Beyond that, $0.011 per 1,000 Neurons.
 
+> **CORRECTION, 2026-08-25.** The table that stood here was wrong in a way
+> that mattered, and the error is worth stating plainly rather than quietly
+> editing out. It priced `llama-3.2-1b`, `llama-3.2-3b` and
+> `llama-3.1-8b-instruct-fp8-fast` — and **none of those three models
+> supports function calling.** Every step this platform takes *is* a native
+> tool call, so that table costed a configuration that cannot run. It was the
+> right arithmetic applied to the wrong models: cheapest-per-token instead of
+> cheapest-per-token-*that-can-drive-the-loop*.
+>
+> Caught by re-deriving the model list from
+> `workers-ai/models?capabilities=Function+calling` instead of from the
+> general model index. The corrected table is below and is restricted to
+> models Cloudflare tags as function-calling.
+
 What 10,000 Neurons/day buys, using this platform's own **measured** context
-window (1083 tokens, from the 120-task endurance soak) and a 500-token reply:
+window (1083 tokens, from the 120-task endurance soak) and a 500-token reply,
+**restricted to models that can actually emit a tool call**:
 
-| Model | Neurons/step | **Free steps/day** |
-|---|---|---|
-| `@cf/meta/llama-3.2-1b-instruct` | 11.8 | **848** |
-| `@cf/meta/llama-3.2-3b-instruct` | 20.3 | **493** |
-| `@cf/meta/llama-3.1-8b-instruct-fp8-fast` | 21.9 | **456** |
+| Model | Neurons/step | **Free steps/day** | $/1000 steps after free |
+|---|---|---|---|
+| `@cf/qwen/qwen3-30b-a3b-fp8` | 20.2 | **493** | **$0.22** |
+| `@cf/openai/gpt-oss-20b` | 33.3 | **300** | $0.37 |
+| `@cf/openai/gpt-oss-120b` | 68.5 | **145** | $0.75 |
+| `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | 131.3 | **76** | $1.44 |
 
-A gated task in this platform runs 2–9 steps. **~450 free steps/day is roughly
-50–200 completed tasks per day, indefinitely, for nothing.**
+Rates fetched 2026-08-25 from `workers-ai/platform/pricing`; the free
+allocation is 10,000 Neurons/day and overage is $0.011/1000 Neurons.
+
+The 500-token reply is an **assumption**, not a measurement, so here is the
+sensitivity — free steps/day as the reply length varies:
+
+| Model | 200 tok | 350 | 500 | 800 | 1200 |
+|---|---|---|---|---|---|
+| `qwen3-30b-a3b-fp8` | 900 | 637 | **493** | 340 | 240 |
+| `gpt-oss-20b` | 397 | 342 | **300** | 240 | 190 |
+| `gpt-oss-120b` | 207 | 171 | **145** | 112 | 86 |
+| `llama-3.3-70b-fp8-fast` | 143 | 99 | **76** | 51 | 36 |
+
+**`qwen3-30b-a3b-fp8` is the recommendation.** It is the cheapest
+function-calling model on the platform by 1.6x, carries a 32k context, and
+holds the top slot across the whole sensitivity range — the ranking never
+inverts, so the choice does not depend on the assumption.
+
+A gated task in this platform runs 2–9 steps. **~493 free steps/day is roughly
+55–245 completed tasks per day, indefinitely, for nothing** — and past the
+free allocation, a thousand agent steps costs **22 cents.**
 
 Available models include `@cf/meta/llama-3.3-70b-instruct-fp8-fast`,
 `@cf/meta/llama-4-scout-17b-16e-instruct`, `@cf/deepseek-ai/deepseek-v4-pro`,
@@ -364,7 +399,9 @@ provider:
 **There is no free tier for Containers** — Cloudflare's pricing table says
 "Free: N/A". Workers Paid at $5/month is the floor.
 
-So: **~$12/month for a 24/7 agent fleet with ~450 free model steps a day.**
+So: **~$12/month for a 24/7 agent fleet with ~493 free model steps a day** on
+`qwen3-30b-a3b-fp8`, and **22 cents per additional thousand steps** after the
+free allocation is spent.
 That is a real number and it is small. Note it excludes model spend above the
 free allocation.
 

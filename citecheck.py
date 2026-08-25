@@ -25,19 +25,44 @@ HONEST_BLANK = "NOT IN MY TRAINING"
 
 def known_atoms(root):
     atoms = set()
+    for _course, path in notes_files(root):
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                atoms.update(ATOM_DEF_RE.findall(f.read()))
+        except OSError:
+            continue
+    return atoms
+
+
+def notes_files(root):
+    """Every notes.md an expert has earned, as (course, absolute path).
+
+    THE ONE WALKER. This was inlined here and hand-written a second time in
+    knowledge.py, and the two disagreed: this one walks the whole tree, the
+    other joined `courses/<course>/notes.md` flat. The platform writes
+    `courses/<course>/lessons/NN/notes.md` (ingest.py, harness.py), so the
+    flat version matched nothing — the knowledge graph was empty against
+    every real expert while its own docstring claimed it read "the same
+    notes.md files citecheck.py validates against".
+
+    That is this codebase's recurring defect in its purest form: two
+    descriptions of one truth and nothing comparing them. Now there is one
+    description, and test_knowledge asserts the two agree.
+
+    The course is the first path segment under courses/, so a lesson
+    directory does not become its own course.
+    """
+    out = []
     courses = os.path.join(root, "courses")
     if not os.path.isdir(courses):
-        return atoms
-    for dirpath, _, filenames in os.walk(courses):
-        for fn in filenames:
-            if fn == "notes.md":
-                try:
-                    with open(os.path.join(dirpath, fn), "r",
-                              encoding="utf-8", errors="replace") as f:
-                        atoms.update(ATOM_DEF_RE.findall(f.read()))
-                except OSError:
-                    continue
-    return atoms
+        return out
+    for dirpath, _dirs, filenames in os.walk(courses):
+        if "notes.md" not in filenames:
+            continue
+        rel = os.path.relpath(dirpath, courses).replace(os.sep, "/")
+        course = "" if rel == "." else rel.split("/", 1)[0]
+        out.append((course, os.path.join(dirpath, "notes.md")))
+    return sorted(out)
 
 
 def check(root, answer_path):

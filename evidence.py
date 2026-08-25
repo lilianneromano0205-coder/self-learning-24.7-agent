@@ -114,7 +114,7 @@ SYSTEMS = {
                   "test_skillgraph.py", "test_skillmd.py", "test_recall.py",
                   "test_associative.py", "test_memory_kinds.py",
                   "test_conflicts.py", "test_awareness.py", "test_audit.py",
-                  "test_cases.py", "test_gotcha_retire.py",
+                  "test_cases.py", "test_gotcha_retire.py", "test_discover.py",
                   "test_reflector.py"],
         "blind": "conflict detection is text-based and conservative by "
                  "design: it finds polarity flips and numeric disagreements "
