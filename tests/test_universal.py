@@ -290,8 +290,118 @@ def main():
         check_authority_stops_the_run(home)
         check_a_dry_run_changes_nothing(home)
         check_every_gap_routes_somewhere_real(home)
+        check_the_unified_entry_point_is_reachable()
         print("PASS test_universal")
     finally:
+        shutil.rmtree(home, ignore_errors=True)
+
+
+def check_the_unified_entry_point_is_reachable():
+    """A unified entry point nothing can reach is not an entry point.
+
+    `universal.achieve` is the layer whose whole claim is "hand it a goal and
+    it orchestrates the rest". It shipped with exactly ONE caller: its own
+    CLI. The panel could reach `universal.resolve(apply=False)`, which is a
+    READ — it assesses and routes and does nothing. loop.py never imported
+    universal at all. So from the platform's point of view the unified layer
+    was an orphan, and "give it a goal and it figures the rest out" was true
+    only for someone typing at a terminal.
+
+    Two things are asserted here, over real HTTP against a real panel:
+
+      1. POST /api/achieve exists, is permissioned deliberately rather than
+         by inheriting the unlisted-route default, and reaches the layer;
+      2. when a gap routes to the OWNER, it returns started=False and names
+         the blockers. Authority is the one dimension a machine must not
+         resolve for itself, and that is enforced by refusing to begin — not
+         by asking a model to behave.
+    """
+    import subprocess
+    import time
+    import urllib.error
+    import urllib.request
+
+    import ui as uimod
+
+    assert uimod.POST_PERMISSION.get("/api/achieve") == "run", (
+        "the unified entry point has no declared permission, so it inherits "
+        "the unlisted-route default — a route this powerful should be a "
+        "decision somebody made")
+
+    home = tempfile.mkdtemp(prefix="achieve-panel-")
+    os.makedirs(os.path.join(home, "experts"), exist_ok=True)
+    with io.open(os.path.join(home, "settings.toml"), "w",
+                 encoding="utf-8") as f:
+        f.write('[agent]\npoll_interval_seconds = 1\nreflect_after = []\n\n'
+                '[providers.m]\ntype = "mock"\nscript = "s.json"\n\n'
+                '[roles.default]\nprovider = "m"\nmodel = "mock"\n')
+    with io.open(os.path.join(home, "s.json"), "w", encoding="utf-8") as f:
+        f.write("[]")
+    fleet.create(home, "Probe", "a probe expert")
+
+    port = 7911
+    base = f"http://127.0.0.1:{port}"
+    proc = subprocess.Popen(
+        [sys.executable, os.path.join(AGENT_DIR, "ui.py"),
+         "--home", home, "--port", str(port)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def call(method, path, body=None):
+        data = json.dumps(body).encode("utf-8") if body is not None else None
+        req = urllib.request.Request(base + path, data=data, method=method)
+        req.add_header("Origin", base)
+        req.add_header("Content-Type", "application/json")
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                return r.status, json.loads(r.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            try:
+                return e.code, json.loads(e.read().decode("utf-8"))
+            except Exception:
+                return e.code, {}
+
+    try:
+        for _ in range(80):
+            try:
+                if call("GET", "/api/experts")[0] == 200:
+                    break
+            except Exception:
+                time.sleep(0.25)
+        else:
+            raise AssertionError("panel did not start")
+
+        # the route exists and validates its inputs rather than 404ing
+        code, r = call("POST", "/api/achieve", {"expert": "", "goal": ""})
+        assert code == 400 and "required" in json.dumps(r), (code, r)
+        code, r = call("POST", "/api/achieve",
+                       {"expert": "nosuchexpert", "goal": "do a thing"})
+        assert code == 404, (code, r)
+
+        # a goal whose gap routes to the OWNER must not start work
+        code, r = call("POST", "/api/achieve", {
+            "expert": "probe",
+            "goal": "log into the vendor portal with my credentials and "
+                    "download every invoice",
+            "learn": False})
+        assert code == 200, (code, r)
+        assert r.get("started") is False, (
+            f"work was STARTED on a goal that needs the owner's authority: "
+            f"{r}. Refusing to begin is the enforcement; anything else is a "
+            f"request that a model behave.")
+        assert r.get("needs_owner"), r
+        assert "authority" in (r.get("message") or "").lower(), r
+        print(f"[unified] POST /api/achieve is reachable, permissioned 'run' "
+              f"by declaration, validates its inputs, and REFUSED to start a "
+              f"goal needing the owner — naming "
+              f"{len(r['needs_owner'])} blocker(s) instead of beginning. The "
+              f"layer that orchestrates everything is no longer reachable "
+              f"only from a terminal.")
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except Exception:
+            proc.kill()
         shutil.rmtree(home, ignore_errors=True)
 
 

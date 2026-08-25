@@ -578,6 +578,11 @@ POST_PERMISSION = {
     "/api/quick":              "create_agent",
     "/api/learner":            "create_agent",
     "/api/team":               "run",
+    # The unified entry point. "run" rather than "read": it resolves gaps
+    # (which can open acquisitions) and then starts the goal engine. It is
+    # declared here rather than left to the unlisted-route default so the
+    # permission is a decision somebody made, not one it inherited.
+    "/api/achieve":            "run",
     "/api/missions":           "run",
     "/api/curriculum":         "run",
     "/api/workers":            "connect_tool",
@@ -1836,6 +1841,64 @@ class Handler(BaseHTTPRequestHandler):
                                    endpoint=d.get("endpoint", ""))
                 self._json({"published": [sk["expert"] for sk in card["skills"]],
                             "fingerprint": card.get("key_fingerprint")})
+            elif path == "/api/achieve":
+                # THE UNIFIED ENTRY POINT: one goal in, and either real work
+                # or a precise statement of what is standing in the way.
+                #
+                # universal.achieve existed with exactly one caller — its own
+                # CLI. The panel could only reach universal.resolve(apply=
+                # False), which is a READ: it assesses and routes and does
+                # nothing. So the layer whose whole purpose is "hand it a
+                # goal and it orchestrates the rest" was, from the platform's
+                # point of view, an orphan.
+                #
+                # This is a POST because it ACTS. It resolves what can be
+                # resolved (discovery runs; acquisitions may open), and then
+                # starts the goal engine — the same background launch the
+                # Learner lane uses, so a long pursuit does not hold an HTTP
+                # handler open.
+                #
+                # AUTHORITY STOPS IT. If anything routes to the owner, work
+                # is NOT started and the blockers are returned instead.
+                # "authority is the one dimension a machine must never
+                # resolve for itself" is enforced here by refusing to begin,
+                # not by asking the model to behave.
+                import universal
+                d = self._data
+                slug = (d.get("expert") or "").strip()
+                want = (d.get("goal") or "").strip()
+                if not slug or not want:
+                    self._fail({"error": "expert and goal are both required"},
+                               400)
+                    return
+                root = expert_root(self.home, slug)
+                if not os.path.isdir(root):
+                    self._fail({"error": f"no expert '{slug}'"}, 404)
+                    return
+                criteria = (d.get("criteria") or "").strip()
+                plan = universal.resolve(self.home, slug, want, criteria,
+                                         apply=bool(d.get("learn", True)))
+                if plan.get("needs_owner"):
+                    self._json({
+                        "started": False,
+                        "verdict": plan.get("verdict"),
+                        "needs_owner": plan["needs_owner"],
+                        "actions": plan.get("actions") or [],
+                        "message": "STOPPED before starting: this goal needs "
+                                   "you. " + "; ".join(
+                                       g["what"] for g in plan["needs_owner"])
+                                   + ". Nothing was attempted, because "
+                                     "authority is the one gap a machine must "
+                                     "not resolve for itself."})
+                    return
+                gid = start_goal(self.home, slug, root, want,
+                                 cycles=d.get("cycles") or 4,
+                                 criteria=criteria or None)
+                self._json({"started": True, "goal_id": gid,
+                            "verdict": plan.get("verdict"),
+                            "actions": plan.get("actions") or [],
+                            "message": f"resolved what could be resolved, "
+                                       f"then started {gid}"})
             elif path == "/api/learner":
                 # LANE 4: give a topic, get an expert that studies it to
                 # mastery — created, then handed the learning goal at once
