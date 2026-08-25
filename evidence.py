@@ -89,7 +89,8 @@ SYSTEMS = {
         "what": "courses and atoms, skills graph, commons, failures, gotchas, "
                 "premise, competence, recall, sources, conflicts, standards, "
                 "self-model",
-        "tests": ["test_memory.py", "test_memcheck.py", "test_skills.py",
+        "tests": ["test_knowledge.py",
+                  "test_memory.py", "test_memcheck.py", "test_skills.py",
                   "test_skillgraph.py", "test_skillmd.py", "test_recall.py",
                   "test_associative.py", "test_memory_kinds.py",
                   "test_conflicts.py", "test_awareness.py", "test_audit.py",
