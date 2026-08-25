@@ -470,18 +470,40 @@ Each item is scoped, and the first two need no new infrastructure.
    returning; and a push with no credentials refuses by name **without
    touching the network**.
 
-3. **A container image and a start/stop hook (medium).** `Dockerfile` already
-   exists. Add: restore from R2 at boot, snapshot to R2 before sleep, and set
-   `sleepAfter` generously. State stays on local disk — never on FUSE.
+3. **A container image and a start/stop hook** — *done.*
+   `deploy/entrypoint.sh` (841 lines) restores the newest R2 archive at boot,
+   verifies it before promoting it, snapshots on an interval **and** on
+   SIGTERM, takes a boot lock so two containers cannot restore over each
+   other, and heartbeats so a dead holder is distinguishable from a live one.
+   `deploy/README.md` is the operator's manual, including the data-loss
+   window between snapshots. State stays on local disk — never on FUSE.
 
-4. **A Durable Object alarm to wake the fleet (small, optional).** Cheaper
-   than never sleeping: the alarm pokes the container on a schedule, the
-   container drains its queue and sleeps again. Costs only what it runs.
+4. **A Durable Object alarm to wake the fleet** — *done.*
+   `deploy/worker/src/index.ts`. The alarm **reschedules itself before it
+   does any work**: if a drain threw and the reschedule sat after it, no
+   alarm would ever be set again and the deployment would stop silently. DO
+   alarms are at-least-once, so a drain can run twice — harmless here,
+   because the second finds an empty queue.
 
-5. **`sandbox.py` Cloudflare backend (medium, only if wanted).** Sandbox SDK
-   is a genuine fifth backend beside `host`/`docker`/`e2b`/`daytona`, but its
-   API is TypeScript-from-Workers, so it needs a thin Worker exposing REST
-   that our Python client can call — the same shape `_hosted()` already uses.
+5. **`sandbox.py` Cloudflare backend** — *done.*
+   `cloudflare` is now the fifth backend beside `host`/`docker`/`e2b`/
+   `daytona`. Its REST surface is `/exec` in the same Worker, deliberately
+   speaking the request shape `_hosted()` already used, so the Python client
+   needed no new code. `/exec` runs shell commands, so it requires a bearer
+   token compared in constant time and **refuses every request when the
+   secret is unset** rather than running them unauthenticated. The token is
+   a dedicated secret, **not** your Cloudflare API token: that token can
+   create Workers, read R2 and spend money account-wide, and sending it
+   there would mean holding full account authority in order to run `ls`.
+
+**What was verified, and how.** `npx tsc --noEmit` passes — and caught a real
+defect first: the `Sandbox` binding was declared as a bare
+`DurableObjectNamespace`, which resolves to `<undefined>`, and `getSandbox`
+rejected it. `npx wrangler deploy --dry-run` parses the config, resolves all
+three bindings, **and builds the Dockerfile — whose build step runs the full
+Python suite inside the Linux image, which passed.** What is still unverified
+is everything that needs an account: no token, no container, no Neuron spent.
+`wrangler deploy` is the first real test.
 
 **What not to do:** do not port the loop to Workers, do not move `state.json`
 onto R2-FUSE, and do not adopt Workflows or Agents unless you are willing to

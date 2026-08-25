@@ -52,7 +52,13 @@ HOSTED = {
                    "url": "https://api.e2b.dev"},
     "daytona":    {"key": "DAYTONA_API_KEY",
                    "url": "https://app.daytona.io/api"},
-    "cloudflare": {"key": "CLOUDFLARE_API_TOKEN",
+    # DELIBERATELY NOT CLOUDFLARE_API_TOKEN. That token can create Workers,
+    # read R2 and spend money across the whole account; sending it as a
+    # bearer to a Worker means the Worker — and anything that ever reads its
+    # logs or environment — holds full account authority in order to run
+    # `ls`. This is a dedicated shared secret whose only power is "may ask
+    # this one sandbox to run a command", so a leak costs exactly that.
+    "cloudflare": {"key": "CLOUDFLARE_SANDBOX_TOKEN",
                    "url": None,
                    "url_env": "CLOUDFLARE_SANDBOX_URL"},
 }

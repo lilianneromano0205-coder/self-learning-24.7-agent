@@ -350,20 +350,25 @@ store_get() {
     mkdir -p "$_dest"
     case "$STORE" in
         r2)
-            # backup.py pull re-verifies what it downloaded, and as of this
-            # writing that verification is BROKEN: `pull()` does
-            #     rep = verify(out)
-            #     if rep.get("problems"):
-            # where verify() returns an (ok, report) TUPLE — so every pull
-            # ends in AttributeError, including a pull of a perfectly good
-            # archive (reproduced locally, without a network). The bytes are
-            # written before that line, so the download itself is fine.
+            # backup.py pull re-verifies what it downloaded. This comment
+            # used to say that verification was BROKEN — `rep = verify(out)`
+            # against a function returning an (ok, report) tuple, so every
+            # pull ended in AttributeError. That was true when it was
+            # written and has since been fixed: backup.py now unpacks
+            # `ok, rep = verify(out)` and raises a named RuntimeError on a
+            # damaged archive. A comment asserting in the present tense that
+            # a shipped component is broken is its own defect — the next
+            # reader either distrusts a working restore path or goes hunting
+            # for a bug that is not there.
             #
-            # The gate below is therefore OUR OWN verify, not pull's exit
-            # status. That is the right shape even after the bug is fixed: a
-            # restore must never trust the downloader's claim that the bytes
-            # are good, because a truncated download and a corrupt archive
-            # look identical until somebody recomputes the checksums.
+            # The gate below is STILL our own verify rather than pull's exit
+            # status, and that is deliberate rather than leftover: a restore
+            # must not trust the downloader's claim that the bytes are good,
+            # because a truncated download and a corrupt archive look
+            # identical until somebody recomputes the checksums. Two
+            # independent checks of one claim is the correct shape here; it
+            # is the ABSENCE of the second check that this codebase keeps
+            # finding, not its presence.
             set +e
             "$PY" "$BACKUP" pull "$_key" --dest "$_dest" \
                 --endpoint "$FLEET_R2_ENDPOINT" --bucket "$FLEET_R2_BUCKET" \

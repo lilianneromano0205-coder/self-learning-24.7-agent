@@ -1,0 +1,72 @@
+{
+  // EXPERT FLEET — Worker + Container deployment.
+  //
+  // Read deploy/worker/README.md before running `wrangler deploy`: the
+  // container's disk is EPHEMERAL, so a deployment without R2 configured
+  // loses the whole fleet every time the container sleeps.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "expert-fleet",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "observability": {
+    // On by default: the alarm and the container lifecycle log JSON events,
+    // and a scheduled job you cannot see is a scheduled job you cannot trust.
+    "enabled": true
+  },
+
+  "containers": [
+    {
+      "class_name": "FleetContainer",
+      // The repository's existing Dockerfile, two levels up. It already
+      // builds the whole platform, runs the test suite during the build, and
+      // ships deploy/entrypoint.sh as its ENTRYPOINT.
+      "image": "../../Dockerfile",
+      // ONE instance. This is not a throughput limit, it is a correctness
+      // one: the platform's concurrency safety rests on O_EXCL and atomic
+      // rename over ONE state directory, and two containers restoring the
+      // same R2 snapshot would each promote their own copy and then run two
+      // loops against divergent state. entrypoint.sh takes a boot lock and
+      // refuses the second one, but that is a backstop, not a licence to
+      // scale this number up.
+      "max_instances": 1,
+      "instance_type": "standard"
+    }
+  ],
+
+  "durable_objects": {
+    "bindings": [
+      { "name": "FLEET", "class_name": "FleetContainer" },
+      { "name": "Sandbox", "class_name": "Sandbox" }
+    ]
+  },
+
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["FleetContainer", "Sandbox"]
+    }
+  ],
+
+  "vars": {
+    // Minutes between wake-ups. The Worker floors this at 5 — an alarm
+    // firing faster than a drain completes would stack drains onto a
+    // container that is already busy.
+    "FLEET_DRAIN_MINUTES": "60"
+  }
+
+  // SECRETS — set these with `wrangler secret put`, never here. This file is
+  // committed; secrets in it would be published to GitHub.
+  //
+  //   npx wrangler secret put FLEET_EXEC_TOKEN
+  //       Required before /exec will run anything. Without it that route
+  //       refuses every request rather than running them unauthenticated.
+  //       Put the SAME value in the fleet's agent.env as
+  //       CLOUDFLARE_SANDBOX_TOKEN. It is NOT your Cloudflare API token.
+  //
+  // The container also needs its own credentials (model provider keys, R2
+  // keys for snapshots). Those belong to the CONTAINER, not to this Worker —
+  // see deploy/README.md, which covers the R2 restore/snapshot lifecycle the
+  // ephemeral disk makes mandatory.
+}

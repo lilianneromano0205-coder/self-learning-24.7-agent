@@ -319,45 +319,44 @@ def knowledge_on_hand(root, goal, criteria=""):
     same reason every other number here is: an expert that believes it knows
     a subject and an expert that knows it look identical from the inside.
     """
+    # THE THIRD COPY OF ONE WALKER, now removed.
+    #
+    # This function used to os.walk the course tree itself and re-declare the
+    # atom regex `^\s*-\s*([CPU]-\d{2,}[\w.]*)\s+(.*)$` inline. citecheck.py
+    # had one, knowledge.py had another, and this was the third — three
+    # descriptions of "what an atom is and where atoms live", which is the
+    # defect this codebase finds more often than any other. It had already
+    # bitten once: knowledge.py's copy joined a flat path the platform never
+    # writes, so the knowledge graph was empty against every real expert.
+    #
+    # There is now one definition of an atom (citecheck.ATOM_DEF_RE), one
+    # walker (citecheck.notes_files), and one parser (knowledge.atoms). This
+    # asks knowledge.py, which is also the production caller that module was
+    # missing — it had shipped with a CLI and no consumer.
     words = {w for w in re.findall(r"[a-z0-9]{4,}", f"{goal} {criteria}".lower())}
-    atoms, courses, tiers = [], 0, []
     cdir = os.path.join(root, "courses")
     if not os.path.isdir(cdir):
         return {"atoms": [], "courses": 0, "matched": 0, "best_tier": None}
     try:
-        import sources as _src
-    except ImportError:                      # pragma: no cover
-        _src = None
-    for course in sorted(os.listdir(cdir)):
-        cpath = os.path.join(cdir, course)
-        if not os.path.isdir(cpath):
+        import knowledge as _kn
+        rows = _kn.atoms(root)
+    except Exception:                        # pragma: no cover
+        return {"atoms": [], "courses": 0, "matched": 0, "best_tier": None}
+    atoms, tiers = [], []
+    for a in rows:
+        claim = a.get("claim") or ""
+        # the same rule as before: at least TWO substantive words shared, so
+        # a single incidental word does not count as having studied a subject
+        if len({w for w in re.findall(r"[a-z0-9]{4,}", claim.lower())}
+               & words) < 2:
             continue
-        courses += 1
-        for dirpath, _d, names in os.walk(cpath):
-            for fn in names:
-                if fn != "notes.md":
-                    continue
-                try:
-                    with open(os.path.join(dirpath, fn), encoding="utf-8",
-                              errors="replace") as f:
-                        body = f.read()
-                except OSError:
-                    continue
-                for line in body.splitlines():
-                    m = re.match(r"^\s*-\s*([CPU]-\d{2,}[\w.]*)\s+(.*)$", line)
-                    if not m:
-                        continue
-                    text = m.group(2).lower()
-                    if len({w for w in re.findall(r"[a-z0-9]{4,}", text)} & words) >= 2:
-                        atoms.append({"id": m.group(1), "course": course,
-                                      "text": m.group(2)[:120]})
-                        src = re.search(r"\[src:\s*([^\]]+)\]", m.group(2))
-                        if src and _src:
-                            try:
-                                _k, tier, _why = _src.classify(src.group(1).strip())
-                                tiers.append(tier)
-                            except Exception:
-                                pass
+        atoms.append({"id": a["id"], "course": a.get("course", ""),
+                      "text": claim[:120]})
+        if a.get("source"):
+            tier, _why = _kn._tier_of(a["source"])
+            tiers.append(tier)
+    courses = len({a.get("course") for a in rows if a.get("course")}) or len(
+        [d for d in os.listdir(cdir) if os.path.isdir(os.path.join(cdir, d))])
     return {"atoms": atoms[:40], "courses": courses, "matched": len(atoms),
             "best_tier": min(tiers) if tiers else None}
 

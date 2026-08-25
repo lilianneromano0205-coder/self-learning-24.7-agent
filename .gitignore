@@ -44,3 +44,7 @@ __pycache__/
 tests/tmp/
 .DS_Store
 .firecrawl/
+
+# Worker deps (deploy/worker) — restored with `npm install`
+node_modules/
+.wrangler/

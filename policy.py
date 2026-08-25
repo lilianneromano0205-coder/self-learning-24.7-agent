@@ -59,6 +59,12 @@ BUILTIN_DENY = [
 # world. The same rule the Effect Authority applies to external effects,
 # applied to commands.
 REVIEW = [
+    # Turning on an MCP server is the widest single privilege change the
+    # agent can make: a toolkit arrives with tools the platform has never
+    # seen, and `filesystem` rooted at a drive letter would reach around
+    # fileauth's zones entirely. It is a CONFIGURATION change, so it belongs
+    # to the owner — and unlike `mcp.py call`, nothing downstream gates it.
+    (r"\bmcp\.py\b[^|;&]*\benable\b", "granting the agent a new MCP toolkit"),
     (r"\bgit\s+push\b", "publishing code to a remote"),
     (r"\bgh\s+(pr|release|repo)\s+(create|edit|delete)\b", "changing a GitHub repository"),
     (r"\b(npm|yarn|pnpm)\s+publish\b", "publishing a package"),
@@ -87,20 +93,48 @@ REVIEW = [
 ]
 
 
-GOVERNED_ENTRY_POINTS = ("mcp.py",)
+# Platform tools that carry their OWN approval gate, and — critically —
+# WHICH OF THEIR SUBCOMMANDS DO.
+#
+# This was `("mcp.py",)`: the whole script. The reasoning was sound for the
+# subcommand it was written for — `mcp.py call` runs every invocation through
+# guarded_call, which classifies risk, asks for approval and writes the
+# effects ledger, so reviewing it a second time here would only stop the
+# ledger from recording it.
+#
+# But the exemption was granted to the FILE, and `mcp.py enable` is in the
+# same file and carries no gate at all. It writes mcp.json and hands the
+# agent a whole new toolkit. Measured: `policy.check` and `policy.review`
+# both passed `python mcp.py enable filesystem C:/` silently, while plain
+# `git push` required approval — so the agent could not publish a commit
+# without asking, but could grant itself unrestricted filesystem access
+# through an MCP server rooted at the drive letter, going around fileauth's
+# zones entirely.
+#
+# An exemption must be no wider than the gate that justifies it.
+GOVERNED_ENTRY_POINTS = {
+    # read-only inspection, plus `call`, which guarded_call governs
+    "mcp.py": ("list", "tools", "catalog", "call"),
+}
 
 
 def _is_governed_entry_point(text):
     """Is this command SOLELY an invocation of a platform tool that carries
     its own gate?
 
-    Two conditions, and both are load-bearing:
+    Three conditions, and all three are load-bearing:
 
       1. the script being run is one of ours — matched as the argument to a
          python interpreter, not merely mentioned somewhere in the string, so
          `python evil.py --config mcp.py` does not qualify;
       2. the command contains no shell metacharacter at all, so nothing can
-         be chained, piped, substituted or redirected onto the end of it.
+         be chained, piped, substituted or redirected onto the end of it;
+      3. the SUBCOMMAND is one that actually carries a gate. `mcp.py call`
+         does — guarded_call classifies risk, asks for approval and writes
+         the effects ledger. `mcp.py enable` does not: it writes mcp.json and
+         grants a new toolkit. Exempting the file exempted both, which let
+         the agent hand itself a filesystem server rooted anywhere while
+         still needing approval to run `git push`.
 
     Together those mean the exemption cannot be used to smuggle anything: the
     only thing that runs is the tool whose own approval gate and effects
@@ -113,7 +147,19 @@ def _is_governed_entry_point(text):
     if not m:
         return False
     script = m.group(1).replace("\\", "/").rsplit("/", 1)[-1]
-    return script in GOVERNED_ENTRY_POINTS
+    allowed = GOVERNED_ENTRY_POINTS.get(script)
+    if not allowed:
+        return False
+    # the first bare word after the script is the subcommand; a command with
+    # no subcommand at all prints usage and does nothing, but it is also not
+    # a gated action, so it is not exempted either
+    rest = text[m.end():].strip()
+    sub = ""
+    for tok in rest.split():
+        if not tok.startswith("-"):
+            sub = tok.strip('"').lower()
+            break
+    return sub in allowed
 
 
 def review(cmd, cfg=None):
