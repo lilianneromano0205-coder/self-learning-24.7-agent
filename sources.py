@@ -202,7 +202,52 @@ GITHUB_TALK = ("issues", "discussions", "pull", "pulls", "wiki")
 # phish.gov.cdn-mirror.io read as institutional -- which is the same
 # "trust carried in a component a stranger controls" failure the host rule
 # in classify() exists to prevent, one field over.
-INSTITUTIONAL = re.compile(r"\.(gov|edu|mil|int)$|\.(ac|edu|gov)\.[a-z]{2}$")
+# Public institutions, by the suffix their country actually uses.
+#
+# The old pattern was `\.(gov|edu|mil|int)$|\.(ac|edu|gov)\.[a-z]{2}$`, which
+# is the United States plus the Commonwealth and nothing else. Measured
+# against real bodies, `ec.europa.eu` — the European Commission — came back
+# tier 3 with the reason "unrecognised origin", the SAME rating as
+# `someseoblog.example/top-10`. A learner told to prefer government and
+# university sources could not tell the two apart, which is the whole
+# problem it was supposed to solve.
+#
+# So the suffixes are the ones governments and universities really use:
+# France (.gouv.fr), Canada (.gc.ca), New Zealand (.govt.nz), Switzerland
+# (.admin.ch), Germany (.bund.de), Japan and Korea (.go.jp/.go.kr), the
+# Spanish- and Portuguese-speaking .gob/.gov variants, and the EU's own
+# europa.eu. Plus the research-institute suffix families (.ac.*, .edu.*,
+# .res.in) that the two-letter rule already half-covered.
+# Every branch is anchored with (^|\.), NOT a bare \. — because classify()
+# strips a leading "www.", so `www.gouv.fr` arrives as `gouv.fr` with no
+# leading dot at all. The first version required one, and France, New
+# Zealand, Switzerland and Japan all came back tier 3 for that reason alone.
+INSTITUTIONAL = re.compile(
+    r"(^|\.)europa\.eu$"                         # EU institutions
+    r"|\.(gov|edu|mil|int|cern)$"                # US, international, CERN
+    r"|(^|\.)(ac|edu|gov|gob|res|qc)\.[a-z]{2,3}$"   # .ac.uk .edu.au .gob.mx
+    r"|(^|\.)(gouv\.fr|gc\.ca|govt\.nz|admin\.ch|bund\.de|go\.jp|go\.kr"
+    r"|gov\.uk|gouv\.qc\.ca)$")
+
+# Public research organisations, national labs and intergovernmental bodies.
+# None of these sit on a .gov or .edu suffix, and every one of them is a
+# primary producer of the material this platform is meant to learn from.
+PUBLIC_RESEARCH = (
+    # national and international laboratories
+    "cern.ch", "esa.int", "embl.de", "esrf.eu", "ill.eu", "mpg.de",
+    "fraunhofer.de", "helmholtz.de", "leibniz-gemeinschaft.de",
+    "cnrs.fr", "inria.fr", "cea.fr", "ifremer.fr",
+    "riken.jp", "jaxa.jp", "aist.go.jp",
+    "csiro.au", "nrc-cnrc.gc.ca", "tno.nl", "sintef.no", "vtt.fi",
+    "csic.es", "cnr.it", "infn.it",
+    # intergovernmental and treaty organisations
+    "un.org", "oecd.org", "worldbank.org", "imf.org", "wto.org",
+    "unesco.org", "unicef.org", "fao.org", "iaea.org", "wipo.int",
+    "europarl.europa.eu", "eea.europa.eu", "ecdc.europa.eu",
+    # professional and standards bodies
+    "ieee.org", "acm.org", "iso.org", "iec.ch", "etsi.org", "itu.int",
+    "astm.org", "ansi.org", "din.de", "bsigroup.com",
+)
 
 # The bar a source must clear to be LEARNED from -- to become a cited atom --
 # as opposed to merely read. Tier 2 by default: professional or better.
@@ -377,6 +422,10 @@ def classify(ref, kind_hint="", cfg=None):
                                f"({TIER_NAMES[tier]})"
         if "stackoverflow.com" in host:
             return "forum", 3, "stackoverflow: high signal, no editorial review"
+        if any(host == d or host.endswith("." + d) for d in PUBLIC_RESEARCH):
+            return kind, 2, (f"{host} is a public research body, national "
+                             f"laboratory, treaty organisation or standards "
+                             f"institute -- tier 2 (professional)")
         if INSTITUTIONAL.search(host):
             return kind, 2, f"{host} is an institutional domain"
     # An UNRECOGNISED origin can never buy professional or normative rank

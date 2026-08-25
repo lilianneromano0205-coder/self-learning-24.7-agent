@@ -136,6 +136,59 @@ def main():
         "the self-model must never smuggle the answers in"
     print("[window] the self-model leads every context window, survives a "
           "closed-book exam, and carries no course content with it")
+    # ---- can it tell a national laboratory from an SEO blog? ------------
+    # The whole "learn only from real sources" claim rests on this one
+    # function, and it was the United States plus the Commonwealth and
+    # nothing else. Measured before the fix, `ec.europa.eu` — the European
+    # Commission — came back tier 3 with the reason "unrecognised origin",
+    # the SAME rating as `someseoblog.example/top-10`. So did CERN, Max
+    # Planck, INRIA, RIKEN, CSIRO, and the governments of France, New
+    # Zealand, Switzerland and Japan. A learner told to prefer government
+    # and university sources could not tell them from a content farm.
+    #
+    # Both directions, enumerated, because a bar that admits everything is
+    # the same as no bar and a bar that admits nothing gets removed.
+    AUTHORITATIVE = [
+        "https://ec.europa.eu/info/x", "https://home.cern/science/y",
+        "https://www.mpg.de/z", "https://www.inria.fr/a",
+        "https://www.riken.jp/b", "https://www.csiro.au/c",
+        "https://www.gouv.fr/d", "https://www.canada.gc.ca/e",
+        "https://www.govt.nz/f", "https://www.admin.ch/g",
+        "https://www.go.jp/h", "https://www.bund.de/i",
+        "https://www.un.org/j", "https://www.oecd.org/k",
+        "https://www.worldbank.org/l", "https://www.ieee.org/m",
+        "https://www.iso.org/n", "https://ocw.mit.edu/o",
+        "https://www.nasa.gov/p", "https://www.cam.ac.uk/q",
+        "https://www.who.int/r", "https://www.nih.gov/s",
+    ]
+    NOT_AUTHORITATIVE = [
+        "https://medium.com/@someone/how-i-did-it",
+        "https://someseoblog.example/top-10-tips",
+        "https://www.reddit.com/r/programming/x",
+        "https://randomtips.example/blog/post",
+        "https://mit.edu.evil.example/pretending",   # lookalike, not MIT
+    ]
+    low = [(u, sources.classify(u)[1]) for u in AUTHORITATIVE
+           if sources.classify(u)[1] > sources.LEARN_MIN_TIER]
+    assert not low, (
+        f"{len(low)} public institution(s) rate below the learn bar and would "
+        f"be refused as material: {low[:5]}. This is the function the whole "
+        f"'real sources, not generic internet trash' claim rests on.")
+    high = [(u, sources.classify(u)[1]) for u in NOT_AUTHORITATIVE
+            if sources.classify(u)[1] <= sources.LEARN_MIN_TIER]
+    assert not high, (
+        f"content-farm material cleared the learn bar: {high}. A bar that "
+        f"admits everything is the same as no bar.")
+    assert sources.classify("https://mit.edu.evil.example/x")[1] >= 3, (
+        "a lookalike domain inherited MIT's standing — trust must come from "
+        "the registered domain, never from a substring of it")
+    print(f"[institutions] {len(AUTHORITATIVE)} real public bodies — the EU, "
+          f"CERN, Max Planck, INRIA, RIKEN, CSIRO, four national governments, "
+          f"the UN, OECD, IEEE, ISO, MIT OpenCourseWare — all clear the learn "
+          f"bar, while {len(NOT_AUTHORITATIVE)} content-farm and lookalike "
+          f"URLs do not; before this, the European Commission rated exactly "
+          f"the same as an SEO blog")
+
     print("PASS test_awareness")
 
 

@@ -141,7 +141,8 @@ SYSTEMS = {
         "what": "capability proof levels derived from hash-bound evidence; "
                 "the mission contract that survives context resets, restarts "
                 "and model swaps",
-        "tests": ["test_proof.py", "test_mission.py", "test_metrics.py"],
+        "tests": ["test_proof.py", "test_mission.py", "test_metrics.py",
+                  "test_evalsuite.py"],
         "blind": "no mission here has run longer than a test. The contract is "
                  "proven to survive a simulated reset, not a week of real "
                  "drift, and no capability has ever been observed above level "
