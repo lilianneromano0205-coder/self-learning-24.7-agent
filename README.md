@@ -3,7 +3,7 @@
 **A file-backed, stdlib-only platform for building expert AI agents that work
 continuously, prove what they did, and remember what they learned.**
 
-71 Python modules · 99 acceptance tests · one HTML control panel · no
+77 Python modules · 107 acceptance tests · one HTML control panel · no
 database, no framework, no build step. Python 3.11+ and your own API keys.
 
 ```bash
@@ -35,7 +35,7 @@ claim it works, and what is not proven.
 
 ---
 
-## The five ideas you need to know
+## The six ideas you need to know
 
 **1. "Done" is a command, not an opinion.**
 A task can carry a definition of done. When the model calls `finish_task`,
@@ -57,7 +57,7 @@ control defends the path its author was thinking about, and does not know
 about the other paths.* Six places executed shell; one was tested. The answer
 is one mandatory gateway per kind of power — Execution, File, Credential,
 Model Gateway, Effect — and `python execution.py --audit` fails the build if
-any module bypasses one. Today: **0 violations across 71 modules.**
+any module bypasses one. Today: **0 violations across 77 modules**, 16 declared platform-internal.
 
 **4. Proof is derived, never claimed.**
 Six levels from SPEC to PRODUCTION PROVEN, computed from evidence bound to a
@@ -73,6 +73,35 @@ decides which kinds each role may see — the Student sees the course and
 nothing else, because a closed-book exam is not closed-book if the answers
 are in the window.
 
+**6. It finds its own sources — from catalogues, never a search engine.**
+An expert that can only read what a human pasted has not learned anything by
+itself. `discover.py` queries the registries the real material lives in —
+OpenAlex, Crossref, DOAJ, PubMed, Zenodo, Software Heritage, GitHub, the EU
+open-data portal, the Library of Congress — all keyless, all public, all
+curated. **Deliberately not a web search**: a general index is ranked for
+engagement, personalised, and changes hourly, so citing it cites nothing, and
+its top results for a technical question are content farms and reposts of the
+real document. Every search-engine host is pinned to tier 4 and can never
+clear the learn bar at any setting. "Only reputable sources" is therefore a
+property of *where candidates can come from*, not an instruction a model may
+ignore.
+
+Two things make it usable rather than merely principled. The goal is reduced
+to its subject before being sent — the raw goal `understand b-tree index
+concurrency control` had PubMed returning *Vascular Compliance and
+Cardiovascular Disease*, matching `compliance`/`control`. And any result
+sharing no substantive term with the query is dropped **and counted**,
+because an off-topic paper reached by a trusted route becomes a cited atom:
+a wrong belief carrying a real citation, which is worse than no belief. The
+same query now returns Bayer & Schkolnick 1977, ARIES/IM, and Graefe's
+*Modern B-tree techniques*.
+
+```bash
+python discover.py "b-tree index concurrency" --limit 5
+python discover.py "CRISPR off-target" --rails pubmed --min-tier 1
+python discover.py "raft consensus" --commands --root experts/dbexpert
+```
+
 ---
 
 ## Why you should believe any of it
@@ -80,7 +109,7 @@ are in the window.
 Five kinds of evidence, weakest first — and the last is the only one produced
 on a computer this project does not own.
 
-**The suite passes — on three platform/version pairs now, not one.** 99
+**The suite passes — on three platform/version pairs now, not one.** 107
 acceptance tests, green on Windows under Python 3.14 and on Linux under
 Python 3.11 and 3.13. Each test prints a sentence describing what it
 observed; `EVIDENCE.md` quotes them verbatim. CI runs the same suite on
@@ -91,10 +120,10 @@ was wrong.
 
 **The tests enumerate rather than exemplify.** `tests/test_invariants.py`
 does not test through an example — it walks the tree: every subprocess call
-site in 71 modules, every declared control file, 12 traversal spellings, all
+site in 77 modules, every declared control file, 12 traversal spellings, all
 4 credential sources against every subsystem that must exclude them, all 9
 provider-call purposes, all 9 roles, every module that mints an expert, every
-reader of the exam file, all 144 sandbox names across 99 test files, all
+reader of the exam file, all 152 sandbox names across 107 test files, all
 64 CLI subcommands the manual promises, and — parsing every module — every
 comparison that puts a file timestamp on both sides, which is how two
 silent staleness bugs were found at once rather than one at a time.
@@ -225,7 +254,7 @@ build is cleared.** The full table is in
 
 ```bash
 python demo.py            # the whole platform, keyless, in one run
-python tests/run_all.py   # 99 acceptance tests
+python tests/run_all.py   # 107 acceptance tests
 python proof.py           # what is proven, and to what level
 python evidence.py        # why we believe it, and where belief runs out
 python metrics.py         # is it working — and the numbers it refuses to invent
@@ -274,6 +303,8 @@ the panel teaches the terminal instead of hiding it.
 | **[ARCHITECTURE.md](ARCHITECTURE.md)** | **the complete technical account — start here** |
 | [MANUAL.md](MANUAL.md) | the operator's guide: every command, every setting |
 | **[CLOUDFLARE.md](CLOUDFLARE.md)** | can this run on Cloudflare? what fits, what cannot, and what it costs |
+| [deploy/README.md](deploy/README.md) | running it in a container: the R2 restore/snapshot lifecycle an ephemeral disk makes mandatory |
+| [deploy/worker/README.md](deploy/worker/README.md) | the Cloudflare Worker: a Durable Object alarm that wakes the fleet, and a REST sandbox |
 | [REFERENCE.md](REFERENCE.md) | every system end to end, and an honest list of limits |
 | [GAPS_RISKS_AND_UNFINISHED.md](GAPS_RISKS_AND_UNFINISHED.md) | the audit record — five passes, 21 numbered defects |
 | [REMEDIATION.md](REMEDIATION.md) | what was done about each, and the residual risk |
