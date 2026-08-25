@@ -94,13 +94,25 @@ SYSTEMS = {
                   "test_skillgraph.py", "test_skillmd.py", "test_recall.py",
                   "test_associative.py", "test_memory_kinds.py",
                   "test_conflicts.py", "test_awareness.py", "test_audit.py",
-                  "test_cases.py",
+                  "test_cases.py", "test_gotcha_retire.py",
                   "test_reflector.py"],
         "blind": "conflict detection is text-based and conservative by "
                  "design: it finds polarity flips and numeric disagreements "
                  "between claims about the same subject, and has no semantic "
                  "model of any domain. Contradictions phrased outside those "
-                 "rules are missed, and no test can enumerate what is missed.",
+                 "rules are missed, and no test can enumerate what is missed. "
+                 "Gotcha retirement has its own limit, in the other "
+                 "direction: a probe names the COMMAND (plus its subcommand "
+                 "for a generic runner like git or python), not the "
+                 "arguments. So a failure that depends on the input — pandoc "
+                 "handling .docx but choking on .odt — is retired by a "
+                 "success on a different file, and the warning is withdrawn "
+                 "while still true for the case that mattered. It comes back "
+                 "the next time it bites, marked UNRETIRED, but it is "
+                 "withdrawn in between. Narrowing the probe to the full "
+                 "argument list would trade this for the opposite failure: "
+                 "almost nothing would ever match, and gotchas would "
+                 "accumulate forever again.",
     },
     "5. Improvement & governance": {
         "what": "charter variants with predictions, approvals, replay, "
