@@ -144,6 +144,47 @@ def main():
         "a case filed after the cache warmed never reached a sibling — a "
         "stale shared memory is worse than none, because it looks current")
 
+    # ---- GOTCHAS travel too, and arrive as a warning not a rule ---------
+    # A gotcha is the cheapest knowledge in the fleet to reuse and was the
+    # most private: "pandoc is not on PATH inside the container" was
+    # rediscovered, at full cost, by every expert on the same machine.
+    #
+    # But a gotcha is BINDING in its own expert's context — "do not re-run a
+    # step listed here as failing". A stranger's gotcha cannot carry that
+    # force: its environment may differ. So it must arrive marked, and the
+    # test asserts the marking, not just the delivery.
+    import gotchas as _g
+    _g.from_failure(veteran, {"id": "g1", "role": "practitioner",
+                              "goal": "convert the docx report to markdown "
+                                      "with pandoc",
+                              "status": "failed", "steps": []},
+                    {"category": "infrastructure",
+                     "cause": "pandoc is not on PATH inside the container",
+                     "actual": "exit 127 command not found"})
+    assert _g.load(rookie) == [], "the rookie should own no gotchas"
+    sib = experience.gotchas_matching(
+        home, "convert the docx report to markdown with pandoc",
+        exclude="rookie")
+    assert sib, (
+        "a sibling's environment failure did not reach a rookie doing the "
+        "same work — that failure gets paid for twice on one machine")
+    assert all(g.get("expert") for g in sib), "a gotcha arrived unattributed"
+    block = experience.render_gotchas(sib)
+    assert "not binding" in block and "veteran" in block, block[:200]
+    assert "worth ignoring if" in block, (
+        "a stranger's gotcha must say it may not apply here; an expert's own "
+        "gotchas are binding and these are not the same thing")
+    ag = loop.Agent(rookie)
+    m2, _m = context.compile(ag, {"id": "g2", "role": "practitioner",
+                                  "goal": "convert the docx report to "
+                                          "markdown with pandoc",
+                                  "course": None})
+    assert "A SIBLING HIT THIS ENVIRONMENT PROBLEM" in m2[1]["content"], (
+        "the sibling gotcha never reached the context window")
+    print("[gotchas] a rookie doing the same work inherits a sibling's "
+          "environment failure — attributed, and marked as a WARNING rather "
+          "than the binding rule it is for the expert that paid for it")
+
     s = experience.summary(home)
     assert s["experts"] >= 2 and s["with_fix"] >= 1, s
     print(f"[shared] a rookie with no history of its own inherited a "

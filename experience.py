@@ -207,6 +207,61 @@ def matching(home, goal, exclude=None, cap=MAX_INJECT):
     return hits[:cap]
 
 
+def gotchas_matching(home, goal, exclude=None, course=None, cap=3):
+    """A SIBLING's environment failures that bear on this goal.
+
+    A gotcha is the cheapest knowledge in the fleet to reuse and was the most
+    private: "pandoc is not on PATH in the container", "that endpoint 404s
+    without a trailing slash". Every expert paid for its own, and none could
+    read another's — so the second expert on the same machine rediscovered
+    the same broken environment at the same cost.
+
+    Reuses gotchas.matching so a sibling's entry and a local one fire on
+    exactly the same rule. The result is deliberately capped tighter than
+    cases: a gotcha is BINDING in its own expert's context ("do not re-run
+    this step"), and a stranger's gotcha is not — it is a warning, and the
+    rendered block says which it is.
+    """
+    try:
+        import gotchas
+    except Exception:                    # pragma: no cover
+        return []
+    out = []
+    for slug in experts(home):
+        if exclude and slug == exclude:
+            continue
+        try:
+            hits = gotchas.matching(_expert_root(home, slug), goal, course,
+                                    cap=cap)
+        except Exception:                # pragma: no cover — never the outage
+            continue
+        for g in hits or []:
+            out.append(dict(g, expert=slug))
+    out.sort(key=lambda g: (-int(g.get("repeats") or 1),
+                            -len(g.get("fired_on") or [])))
+    return out[:cap]
+
+
+def render_gotchas(hits):
+    """A sibling's environment failures — a WARNING, never a binding rule."""
+    if not hits:
+        return ""
+    lines = [
+        "A SIBLING HIT THIS ENVIRONMENT PROBLEM — not yours, and not binding. "
+        "Another expert on this fleet recorded the failure below. Its own "
+        "gotchas are binding on it; this one is a warning worth checking "
+        "BEFORE you spend the same time discovering it, and worth ignoring if "
+        "your environment differs."]
+    for g in hits:
+        rep = (f" (hit {g['repeats']}x)" if int(g.get("repeats") or 1) > 1
+               else "")
+        lines.append(f"- ({g.get('expert', '?')}{rep}) "
+                     f"{str(g.get('when', ''))[:90]}")
+        if g.get("do"):
+            lines.append(f"    what worked THERE: {str(g['do'])[:130]}")
+    return "\n".join(lines)
+
+
 def render(hits):
     """The context block. Attributed, dated, and honest about its standing."""
     if not hits:

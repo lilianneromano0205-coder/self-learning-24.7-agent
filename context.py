@@ -399,6 +399,25 @@ def compile(agent, task):
                 src["gotchas"].add_text("gotchas", _gotchas.render(hits))
         except Exception:
             pass
+        # A SIBLING's environment failures, after this expert's own and
+        # inside the same budget. A gotcha is the cheapest knowledge in the
+        # fleet to reuse and was the most private: "pandoc is not on PATH in
+        # the container" was rediscovered, at full cost, by every expert on
+        # the same machine. It rides second and loses ties on purpose — an
+        # expert's own gotcha is binding on it, a stranger's is a warning,
+        # and render_gotchas says which is which rather than blurring them.
+        if src["gotchas"].room() > 0:
+            try:
+                import experience as _experience
+                me = os.path.basename(os.path.abspath(root))
+                sib = _experience.gotchas_matching(
+                    os.path.dirname(os.path.dirname(os.path.abspath(root))),
+                    goal, exclude=me, course=course)
+                if sib:
+                    src["gotchas"].add_text("sibling-gotchas",
+                                            _experience.render_gotchas(sib))
+            except Exception:
+                pass
 
     # --- premise: does verified memory contradict the goal? (M4)
     warnings = []
