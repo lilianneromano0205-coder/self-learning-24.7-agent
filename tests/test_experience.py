@@ -107,6 +107,43 @@ def main():
         "changes nothing about what the agent does")
     assert "veteran" in body.lower(), "the sibling was not named in the window"
 
+    # ---- BOUNDED, and it must still see new work ------------------------
+    # The first version read every sibling's entire ledger on every context
+    # compile. Measured: 0.21 ms at 0 cases, 5.31 ms at 300, linear forever,
+    # on a call that happens for every task. test_endurance.py caught it on a
+    # CI runner within the hour — "work that gets steadily slower as the
+    # ledgers fill is work that stops entirely at some point nobody planned
+    # for". A timing assertion here would be flaky on a shared runner, so the
+    # STRUCTURAL properties are asserted instead: the work is capped, and the
+    # cache still notices a change.
+    for i in range(experience.MAX_HARVEST + 60):
+        _fail(other, f"unrelated churn number {i} in the ledger",
+              "noise", "noise")
+    got = experience.harvest(home)
+    assert len(got) <= experience.MAX_HARVEST, (
+        f"harvest returned {len(got)} rows with no ceiling — an unbounded "
+        f"per-task scan is the same defect as an unbounded read, in slower "
+        f"motion")
+    # and one NOISY expert must not evict a quiet one's verified fix. A flat
+    # "newest N fleet-wide" bound let 360 routine failures from `other` push
+    # the veteran's FIXED case out of the window entirely — volume silently
+    # outranking value, and the most useful record is exactly the rare kind.
+    kept = {c["expert"] for c in got}
+    assert "veteran" in kept, (
+        f"the noisy expert crowded everyone else out: {sorted(kept)}")
+    assert any(c.get("status") == "fixed" and c["expert"] == "veteran"
+               for c in got), (
+        "the one case in this fleet carrying a verified fix was evicted by "
+        "routine churn from another expert")
+    # a NEW case must still reach a sibling, or the cache is a memory hole
+    _fail(veteran, "export the quarterly invoices to csv one more time",
+          "a brand new wall", "failed again")
+    fresh = experience.matching(home, "export the quarterly invoices to csv",
+                                exclude="rookie")
+    assert any("brand new wall" in str(h.get("cause", "")) for h in fresh), (
+        "a case filed after the cache warmed never reached a sibling — a "
+        "stale shared memory is worse than none, because it looks current")
+
     s = experience.summary(home)
     assert s["experts"] >= 2 and s["with_fix"] >= 1, s
     print(f"[shared] a rookie with no history of its own inherited a "

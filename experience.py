@@ -63,6 +63,9 @@ sys.path.insert(0, HOME)
 
 MAX_INJECT = 4              # a sibling's experience is context, not a course
 MIN_SHARED_TERMS = 2        # the same threshold cases.py uses locally
+MAX_HARVEST = 300           # newest cases considered fleet-wide; the block
+                            # shows 4, and an unbounded per-task scan is the
+                            # same defect as the unbounded read, slower
 
 
 def experts(home):
@@ -78,25 +81,106 @@ def _expert_root(home, slug):
     return os.path.join(home, "experts", slug)
 
 
+_CACHE = {}                 # home -> (fingerprint, rows)
+
+
+def _ledger_fingerprint(home):
+    """A cheap stamp of every sibling ledger: (path, mtime, size) each.
+
+    THIS IS A CACHE KEY, NOT A CLOCK COMPARISON. The distinction matters
+    because this codebase has been burned by mtime twice (U19, U20): those
+    bugs compared one FILE's timestamp against ANOTHER'S to decide which was
+    newer, which a coarse filesystem tick corrupts. Here the question is only
+    "is this the same set of bytes I already read?", asked against a stamp
+    this process took itself — and SIZE is included alongside mtime because a
+    case ledger is append-only, so any change moves the size even when two
+    writes land inside one tick.
+    """
+    out = []
+    for slug in experts(home):
+        p = os.path.join(_expert_root(home, slug), "memory", "cases.jsonl")
+        try:
+            st = os.stat(p)
+            out.append((slug, int(st.st_mtime_ns), st.st_size))
+        except OSError:
+            out.append((slug, 0, 0))
+    return tuple(out)
+
+
 def harvest(home, exclude=None):
     """Every sibling's cases, attributed. -> [case dict + 'expert'].
 
     Reads through cases.load so the record shape has exactly one definition.
     A malformed or missing ledger is skipped rather than raised: one broken
     expert must not blind the whole fleet.
+
+    CACHED, because the first version was a per-compile full read of every
+    sibling's entire ledger and that is a cost that GROWS. Measured, four
+    experts, one process:
+
+           0 sibling cases -> 0.21 ms per call
+          24 sibling cases -> 1.85 ms
+         100 sibling cases -> 3.78 ms
+         300 sibling cases -> 5.31 ms
+
+    Linear, forever, on a call that happens for every task. tests/
+    test_endurance.py exists to catch exactly that shape — "work that gets
+    steadily slower as the ledgers fill is work that stops entirely at some
+    point nobody planned for" — and it caught this on a CI runner within an
+    hour of the feature landing.
+
+    A compile happens constantly; a case ledger changes only when a task
+    fails or is fixed. So the read is cached against a stat-only fingerprint:
+    O(experts) stat calls instead of O(cases) parsed lines, and the moment
+    any ledger actually changes the next call re-reads it.
     """
     import cases
-    out = []
-    for slug in experts(home):
-        if exclude and slug == exclude:
-            continue
-        try:
-            rows = cases.load(_expert_root(home, slug))
-        except Exception:                # pragma: no cover — never the outage
-            continue
-        for c in rows or []:
-            out.append(dict(c, expert=slug))
-    return out
+    key = os.path.abspath(home)
+    fp = _ledger_fingerprint(home)
+    hit = _CACHE.get(key)
+    if hit and hit[0] == fp:
+        rows = hit[1]
+    else:
+        rows = []
+        for slug in experts(home):
+            try:
+                got = cases.load(_expert_root(home, slug))
+            except Exception:            # pragma: no cover — never the outage
+                continue
+            for c in got or []:
+                # the term set is built ONCE here, not rebuilt per query.
+                # Caching the file read but not this left the per-call cost
+                # still growing with the ledger — the I/O was never the whole
+                # linear term.
+                rows.append(dict(c, expert=slug,
+                                 _terms=frozenset(c.get("terms") or [])))
+        # BOUNDED, AND FAIR. A fleet running for months accumulates cases
+        # without limit, and an unbounded scan on a per-task call is the same
+        # defect as the unbounded read, in slower motion.
+        #
+        # The first bound was a flat "newest 300 fleet-wide", and a test
+        # caught what that actually does: one expert filing 360 routine
+        # failures pushed another expert's VERIFIED FIX clean out of the
+        # window. A noisy sibling silently outranked a useful one, and the
+        # most valuable record in the fleet is exactly the kind that is rare.
+        #
+        # So the budget is split per expert. Every sibling gets a share and
+        # keeps its own newest, so volume buys a sibling nothing.
+        per_expert = {}
+        for c in rows:
+            per_expert.setdefault(c["expert"], []).append(c)
+        share = max(20, MAX_HARVEST // max(1, len(per_expert)))
+        rows = []
+        for slug, got in per_expert.items():
+            got.sort(key=lambda c: str(c.get("opened") or c.get("at") or ""),
+                     reverse=True)
+            rows.extend(got[:share])
+        rows.sort(key=lambda c: str(c.get("opened") or c.get("at") or ""),
+                  reverse=True)
+        _CACHE[key] = (fp, rows)
+    if exclude:
+        return [c for c in rows if c.get("expert") != exclude]
+    return list(rows)
 
 
 def matching(home, goal, exclude=None, cap=MAX_INJECT):
@@ -114,7 +198,7 @@ def matching(home, goal, exclude=None, cap=MAX_INJECT):
         return []
     hits = []
     for c in harvest(home, exclude):
-        shared = gw & set(c.get("terms") or [])
+        shared = gw & (c.get("_terms") or frozenset(c.get("terms") or []))
         if len(shared) >= MIN_SHARED_TERMS:
             hits.append(dict(c, matched_on=sorted(shared)[:6]))
     order = {"fixed": 0, "recurred": 1, "open": 2}
