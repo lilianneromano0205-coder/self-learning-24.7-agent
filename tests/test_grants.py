@@ -169,7 +169,87 @@ def main():
     check_only_the_owner_grants(home)
     check_the_cap_binds_and_uses_are_logged(home)
     check_assess_consumes_the_grant(home)
+    check_acting_under_a_grant_is_recorded(home)
     print("PASS test_grants")
+
+
+def check_acting_under_a_grant_is_recorded(_home):
+    """A standing grant without a usage log is a blank cheque.
+
+    grants.py says exactly that, in record_use's own docstring — and nothing
+    in the platform called it. The grant machinery worked: a covered
+    authority gap was suppressed and the run proceeded. But an owner who
+    wrote "yes, this expert may send messages about invoices, for 90 days"
+    had no way to see what had been done in their name, and
+    `python grants.py uses` printed an empty ledger however much work the
+    grant had authorised. The module documented the failure mode and then
+    committed it.
+
+    For a platform meant to be trusted with anything consequential, this is
+    the part an auditor actually reads: not "was there permission" but "what
+    was done with it".
+
+    Two halves, and the second is what makes the first usable:
+      1. ACTING under a grant records a use, one per grant consumed;
+      2. LOOKING does not. assess() runs on every panel read — while
+         somebody is still typing the sentence — and logging those would
+         bury the real entries under readings.
+    """
+    import shutil
+    import tempfile
+
+    import fleet
+
+    home = tempfile.mkdtemp(prefix="grant-uses-")
+    try:
+        os.makedirs(os.path.join(home, "experts"), exist_ok=True)
+        fleet.create(home, "Mailer", "sends invoice mail")
+        goal = "send the quarterly invoice email to the vendor"
+
+        # the goal implies two authority gaps; grant both, scoped as the
+        # platform itself derives the scope
+        scope = universal._scope_of(goal)
+        for kind in ("message", "money"):
+            grants.grant(home, "owner", kind, scope, days=90,
+                         why="routine invoicing")
+
+        # 2. LOOKING RECORDS NOTHING
+        universal.resolve(home, "mailer", goal, apply=False)
+        assert grants.uses(home) == [], (
+            "a read-only assessment logged a grant use. The panel calls this "
+            "on every keystroke-driven refresh, so the ledger would fill "
+            "with readings and the real entries become unfindable.")
+
+        # 1. ACTING RECORDS IT
+        plan = universal.resolve(home, "mailer", goal, apply=True)
+        rows = grants.uses(home)
+        kinds = {r.get("kind") for r in rows}
+        assert kinds == {"message", "money"}, (
+            f"work proceeded under grants and the ledger holds {sorted(kinds)}"
+            f" — every grant that suppressed a gap must appear, or the owner "
+            f"sees only part of what was done in their name")
+        assert all(r.get("scope") for r in rows), rows
+        assert all("mailer" in str(r.get("detail", "")) for r in rows), (
+            "a use was recorded without saying WHICH expert did it or what "
+            "for; 'something happened' is not an audit trail")
+        assert not plan.get("needs_owner"), (
+            "the grants covered both gaps, so nothing should still route to "
+            "the owner")
+
+        # and the counter on the grant itself moved, so `grants.py list`
+        # shows an owner how heavily each standing permission is being used
+        listed = {g["kind"]: g for g in grants.status(home)} \
+            if hasattr(grants, "status") else {}
+        if listed:
+            assert all(listed[k].get("uses", 0) >= 1 for k in ("message",
+                                                               "money")), listed
+        print(f"[recorded] acting under {len(kinds)} standing grant(s) wrote "
+              f"{len(rows)} usage row(s) naming the expert and the work, "
+              f"while a read-only assessment wrote none — the difference "
+              f"between a permission and a blank cheque is the log of what "
+              f"was done with it")
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
 
 
 if __name__ == "__main__":

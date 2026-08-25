@@ -291,7 +291,12 @@ def assess(home, expert, goal, criteria=""):
             if kind:
                 covered, note = _grants.check(home, kind, _scope_of(goal))
         if covered:
-            granted.append({"what": what, "why": why, "grant": note})
+            # `kind` and `scope` travel with the entry so resolve() can log
+            # the USE later. They are not decoration: grants.record_use needs
+            # both, and without them the only thing that could be recorded is
+            # "something happened", which is not an audit trail.
+            granted.append({"what": what, "why": why, "grant": note,
+                            "kind": kind, "scope": _scope_of(goal)})
             continue
         gaps.append({"dimension": "authority", "what": what, "why": why,
                      "detail": ("only the owner can grant this"
@@ -419,6 +424,44 @@ def resolve(home, expert, goal, criteria="", apply=False):
     r = ready(home, expert, goal, criteria)
     root = _root(home, expert)
     actions = []
+
+    # A STANDING GRANT WITHOUT A USAGE LOG IS A BLANK CHEQUE.
+    #
+    # grants.py says exactly that in record_use's own docstring — and nothing
+    # in the platform called it. Grants worked: a covered authority gap was
+    # suppressed and the run proceeded. But the owner who wrote "yes, this
+    # expert may send email about invoices, for 90 days" had no way to see
+    # what had been done in their name, and `python grants.py uses` printed
+    # an empty ledger no matter how much work a grant had authorised. The
+    # module documented the failure mode and then committed it.
+    #
+    # Recorded HERE and only when apply=True, deliberately. assess() runs on
+    # every read — the panel calls it while somebody is typing a sentence —
+    # and logging a "use" for each of those would fill the ledger with
+    # readings and make the real ones unfindable. apply=True is the moment
+    # the platform is acting rather than looking.
+    if apply and r.get("granted"):
+        try:
+            import grants as _g
+            for gr in r["granted"]:
+                if not gr.get("kind"):
+                    continue
+                try:
+                    _g.record_use(home, gr["kind"], gr.get("scope") or "",
+                                  detail=f"{expert}: {goal[:160]}",
+                                  task=expert)
+                except Exception as e:
+                    # A grant that has expired between assess() and here is a
+                    # REFUSAL, not a crash — and it must be visible rather
+                    # than swallowed, because "the grant lapsed mid-run" is
+                    # exactly what an auditor needs to see.
+                    actions.append({
+                        "gap": gr["what"], "action": "ask the owner",
+                        "command": None, "done": False,
+                        "why": f"the grant covering this stopped applying "
+                               f"before the work started: {e}"})
+        except Exception:                    # pragma: no cover — optional
+            pass
     for g in r["blocking"]:
         if g["dimension"] == "authority":
             actions.append({"gap": g["what"], "action": "ask the owner",

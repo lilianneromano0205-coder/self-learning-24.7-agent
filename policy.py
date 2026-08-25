@@ -11,9 +11,25 @@ Two layers, both from settings.toml so the owner holds the keys:
   DENY  (always on)  patterns that destroy, exfiltrate, escalate, or escape:
         recursive deletes of roots, disk formatting, shutdown/reboot,
         curl|sh style pipe-to-shell, credential files, privilege escalation,
-        and any attempt to leave the agent's own directory via cd/absolute
-        paths outside the root. Owner may ADD patterns; may not remove the
-        built-ins.
+        and the *spellings* of leaving the agent's own directory that can be
+        recognised in a command string — `cd /`, absolute paths outside the
+        root, traversal sequences. Owner may ADD patterns; may not remove
+        the built-ins.
+
+        WHAT THIS IS NOT. This line used to end "and any attempt to leave the
+        agent's own directory", which promises containment this module cannot
+        deliver and does not attempt. policy.py reads a STRING; a string can
+        be obfuscated, and a program the string starts can go anywhere it
+        likes once it is running. On the default `host` backend there is no
+        filesystem boundary at all — REFERENCE.md §20 has always said so
+        ("`host` sandbox is not isolation"), but this docstring said
+        otherwise, and a reader who trusts the module they are reading gets
+        the wrong answer.
+
+        Containment is `[agent] sandbox = "docker"` (or e2b/daytona/
+        cloudflare), where the boundary is the kernel's rather than a regex's.
+        What this module actually provides is a fast, inspectable veto on the
+        recognisable shapes of catastrophe — worth having, and not a sandbox.
   ALLOW (optional, per role)  if [agent.command_policy.<role>] lists allow
         regexes, a command must match one of them — the narrowest surface a
         role can have short of no shell at all (which the Rule of Two already
