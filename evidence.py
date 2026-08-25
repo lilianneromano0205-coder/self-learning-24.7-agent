@@ -7,7 +7,8 @@ suite, captures what each test SAID it proved (every test prints its own
 `[section]` sentences), maps those to the six systems, and writes a report
 where each system carries:
 
-    verdict     proven / partly proven / UNPROVEN
+    verdict     proven / proven except skipped / partly proven /
+                FAILING / UNPROVEN
     evidence    the sentences the tests actually printed, from this run
     blind spot  what these tests do not cover, stated plainly
 
@@ -22,6 +23,9 @@ Two rules keep it honest:
     silently drift away from the map.
   * a system with no tests is printed as UNPROVEN in capitals. Silence is
     never read as success.
+  * a test that SKIPS is a third outcome, not a failure and not a proof. It
+    is named in the report with the reason it gave, it contributes no
+    observations, and a system where everything skipped reads UNPROVEN.
 
     python evidence.py                 # run the suite and write EVIDENCE.md
     python evidence.py --from run.log  # use a captured run instead
@@ -30,6 +34,7 @@ Two rules keep it honest:
 
 import argparse
 import json
+import locale
 import os
 import re
 import subprocess
@@ -42,6 +47,21 @@ sys.path.insert(0, HERE)
 SECTION_RE = re.compile(r"^\[([a-z0-9_-]+)\]\s+(.*)$", re.I)
 TEST_RE = re.compile(r"^=== (test_\w+\.py) ===$")
 PASS_RE = re.compile(r"^PASS (\S+)")
+# A test may decline to run and SAY SO — test_shutdown does exactly this on
+# Windows, where Popen.terminate() is TerminateProcess and no handler can
+# intercept it, so there is no SIGTERM to catch and asserting anything would
+# be asserting something false.
+#
+# Before this, a skip read as a missing PASS and the whole system came out
+# **FAILING** on a green suite. That is the worst kind of wrong for a document
+# whose entire job is to be trusted: it cries failure where there is none, and
+# a reader who checks once and finds the alarm bogus stops reading the alarms.
+# The opposite — folding skips silently into "proven" — is worse still, because
+# a skipped test proves NOTHING and would be counted as proof.
+#
+# So a skip is its own outcome, carries its reason into the artifact, and the
+# system it belongs to is marked as not fully proven ON THIS RUN.
+SKIP_RE = re.compile(r"^SKIP\s+(test_\w+)(?:\.py)?\s*[:\-]\s*(.*)$")
 
 # Which tests speak for which system. Every registered test must appear here.
 SYSTEMS = {
@@ -278,8 +298,20 @@ def run_suite(capture_path=None):
     tdir = os.path.join(HERE, "tests")
     for name in tests:
         parts.append(f"=== {name} ===")
+        # UTF-8 IN THE CHILDREN, EXPLICITLY.
+        #
+        # `text=True` alone decodes with the locale encoding, which on Windows
+        # is cp1252 — and the child, seeing a pipe, ENCODES with cp1252 too.
+        # The two cancel out for characters cp1252 happens to have (the
+        # em-dashes these tests are full of) and lose everything else: a test
+        # printing an arrow or a non-Latin name would either mangle it or die
+        # of UnicodeEncodeError while its assertions were all passing. Pinning
+        # both ends to UTF-8 makes the round-trip lossless whatever a test
+        # prints, on every platform.
+        env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
         r = subprocess.run([sys.executable, os.path.join(tdir, name)],
-                           capture_output=True, text=True, cwd=tdir)
+                           capture_output=True, text=True, cwd=tdir,
+                           encoding="utf-8", errors="replace", env=env)
         parts.append((r.stdout or "") + (r.stderr or ""))
         if r.returncode != 0:
             failed += 1
@@ -300,7 +332,8 @@ def parse(output):
         m = TEST_RE.match(line)
         if m:
             current = m.group(1)
-            per.setdefault(current, {"sections": [], "passed": False})
+            per.setdefault(current, {"sections": [], "passed": False,
+                                     "skipped": None})
             continue
         if current is None:
             continue
@@ -310,6 +343,10 @@ def parse(output):
             continue
         if PASS_RE.match(line):
             per[current]["passed"] = True
+            continue
+        m = SKIP_RE.match(line)
+        if m:
+            per[current]["skipped"] = m.group(2).strip() or "no reason given"
     return per
 
 
@@ -324,12 +361,19 @@ def build(output):
     for name, spec in SYSTEMS.items():
         tests = [t for t in spec["tests"] if t in per]
         ran = [t for t in tests if per[t]["passed"]]
-        failed = [t for t in tests if not per[t]["passed"]]
+        skipped = [(t, per[t]["skipped"]) for t in tests
+                   if not per[t]["passed"] and per[t]["skipped"]]
+        failed = [t for t in tests
+                  if not per[t]["passed"] and not per[t]["skipped"]]
         sections = [(t, k, s) for t in ran for k, s in per[t]["sections"]]
-        if not tests:
+        if not tests or not ran:
             verdict = "UNPROVEN"
         elif failed:
             verdict = "FAILING"
+        elif skipped:
+            # NOT "proven": a test that declined to run proved nothing, and
+            # the reader is entitled to know which claim is unbacked here.
+            verdict = "proven except skipped"
         elif len(ran) < len(spec["tests"]):
             verdict = "partly proven"
         else:
@@ -337,7 +381,8 @@ def build(output):
         systems.append({
             "system": name, "what": spec["what"], "verdict": verdict,
             "tests_declared": len(spec["tests"]), "tests_ran": len(ran),
-            "tests_failed": failed, "observations": len(sections),
+            "tests_failed": failed, "tests_skipped": skipped,
+            "observations": len(sections),
             "evidence": sections, "blind_spot": spec["blind"],
         })
     return {
@@ -382,6 +427,8 @@ def render(rep):
               f"producing {s['observations']} observations."]
         if s["tests_failed"]:
             L.append(f"**FAILING:** {', '.join(s['tests_failed'])}")
+        for t, why in s.get("tests_skipped") or []:
+            L.append(f"**NOT RUN HERE — {t}:** {why}")
         L += ["", "<details><summary>What the tests observed "
               f"({s['observations']})</summary>", ""]
         for t, kind, sentence in s["evidence"]:
@@ -399,8 +446,31 @@ def main():
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
     if a.src:
-        with open(a.src, encoding="utf-8", errors="replace") as f:
-            output = f.read()
+        # A captured run is whatever the capturing shell wrote. On Windows a
+        # plain `python tests/run_all.py > run.txt` writes cp1252, and reading
+        # that as UTF-8 with errors="replace" silently turned every em-dash
+        # into U+FFFD — 84 of them in one artifact, in the sentences this
+        # document exists to quote VERBATIM. Replacement characters are the
+        # failure mode that looks like a font problem and is actually lost
+        # evidence, so decode strictly and fall back rather than guess:
+        # a cp1252 byte like 0x97 is not valid UTF-8, which makes the choice
+        # deterministic rather than a heuristic.
+        # Deliberately NOT falling back to latin-1: it never raises, so it
+        # would win every contest and decode a Windows em-dash (0x97) into a
+        # C1 control character instead — silently, and looking like success.
+        # A captured Windows run is cp1252, and the residue after that is a
+        # genuinely mixed file (a test that re-emits a subprocess's already
+        # decoded output can double-encode a few bytes), which no single codec
+        # can read. Those get U+FFFD and nothing else does.
+        raw = open(a.src, "rb").read()
+        for enc in ("utf-8", locale.getpreferredencoding(False), "cp1252"):
+            try:
+                output = raw.decode(enc)
+                break
+            except (UnicodeDecodeError, LookupError):
+                continue
+        else:
+            output = raw.decode("cp1252", errors="replace")
         code = 0
     else:
         print("running the suite (this takes a few minutes)...", flush=True)

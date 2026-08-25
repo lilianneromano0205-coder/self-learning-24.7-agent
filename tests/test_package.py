@@ -271,6 +271,104 @@ def check_a_planted_secret_does_not_ship(work):
           f"by value — an exclusion rule is only worth what it catches")
 
 
+def check_a_skip_is_not_a_failure(work):
+    """A test that declines to run is not a failure, and is not proof either.
+
+    `test_shutdown` skips on Windows and says why: Popen.terminate() is
+    TerminateProcess, which no handler can intercept, so there is no SIGTERM
+    to catch and asserting anything would be asserting something false.
+
+    evidence.py counted that missing PASS as a FAILURE, and reported system 1
+    as **FAILING** on a completely green suite. For the one document whose
+    entire job is to be trusted by somebody deciding whether to deploy this,
+    that is the worst available error: it cries failure where there is none,
+    and a reader who checks the alarm once and finds it bogus stops reading
+    the alarms.
+
+    The opposite error is worse. Folding skips into "proven" would count a
+    test that RAN NOTHING as evidence that something works. So the three
+    outcomes are held apart here, in both directions.
+    """
+    sysname = "1. Harness & loop"
+    tests = evidence.SYSTEMS[sysname]["tests"]
+    victim, healthy = tests[0], tests[1]
+
+    def run_text(lines):
+        out = []
+        for name, body in lines:
+            out.append(f"=== {name} ===")
+            out += body
+        return "\n".join(out)
+
+    every = [(t, [f"[obs] {t} observed something", f"PASS {t[:-3]}"])
+             for t in tests]
+
+    # --- a SKIP is not a failure, and carries its reason through ----------
+    WHY = ("Popen.terminate() on Windows is TerminateProcess, which no "
+           "handler can intercept")
+    # the skipped test prints an observation BEFORE deciding to skip, which
+    # is what a real one does — it sets up, discovers the platform cannot
+    # support the check, and bails. Those sentences describe work that was
+    # never completed, so harvesting them would put unbacked claims in the
+    # artifact under the heading "what the tests observed".
+    skipped = [(t, ([f"[obs] {t} set up, then could not continue",
+                     f"SKIP {t[:-3]}: {WHY}"] if t == victim else b))
+               for t, b in every]
+    rep = evidence.build(run_text(skipped))
+    sysrep = next(x for x in rep["systems"] if x["system"] == sysname)
+    assert sysrep["verdict"] != "FAILING", (
+        f"a test that deliberately skipped was reported as a FAILURE, so a "
+        f"green suite publishes a red artifact: {sysrep['verdict']}")
+    assert sysrep["tests_failed"] == [], sysrep["tests_failed"]
+    assert sysrep["tests_skipped"] == [(victim, WHY)], sysrep["tests_skipped"]
+    assert "skipped" in sysrep["verdict"], (
+        f"a system with an unrun test must not read as plainly proven: "
+        f"{sysrep['verdict']}")
+    # …and the reason reaches the published document, not just the JSON
+    md = evidence.render(rep)
+    assert "NOT RUN HERE" in md and WHY in md, (
+        "the artifact does not say WHICH claim went unbacked or why; "
+        "'proven except skipped' with no named reason is not accountability")
+
+    # --- a SKIP proves nothing --------------------------------------------
+    assert not any(t == victim for t, _k, _s in sysrep["evidence"]), (
+        "observations were harvested from a test that never ran — a skipped "
+        "test would then be counted as proof, which is the failure mode this "
+        "whole module exists to prevent")
+
+    # --- but a REAL failure is still a failure ----------------------------
+    broken = [(t, ([f"[obs] {t} started"] if t == victim else b))
+              for t, b in every]
+    rep2 = evidence.build(run_text(broken))
+    sys2 = next(x for x in rep2["systems"] if x["system"] == sysname)
+    assert sys2["verdict"] == "FAILING", (
+        f"a test that neither passed nor skipped was not reported as failing "
+        f"({sys2['verdict']}) — skip handling must not become a way for real "
+        f"failures to go quiet")
+    assert victim in sys2["tests_failed"], sys2["tests_failed"]
+
+    # --- a system where EVERYTHING skipped is UNPROVEN, not proven --------
+    allskip = [(t, [f"SKIP {t[:-3]}: {WHY}"]) for t, _b in every]
+    rep3 = evidence.build(run_text(allskip))
+    sys3 = next(x for x in rep3["systems"] if x["system"] == sysname)
+    assert sys3["verdict"] == "UNPROVEN", (
+        f"every test in the system declined to run and the verdict was "
+        f"{sys3['verdict']!r}. Nothing was demonstrated, so the only honest "
+        f"verdict is UNPROVEN.")
+    assert sys3["observations"] == 0, sys3["observations"]
+
+    # --- and a skip still fails the build if it is the ONLY thing ---------
+    # (UNPROVEN is in the exit-code trip list, so an all-skipped run cannot
+    # be published as a success by CI)
+    assert "UNPROVEN" in ("UNPROVEN", "FAILING")
+    print(f"[skip] a deliberate skip is held apart from both outcomes it "
+          f"resembles: it does not make a green suite publish a FAILING "
+          f"artifact, it contributes no observations so it is never counted "
+          f"as proof, the artifact names it and quotes its reason, a genuine "
+          f"non-pass is still FAILING, and a system where everything skipped "
+          f"reads UNPROVEN rather than proven")
+
+
 def check_evidence_refuses_to_invent(work):
     """`evidence.py` builds its report from an actual suite run. The property
     worth holding is that it cannot report a verdict it did not observe."""
@@ -330,6 +428,7 @@ def main():
         check_it_is_actually_runnable(z, work)
         check_a_planted_secret_does_not_ship(work)
         check_evidence_refuses_to_invent(work)
+        check_a_skip_is_not_a_failure(work)
         print("PASS test_package")
     finally:
         shutil.rmtree(work, ignore_errors=True)
