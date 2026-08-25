@@ -438,14 +438,75 @@ def guarded_call(s, tool, arguments, root=None, fresh=False):
     return result, "live"
 
 
-def render_result(result):
+_IMG_EXT = {"image/png": ".png", "image/jpeg": ".jpg", "image/jpg": ".jpg",
+            "image/webp": ".webp", "image/gif": ".gif"}
+
+
+def _save_blob(root, c, n):
+    """Write a non-text content block to tmp/ and return its relative path.
+
+    An image block used to be replaced with "[image content omitted]" and
+    thrown away. That is the difference between a browser that can act and a
+    browser that can SEE: with a playwright server enabled, a screenshot came
+    back to the model as that literal string, so every visual question was
+    unanswerable and the agent could not even tell that something had been
+    withheld from it.
+
+    The bytes are base64 in the block. They are written to the expert's own
+    tmp/ — inside the File Authority's reach, carried by backup.py, destroyed
+    with the expert — and the path is handed back, because `ingest.py vision`
+    already takes a path and already knows how to ask a vision model about it.
+    Two steps instead of one, and the second one is a capability the platform
+    has had all along.
+
+    Returns None if there is nothing decodable, so the caller falls back to
+    saying what was withheld rather than pretending.
+    """
+    import base64
+    data = c.get("data") or c.get("blob")
+    if not data or not isinstance(data, str):
+        return None
+    mime = str(c.get("mimeType") or c.get("mime_type") or "")
+    ext = _IMG_EXT.get(mime.lower(), ".bin")
+    try:
+        raw = base64.b64decode(data, validate=True)
+    except Exception:
+        return None
+    if not raw or len(raw) > 25_000_000:      # a tool result is untrusted input
+        return None
+    d = os.path.join(root or ".", "tmp")
+    try:
+        os.makedirs(d, exist_ok=True)
+        name = f"mcp-{int(time.time())}-{n}{ext}"
+        with open(os.path.join(d, name), "wb") as f:
+            f.write(raw)
+    except OSError:
+        return None
+    return f"tmp/{name}", len(raw), mime or "unknown"
+
+
+def render_result(result, root=None):
     """Flatten an MCP tool result to fenced text. isError stays loud."""
     parts = []
-    for c in result.get("content", []):
+    for i, c in enumerate(result.get("content", [])):
         if c.get("type") == "text":
             parts.append(c.get("text", ""))
         else:
-            parts.append(f"[{c.get('type', 'unknown')} content omitted]")
+            saved = _save_blob(root, c, i)
+            if saved:
+                rel, size, mime = saved
+                parts.append(
+                    f"[{c.get('type', 'binary')} content saved to {rel} "
+                    f"({size:,} bytes, {mime}) — it is NOT in this text. To "
+                    f"read it: run_command "
+                    f"`python ingest.py vision {rel} out/seen-{i}.md` and then "
+                    f"read_file that. This is how a screenshot becomes "
+                    f"something you can answer questions about.]")
+            else:
+                parts.append(
+                    f"[{c.get('type', 'unknown')} content omitted — it could "
+                    f"not be decoded or was too large to keep, so it is gone "
+                    f"rather than hidden]")
     body = "\n".join(parts) or json.dumps(
         result.get("structuredContent", result), ensure_ascii=False)[:4000]
     if len(body) > MAX_RESULT_CHARS:
@@ -519,7 +580,7 @@ def main():
                 raise SystemExit(f"--args must be JSON: {e}")
             result, how = guarded_call(s, a.tool, args, root=root,
                                        fresh=a.fresh)
-            out = render_result(result)
+            out = render_result(result, root)
             if how == "approval_required":
                 print(out, end="")
                 s.close()

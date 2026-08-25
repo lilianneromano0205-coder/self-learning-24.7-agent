@@ -170,6 +170,41 @@ def main():
           f"browser server passes its options — and {len(ALLOW)} ordinary "
           f"argument shapes still pass")
 
+    # ---- a screenshot must not evaporate --------------------------------
+    # Every non-text content block was replaced with "[image content
+    # omitted]" and thrown away. That is the difference between a browser
+    # that can act and one that can SEE: with a playwright server enabled, a
+    # screenshot reached the model as that literal string, so every visual
+    # question was unanswerable — and the agent could not even tell that
+    # something had been withheld from it.
+    import base64 as _b64
+    import tempfile as _tmp
+    _root = _tmp.mkdtemp(prefix="mcp-img-")
+    PNG = _b64.b64encode(bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+        "0000000a49444154789c6360000002000100ffff0300000600055773d5c0000000"
+        "0049454e44ae426082")).decode()
+    out = mcp.render_result(
+        {"content": [{"type": "text", "text": "navigated to https://example.org"},
+                     {"type": "image", "mimeType": "image/png", "data": PNG}]},
+        _root)
+    saved = [n for n in os.listdir(os.path.join(_root, "tmp"))
+             if n.endswith(".png")]
+    assert saved, "the image block was discarded instead of written to disk"
+    assert "tmp/" in out and "ingest.py vision" in out, (
+        f"the result must name the path AND the command that reads it, or a "
+        f"file on disk nobody knows how to open is the same as no file: {out[:200]}")
+    assert "navigated to https://example.org" in out, "the text block was lost"
+    # and something undecodable says so rather than pretending
+    bad = mcp.render_result(
+        {"content": [{"type": "image", "mimeType": "image/png",
+                      "data": "!!!not base64!!!"}]}, _root)
+    assert "omitted" in bad and "gone rather than hidden" in bad, bad
+    print(f"[sees] an image block is written to tmp/ ({saved[0]}) and the "
+          f"result names the exact `ingest.py vision` command that reads it, "
+          f"so a screenshot becomes something the agent can answer questions "
+          f"about; an undecodable blob is reported as gone, not hidden")
+
     print("PASS test_mcp")
 
 

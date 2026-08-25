@@ -1026,17 +1026,25 @@ class Agent:
                 "content": json.dumps({"tool": step["tool"], "args": step.get("args", {})}),
                 "tool_calls": None,
             }
+        # A step may name ONE tool, or several. Several is not exotic: every
+        # OpenAI-compatible provider can return parallel tool calls in a single
+        # message, and this mock could only ever express one — so the loop's
+        # handling of the multi-call case was untestable, and therefore untested,
+        # and therefore wrong (only the first was answered, leaving orphaned
+        # tool_call_ids that make the next request invalid). A test harness that
+        # cannot express what real providers do will certify a loop that cannot
+        # survive them.
+        steps = step.get("tools") or ([step] if "tool" in step else [])
+        calls = [{
+            "id": f"mock_{idx}_{j}" if len(steps) > 1 else f"mock_{idx}",
+            "type": "function",
+            "function": {"name": s["tool"],
+                         "arguments": json.dumps(s.get("args", {}))},
+        } for j, s in enumerate(steps)]
         return {
             "role": "assistant",
             "content": step.get("content"),
-            "tool_calls": [{
-                "id": f"mock_{idx}",
-                "type": "function",
-                "function": {
-                    "name": step["tool"],
-                    "arguments": json.dumps(step.get("args", {})),
-                },
-            }] if "tool" in step else None,
+            "tool_calls": calls or None,
         }
 
     def _stash_attempt(self, task):
@@ -1544,6 +1552,52 @@ class Agent:
             self.save_context(task, messages)
             self.commit_task(task)
             return True
+
+        # EVERY tool_call_id GETS AN ANSWER, even the ones not executed.
+        #
+        # This function handles tool_calls[0] and always has. The assistant
+        # message appended above carries ALL of them, because that is what the
+        # model actually said. So when a provider returned two or more calls in
+        # one message — which OpenAI-compatible APIs do routinely, it is what
+        # parallel tool use IS — the extra ids got no `tool` response, and two
+        # things went wrong at once:
+        #
+        #   1. the work was silently dropped. The model asked for three things
+        #      and one happened, with nothing anywhere saying so.
+        #   2. the transcript became invalid. The protocol requires a `tool`
+        #      message per tool_call_id, so the NEXT request carried orphaned
+        #      ids and providers answer that with a 400 — a failure that shows
+        #      up far from its cause and reads like provider weather.
+        #
+        # Executing all of them in one turn is the better end state and is NOT
+        # what this does, deliberately. The dispatch below has terminal
+        # semantics threaded through it — finish_task can end the task,
+        # ask_human can block it — and "what happens to call 3 when call 2
+        # finished the task" is a real design question, not a loop. Getting
+        # that wrong in the platform's most critical function to save a round
+        # trip is a bad trade.
+        #
+        # So: the first call runs exactly as before, every extra id is answered
+        # honestly and asked for again, and the event is logged. If the log
+        # shows this happening often, the number will be the argument for doing
+        # the larger change — rather than a guess about how often it happens.
+        extras = tool_calls[1:]
+        if extras:
+            self.log.info(json.dumps({
+                "event": "extra_tool_calls", "task": task["id"],
+                "count": len(extras),
+                "names": [c.get("function", {}).get("name") for c in extras][:5],
+                "why": "answered and asked for again; only the first ran"}))
+            for extra in extras:
+                messages.append({
+                    "role": "tool", "tool_call_id": extra.get("id", "?"),
+                    "content": (
+                        "NOT RUN — this harness executes one tool call per "
+                        "step so each result can be checked before the next "
+                        "call depends on it. Nothing was lost and nothing was "
+                        "done: issue this call again on its own, after reading "
+                        "the result of the call that did run."),
+                })
 
         tc = tool_calls[0]
         name = tc["function"]["name"]
@@ -2378,12 +2432,71 @@ class Agent:
                                        "error": str(e)[:200]}))
             return None
 
+    def _install_shutdown_handler(self):
+        """Turn SIGTERM into a request to stop between steps, not a kill.
+
+        Nothing in this platform handled a signal. SIGTERM is exactly what
+        Docker, Kubernetes and Cloudflare Containers send when they stop a
+        container, and they follow it with a grace period — usually ten to
+        thirty seconds — before SIGKILL. Ignoring it meant the process died
+        wherever it happened to be: mid-provider-call, mid-write, holding a
+        task lock, with a `running` task still stamped as ours.
+
+        None of that was UNRECOVERABLE — the runner lease notices a dead pid
+        and the next loop adopts the task — but recovery is not the same as
+        shutdown. Recovery re-does work that was nearly finished, and pays for
+        the tokens twice. The grace period is offered precisely so a process
+        can stop at a clean boundary, and this one was throwing it away.
+
+        Between STEPS, never inside one. A handler that interrupted a step
+        would create exactly the half-written state this is meant to avoid.
+        And a SECOND signal exits immediately: an operator who sends TERM
+        twice is telling you they are done waiting, and a graceful shutdown
+        that cannot itself be stopped is a hang.
+        """
+        import signal
+        self._stop_requested = False
+
+        def _ask_to_stop(signum, _frame):
+            if getattr(self, "_stop_requested", False):
+                self.log.error(json.dumps({
+                    "event": "shutdown_forced", "signal": int(signum),
+                    "why": "second signal — exiting without finishing the step"}))
+                raise SystemExit(130)
+            self._stop_requested = True
+            self.log.info(json.dumps({
+                "event": "shutdown_requested", "signal": int(signum),
+                "why": "will stop at the next step boundary; send it again "
+                       "to exit now"}))
+
+        for name in ("SIGTERM", "SIGINT", "SIGBREAK"):
+            sig = getattr(signal, name, None)
+            if sig is None:
+                continue                     # SIGBREAK is Windows-only
+            try:
+                signal.signal(sig, _ask_to_stop)
+            except (ValueError, OSError):    # not the main thread; fine
+                pass
+
+    def _should_stop(self):
+        if not getattr(self, "_stop_requested", False):
+            return False
+        self.log.info(json.dumps({
+            "event": "shutdown_clean", "root": self.root,
+            "why": "stopped at a step boundary with state committed and the "
+                   "lock released; whatever was queued is still queued"}))
+        self.heartbeat(note="stopped")
+        return True
+
     def run(self, drain=False):
         self.log.info(json.dumps({"event": "agent_start", "root": self.root, "drain": drain}))
         self._drain_mode = drain
+        self._install_shutdown_handler()
         self._health_ritual()
         self.heartbeat(note="started")
         while True:
+            if self._should_stop():
+                return
             if self._budget_exceeded():
                 if drain:
                     self.log.info(json.dumps({"event": "drain_budget_stop"}))
@@ -2430,6 +2543,22 @@ class Agent:
                     "role": task["role"], "steps": n_steps(task),
                 }))
             while task["status"] == "running":
+                # The INNER boundary. A task can run 150 steps, so checking
+                # only between tasks would make a graceful stop take as long
+                # as the longest task — which is exactly the grace period the
+                # orchestrator does not give. Checked BEFORE a step starts, so
+                # the step that is already running always completes and
+                # commits; the task stays `running` with its lease released,
+                # and the next loop to start adopts it exactly where it left
+                # off, which is the path U15 already made safe.
+                if getattr(self, "_stop_requested", False):
+                    self.log.info(json.dumps({
+                        "event": "shutdown_midtask", "task": task["id"],
+                        "steps_done": n_steps(task),
+                        "why": "stopping between steps; the task stays "
+                               "running and is resumable, and no step was "
+                               "interrupted"}))
+                    break
                 try:
                     self.heartbeat(task, note="working")
                     if not self.run_task_step(state, task):
