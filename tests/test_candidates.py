@@ -241,6 +241,53 @@ def main():
           f"one only when it strictly beats the last — on a task where the "
           f"verifier cannot discriminate it reports a tie and changes "
           f"nothing, which is the honest answer rather than a shuffle")
+    # --- 10. AND IT DISCRIMINATES. Wiring is not the same as working.
+    #
+    # The previous commit connected best-of-N to the loop and then measured
+    # it honestly: six attempts at one goal all scored 0.0, because every
+    # component declined to answer on an ordinary task — no citations to
+    # check, no interface, no course spec. rank() over a set of ties is a
+    # stable sort, so the "winner" was whichever attempt happened to come
+    # first, and the feature was wired, safe, and worth nothing.
+    #
+    # `substance` is the component that always applies: exists, parses,
+    # carries no placeholder, is not trivially shorter than the request. It
+    # does not measure whether work is GOOD — it measures whether work is
+    # REAL, which is the distinction the tie could not see.
+    junk = write(sb, "answers/junk.md", "x")
+    thin = write(sb, "answers/thin.md", "short.")
+    real = write(sb, "answers/real.md",
+                 "A considered answer with genuine detail that addresses the "
+                 "question rather than gesturing at it.")
+    todo = write(sb, "answers/todo.md",
+                 "A long enough answer in every other respect, but TODO: "
+                 "finish the second half of this before shipping it.")
+    broken = write(sb, "answers/broken.json", '{"a": 1,,}')
+    goal = "write a considered answer about retry budgets"
+    def sub(rel):
+        return candidates.score(agent, task_with([rel], done_check=PASS,
+                                                 goal=goal))["score"]
+    s_junk, s_thin, s_real = sub("answers/junk.md"), sub("answers/thin.md"), sub("answers/real.md")
+    s_todo, s_broken = sub("answers/todo.md"), sub("answers/broken.json")
+    assert s_real > s_junk, (
+        f"a real answer ({s_real}) did not outscore 'x' ({s_junk}) — this is "
+        f"the exact tie that made best-of-N pick arbitrarily")
+    assert s_real > s_thin, (s_real, s_thin)
+    assert s_real > s_todo, (
+        f"an answer carrying TODO ({s_todo}) scored as well as a finished one "
+        f"({s_real})")
+    assert s_broken < s_real, (
+        f"a .json file that does not parse ({s_broken}) was not penalised")
+    # and it must not invent an opinion where there is no artifact
+    assert candidates._substance(sb, []) is None, (
+        "substance scored a task that wrote nothing; a component with no "
+        "evidence must decline, not guess")
+    print(f"[discriminates] a real answer scores {s_real}, a one-character "
+          f"one {s_junk}, an unfinished one carrying TODO {s_todo}, and a "
+          f".json that does not parse {s_broken} — the composite can now tell "
+          f"attempts apart on ordinary work, where every other component "
+          f"declines to answer and six attempts previously tied at 0.0")
+
     print("PASS test_candidates")
 
 

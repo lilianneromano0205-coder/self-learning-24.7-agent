@@ -40,7 +40,7 @@ import shutil
 import time
 
 WEIGHTS = {"grounding": 0.30, "honesty": 0.25, "interface": 0.25,
-           "spec": 0.20}
+           "spec": 0.20, "substance": 0.20}
 DIR = "candidates"
 DEFAULT_MAX = 5
 ESCALATION = {0: 1, 1: 3, 2: 5}          # gate failures -> attempts to make
@@ -157,6 +157,88 @@ def _interface(root, paths):
     return score, {"blockers": blockers, "warnings": warns}
 
 
+PLACEHOLDERS = ("todo", "fixme", "lorem ipsum", "tbd", "xxx",
+                "your text here", "coming soon", "<placeholder>")
+_PARSERS = {".json": "json", ".py": "python", ".toml": "toml"}
+
+
+def _substance(root, paths, task=None):
+    """A mechanical FLOOR: does the artifact exist, parse, and say anything?
+
+    This exists because every other component here declines to answer on an
+    ordinary task. Measured through the real loop, six attempts at one goal
+    all scored 0.0 — grounding was the only component that ran, and it had
+    nothing to measure. rank() over a set of ties is a stable sort, so "the
+    winner" was whichever attempt came first, and best-of-N reduced to
+    picking arbitrarily.
+
+    So this asks the questions a computer can answer about ANY artifact,
+    without a model and without a domain:
+
+        it exists, and it is not empty
+        it PARSES, if its extension implies a format
+        it does not contain TODO, FIXME or lorem ipsum
+        it is not trivially shorter than the task that asked for it
+
+    None of that measures whether the work is GOOD. It measures whether the
+    work is real, which is the difference the earlier tie could not see: an
+    attempt that wrote "x" and one that wrote a considered answer were
+    indistinguishable, and the platform shipped whichever came last.
+    """
+    if not paths:
+        return None
+    checks, problems = 0, []
+    for rel in paths:
+        full = os.path.join(root, rel.replace("/", os.sep))
+        checks += 1
+        if not os.path.isfile(full):
+            problems.append(f"{rel}: missing")
+            continue
+        try:
+            raw = open(full, "rb").read()
+        except OSError as e:
+            problems.append(f"{rel}: unreadable ({e.__class__.__name__})")
+            continue
+        checks += 1
+        if not raw.strip():
+            problems.append(f"{rel}: empty")
+            continue
+        text = raw.decode("utf-8", errors="replace")
+        ext = os.path.splitext(rel)[1].lower()
+        if ext in _PARSERS:
+            checks += 1
+            kind = _PARSERS[ext]
+            try:
+                if kind == "json":
+                    json.loads(text)
+                elif kind == "python":
+                    compile(text, rel, "exec")
+                elif kind == "toml":
+                    import tomllib
+                    tomllib.loads(text)
+            except Exception as e:
+                problems.append(f"{rel}: does not parse as {kind} "
+                                f"({e.__class__.__name__})")
+        checks += 1
+        low = text.lower()
+        hit = [m for m in PLACEHOLDERS if m in low]
+        if hit:
+            problems.append(f"{rel}: placeholder text ({hit[0]})")
+        # An answer far shorter than its own question is a non-answer. The
+        # bar is deliberately low: this catches "x", not brevity.
+        goal = str((task or {}).get("goal") or "")
+        if goal:
+            checks += 1
+            if len(text.strip()) < max(12, len(goal) // 12):
+                problems.append(f"{rel}: {len(text.strip())} chars against a "
+                                f"{len(goal)}-char request")
+    if not checks:
+        return None
+    value = max(0.0, 1.0 - (len(problems) / float(checks)))
+    return value, {"checks": checks, "problems": problems[:6],
+                   "artifacts": len(paths)}
+
+
 def _spec(root, task):
     """The course spec's own mechanical checks, as a pass ratio."""
     course = task.get("course")
@@ -191,7 +273,11 @@ def score(agent, task, paths=None):
     for name, fn in (("grounding", lambda: _grounding(root, paths, task)),
                      ("honesty", lambda: _honesty(root, task, paths)),
                      ("interface", lambda: _interface(root, paths)),
-                     ("spec", lambda: _spec(root, task))):
+                     ("spec", lambda: _spec(root, task)),
+                     # last, and always applicable: the others all decline to
+                     # answer on an ordinary task, which is how six attempts
+                     # came to tie at 0.0
+                     ("substance", lambda: _substance(root, paths, task))):
         try:
             got = fn()
         except Exception as e:                 # a scorer must never be the outage
