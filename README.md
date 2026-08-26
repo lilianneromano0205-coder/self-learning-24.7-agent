@@ -3,7 +3,7 @@
 **A file-backed, stdlib-only platform for building expert AI agents that work
 continuously, prove what they did, and remember what they learned.**
 
-79 Python modules · 109 acceptance tests · one HTML control panel · no
+80 Python modules · 110 acceptance tests · one HTML control panel · no
 database, no framework, no build step. Python 3.11+ and your own API keys.
 
 ```bash
@@ -57,7 +57,7 @@ control defends the path its author was thinking about, and does not know
 about the other paths.* Six places executed shell; one was tested. The answer
 is one mandatory gateway per kind of power — Execution, File, Credential,
 Model Gateway, Effect — and `python execution.py --audit` fails the build if
-any module bypasses one. Today: **0 violations across 79 modules**, 16 declared platform-internal.
+any module bypasses one. Today: **0 violations across 80 modules**, 16 declared platform-internal.
 
 **4. Proof is derived, never claimed.**
 Six levels from SPEC to PRODUCTION PROVEN, computed from evidence bound to a
@@ -149,15 +149,25 @@ no runbook matches, the result is *blocked with the frontier named*, never
 improvisation: brittleness at the frontier is what killed the old
 deterministic agents, and the frontier is exactly where the model belongs.
 
+When a pursuit ends BLOCKED, `repair.py` closes the loop the research
+record actually supports (Huang et al. ICLR 2024; Voyager; Darwin Gödel
+Machine): every repair is grounded in the failing check's recorded error —
+never in the model re-reading its own work — revisions keep lineage beside
+their parent, budget and tamper blocks route to the owner alone, and repair
+itself can move a goal back to `running` but can never grade it: VERIFIED
+still only comes from the frozen acceptance tests, and the event ledger
+proves the graders spoke first.
+
 ```bash
 python runbook.py list      experts/builder
 python runbook.py reconcile experts/builder <goal-id>   # zero-token goal loop
 python runbook.py draft     experts/builder <goal-id>   # skeleton from a win
+python repair.py  apply     experts/builder <goal-id> --resume
 ```
 
 **[GOAL_SPECIALIST.md](GOAL_SPECIALIST.md)** is the deep account: the
-architecture, the evidence (15/15 mutations killed across the contract and
-runbook layers), and the audit's complete 115-gap register with an honest
+architecture, the evidence (21/21 mutations killed across the contract,
+runbook and repair layers), and the audit's complete 115-gap register with an honest
 status for every row.
 
 ---
@@ -167,7 +177,7 @@ status for every row.
 Five kinds of evidence, weakest first — and the last is the only one produced
 on a computer this project does not own.
 
-**The suite passes — on three platform/version pairs now, not one.** 109
+**The suite passes — on three platform/version pairs now, not one.** 110
 acceptance tests, green on Windows under Python 3.14 and on Linux under
 Python 3.11 and 3.13. Each test prints a sentence describing what it
 observed; `EVIDENCE.md` quotes them verbatim. CI runs the same suite on
@@ -312,7 +322,7 @@ build is cleared.** The full table is in
 
 ```bash
 python demo.py            # the whole platform, keyless, in one run
-python tests/run_all.py   # 109 acceptance tests
+python tests/run_all.py   # 110 acceptance tests
 python proof.py           # what is proven, and to what level
 python evidence.py        # why we believe it, and where belief runs out
 python metrics.py         # is it working — and the numbers it refuses to invent

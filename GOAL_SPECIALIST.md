@@ -169,6 +169,45 @@ quarantine, quarantined volunteers, candidates run unsupervised, pursue
 unwired from the machine path, trust ledger reopened to the worker, TODO
 drafts accepted as runnable.
 
+### Repair — self-modification until done, without the hallucination
+
+The owner's requirement in its own words: when the job is not done, the
+agent modifies itself and its approach until it is — *"not in a dumb way,
+like an AI hallucinating and thinking it really did the job."* That clause
+is the entire design problem, and the research record is unusually clear
+about how it goes wrong. `repair.py` is built on four verified results:
+
+| Result | Source | The law it becomes |
+|---|---|---|
+| Intrinsic self-correction — no external signal — makes models **worse** | [Huang et al., ICLR 2024](https://arxiv.org/abs/2310.01798) | **LAW 1 — no repair without a signal.** Every planned action carries the failing check and its recorded stderr, verbatim from the event ledger. There is no "reflect and try again" action. |
+| Self-modifications are kept only when **empirically validated**, in an archive with lineage | [Darwin Gödel Machine](https://arxiv.org/abs/2505.22954) | **LAW 2 — repair never grades itself.** It may move `blocked → running` and act; VERIFIED can only come from the frozen graders, and the ledger must show a passing verify event *before* any verified state. **LAW 4 — revision keeps lineage.** A failing runbook's revision is written *beside* its parent as a zero-trust candidate; the parent's file and earned trust are untouched. |
+| Skills as executable code; retries incorporate **environment feedback and execution errors** | [Voyager](https://arxiv.org/abs/2305.16291) | The failing signal travels into the resumed pursuit: `repair.md`, injected into the planner's context. |
+| Models struggle to absorb even good feedback | [Feedback Friction](https://arxiv.org/pdf/2506.11930) | The signal file is **small and explicit** — the failing checks and errors, under 2KB, never a wall of logs — and warns the planner that the harness re-runs every check itself. |
+
+And one law the papers don't need but a 24/7 platform does: **LAW 3 — the
+machine never lifts its own ceiling.** A budget block and a tamper block
+plan exactly one action — OWNER. A repair pass leaves the contract's budget
+bit-for-bit unchanged (asserted, and the mutation that removes the guard is
+killed). An agent that can raise its own budget when it runs out has no
+budget; an agent that can forgive tampering with its graders has no graders.
+
+The loop, end to end: `diagnose` (classify the block from the ledger, never
+from the model's opinion) → `plan` (typed actions, each grounded: study the
+failing subject via the discovery catalogues, apply a pinned capability
+recipe for an exit-127, revise the failing runbook beside its parent, or
+retry with the signal) → `apply` (execute the machine-executable half,
+record events, write the signal file) → **hand the goal back to the
+graders** (`reconcile`, then the model loop if needed). Repair watches
+itself the way it watches goals: attempts are bounded, and planning the
+*identical* repair twice stops with "not converging" — the oscillation rule
+one level up.
+
+Six mutations, six killed: signal dropped from the retry, repair granting
+itself `verified` (caught by the ledger-order assertion — no passing verify
+event preceded the state), budget block receiving machine repairs, revision
+overwriting its parent, identical repairs repeating, the attempt bound
+ignored.
+
 ### One readiness truth (audit gap #16)
 
 The audit found the surfaces contradicting: *"Preflight reports 'ready with

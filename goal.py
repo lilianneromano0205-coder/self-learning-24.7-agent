@@ -249,6 +249,14 @@ def pursue(home, expert, goal, criteria="", cycles=4, drive=False,
         # ---------- 1. PLAN -------------------------------------------------
         plan_rel = f"{rel_dir}/plan-{cycle}.md"
         base_mem = [f"{rel_dir}/goal.md", f"{rel_dir}/toolbox.md"]
+        # A repaired pursuit opens with the REPAIR SIGNAL: the exact failing
+        # checks and their recorded errors, verbatim from the ledger — small
+        # and explicit, because models struggle to absorb even good feedback
+        # when it arrives as a wall of logs (arXiv:2506.11930), and because
+        # correction grounded in external signals is the only kind the
+        # evidence supports (arXiv:2310.01798).
+        if os.path.exists(os.path.join(d, "repair.md")):
+            base_mem.append(f"{rel_dir}/repair.md")
         if commons_rel:
             base_mem.insert(0, commons_rel)
         if assessment_note:
