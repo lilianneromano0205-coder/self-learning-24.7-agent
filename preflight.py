@@ -473,7 +473,48 @@ def check_policy(home):
     return out
 
 
+def check_thinking(home):
+    """CAN THIS FLEET THINK? Answered by asking doctor, not by re-deriving.
+
+    The audit's exact words for the defect this closes: "Preflight reports
+    'ready with risks', Doctor says the system cannot think, and the panel
+    shows blockers. Operators cannot know whether work may safely start. In
+    a proof-oriented product, contradictory truth is a release defect."
+
+    It happened because the two surfaces computed DIFFERENT questions and
+    published both answers under the one word "ready": doctor.readiness asks
+    whether a usable model provider exists; preflight asked about spend,
+    secrets, backups and exposure — and a fleet with no key at all could
+    pass every one of those. Both were right; the product was wrong.
+
+    So preflight now ASKS doctor rather than growing a second copy of the
+    provider logic — one computation, two renderers, which is this
+    codebase's standing rule for one truth. A fleet that cannot think is
+    NOT READY here, whatever else is in order, because every capability an
+    operator is about to rely on sits downstream of a model call.
+    """
+    import doctor
+    out = []
+    try:
+        r = doctor.readiness(home)
+    except Exception as e:                    # pragma: no cover
+        return [_finding(RISK, "thinking",
+                         f"doctor.readiness itself failed: {e}",
+                         "python doctor.py — a readiness probe that crashes "
+                         "cannot clear anything")]
+    for item in r.get("items", []):
+        if item.get("blocking"):
+            out.append(_finding(BLOCKER, "thinking", item["what"],
+                                item["how"]))
+    if not out:
+        out.append(_finding(OK, "thinking",
+                            "doctor and preflight agree: nothing blocks "
+                            "this fleet from thinking", ""))
+    return out
+
+
 CHECKS = (
+    ("thinking", check_thinking),
     ("cost", check_spend), ("pricing", check_pricing),
     ("secrets", check_secrets), ("policy", check_policy),
     ("backups", check_backups), ("capacity", check_disk),

@@ -43,6 +43,7 @@ import time
 HOME = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HOME)
 import commons        # noqa: E402
+import contract as contractmod  # noqa: E402
 import loop           # noqa: E402
 import toolbox        # noqa: E402
 
@@ -129,7 +130,7 @@ def _expert_cfg(root):
 
 
 def pursue(home, expert, goal, criteria="", cycles=4, drive=False,
-           timeout=1800, gid=None):
+           timeout=1800, gid=None, accept=None, max_usd=0.0, max_minutes=0):
     root = os.path.join(home, "experts", expert)
     if not os.path.isdir(root):
         sys.exit(f"ERROR: no expert '{expert}'")
@@ -146,8 +147,28 @@ def pursue(home, expert, goal, criteria="", cycles=4, drive=False,
     commons.refresh_directory(home)
     commons_rel = commons.write_digest(home, root)
 
+    # THE CONTRACT: what "done" means, frozen BEFORE any planning happens.
+    #
+    # The audit's finding, in one line: the planner writes its own graders.
+    # Milestone CHECKs are authored by the model that then works to satisfy
+    # them, so a plan under pressure can grade itself generously. Acceptance
+    # tests arrive from the CALLER, are hashed and sealed outside this
+    # expert's root, and the harness runs them itself at the end — the
+    # worker cannot write them, cannot edit them without tripping the seal,
+    # and cannot talk its way past them. No acceptance tests means the
+    # pursuit can end "achieved" (the judge's checked opinion) but never
+    # VERIFIED — that ceiling is recorded, not hidden.
+    try:
+        contractmod.load(root, gid)
+        contractmod.event(root, gid, "resumed", expert=expert)
+    except (OSError, ValueError):
+        contractmod.create(root, gid, goal, criteria=criteria,
+                           accept=accept or [], max_usd=max_usd,
+                           max_minutes=max_minutes, max_cycles=cycles)
+        contractmod.freeze(root, gid)
     rec = {"id": gid, "goal": goal, "criteria": criteria, "expert": expert,
            "status": "planning", "cycles": [], "verdict": None,
+           "verified": False,
            "started": time.strftime("%Y-%m-%dT%H:%M:%S")}
     _record(d, rec)
     agent = loop.Agent(root)
@@ -156,6 +177,33 @@ def pursue(home, expert, goal, criteria="", cycles=4, drive=False,
 
     assessment_note = ""
     for cycle in range(1, cycles + 1):
+        # BUDGETS END A PURSUIT BY NAME, NEVER BY SURPRISE. Checked at the
+        # top of every cycle (and spend accrues per finished task below), so
+        # the most one cycle can overshoot is the cycle already running —
+        # the same honest boundary the audit calls "checked between steps".
+        bstate = contractmod.budget_state(root, gid)
+        if bstate["exceeded"]:
+            why = "; ".join(bstate["exceeded"])
+            rec["status"] = "blocked"
+            rec["blocked"] = f"budget: {why}"
+            _record(d, rec)
+            try:
+                contractmod.transition(root, gid, "blocked",
+                                       why=f"budget: {why}")
+            except contractmod.ContractError:
+                pass
+            commons.learn(home, f"goal '{goal[:60]}' stopped on budget "
+                                f"({why}) — re-scope or raise the budget",
+                          from_expert=expert, tag="goal")
+            print(f"[goal {gid}] BLOCKED on budget: {why}")
+            return rec
+        contractmod.event(root, gid, "cycle_started", cycle=cycle)
+        if cycle == 1:
+            try:
+                contractmod.transition(root, gid, "running",
+                                       why="pursuit started")
+            except contractmod.ContractError:
+                pass
         cyc = {"n": cycle, "milestones": [], "verdict": None}
         rec["cycles"].append(cyc)
         rec["status"] = f"cycle {cycle}: planning"
@@ -227,6 +275,16 @@ def pursue(home, expert, goal, criteria="", cycles=4, drive=False,
             ms["task"] = mtid
             cyc["milestones"].append(ms)
             _record(d, rec)
+            cost = float(mt.get("cost_usd") or 0.0)
+            if cost:
+                contractmod.event(root, gid, "spent", usd=cost, task=mtid)
+            contractmod.event(
+                root, gid,
+                "milestone_done" if mt["status"] == "done"
+                else "milestone_failed",
+                n=ms["n"], cycle=cycle, check=(ms.get("check") or "")[:120],
+                what=ms["what"][:120],
+                error=(mt.get("error") or "")[:200])
             print(f"[goal {gid}]   M{ms['n']} {mt['status']}")
             if mt["status"] != "done":
                 # 4. LEARN — a real failure becomes a fleet lesson, once
@@ -299,13 +357,106 @@ def pursue(home, expert, goal, criteria="", cycles=4, drive=False,
                           from_expert=expert, tag="judging")
         cyc["verdict"] = verdict
         rec["verdict"] = verdict
+        contractmod.event(root, gid, "verdict", cycle=cycle, verdict=verdict,
+                          overruled=bool(failed_checks and
+                                         verdict == "NOT ACHIEVED"))
         print(f"[goal {gid}] cycle {cycle} verdict: {verdict}"
               + (f" (overruled: {', '.join(failed_checks)})" if failed_checks
                  and verdict == "NOT ACHIEVED" else ""))
         if verdict == "ACHIEVED":
+            # THE ACCEPTANCE AUTHORITY OUTRANKS THE JUDGE. The judge's
+            # verdict was already re-checked against milestone checks; both
+            # of those were authored by the planner. The contract's tests
+            # were authored by the caller and frozen before planning — so an
+            # ACHIEVED that fails them is overruled a second time, and the
+            # failure list goes into the next cycle's assessment so the plan
+            # attacks exactly what the graders still refuse.
+            vr = contractmod.verify(root, gid, cfg=_expert_cfg(root))
+            if vr["tamper"]:
+                rec["status"] = "blocked"
+                rec["blocked"] = "contract tamper: " + vr["why"]
+                rec["finished"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+                _record(d, rec)
+                try:
+                    contractmod.transition(root, gid, "blocked",
+                                           why="acceptance tests tampered")
+                except contractmod.ContractError:
+                    pass
+                commons.learn(home, "a goal's frozen acceptance tests were "
+                                    "edited after freezing — the pursuit was "
+                                    "stopped, not passed",
+                              from_expert=expert, tag="goal")
+                print(f"[goal {gid}] BLOCKED: {vr['why'][:120]}")
+                return rec
+            if vr["mechanical"] and not vr["all"]:
+                cyc["acceptance_failed"] = vr["failed"]
+                # durable in the LEDGER, not only in the assessment file —
+                # the next cycle's judge task replays its script and
+                # rewrites assessment-1.md, clobbering any note appended
+                # there (the original overrule learned this same lesson and
+                # keeps its record in goal.json for the same reason)
+                contractmod.event(root, gid, "acceptance_overruled",
+                                  cycle=cycle, failed=vr["failed"])
+                rec["verdict"] = "NOT ACHIEVED"
+                cyc["verdict"] = "NOT ACHIEVED"
+                note = (f"\n\n[OVERRULED by the CONTRACT: the judge said "
+                        f"ACHIEVED while these frozen acceptance tests still "
+                        f"fail: {', '.join(vr['failed'])}. These graders were "
+                        f"written by the caller before planning began; "
+                        f"satisfy them, not the plan.]\n")
+                with open(apath, "a", encoding="utf-8") as f:
+                    f.write(note)
+                print(f"[goal {gid}] ACHIEVED overruled by acceptance: "
+                      f"{', '.join(vr['failed'])}")
+                assessment_note = assess_rel
+                _record(d, rec)
+                osc = contractmod.oscillating(root, gid)
+                if osc:
+                    rec["status"] = "blocked"
+                    rec["blocked"] = f"no convergence: {osc}"
+                    rec["finished"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+                    _record(d, rec)
+                    try:
+                        contractmod.transition(root, gid, "blocked", why=osc)
+                    except contractmod.ContractError:
+                        pass
+                    print(f"[goal {gid}] BLOCKED: {osc[:140]}")
+                    return rec
+                continue
             rec["status"] = "achieved"
+            rec["verified"] = bool(vr["mechanical"] and vr["all"])
+            if not rec["verified"]:
+                rec["verification"] = vr["why"]
             rec["finished"] = time.strftime("%Y-%m-%dT%H:%M:%S")
             _record(d, rec)
+            try:
+                contractmod.transition(
+                    root, gid,
+                    "verified" if rec["verified"] else "partial",
+                    why=("all frozen acceptance tests passed, run by the "
+                         "harness" if rec["verified"] else vr["why"]))
+            except contractmod.ContractError:
+                pass
+            if not rec["verified"]:
+                print(f"[goal {gid}] achieved but NOT verified: {vr['why']}")
+            return rec
+        # A PLAN THAT HITS THE SAME WALL TWICE IN A ROW WILL HIT IT A THIRD
+        # TIME. Burning the remaining cycles on an identical failure is a
+        # loop wearing persistence's clothes; ending BLOCKED with the wall
+        # named lets the owner fix the actual obstacle.
+        osc = contractmod.oscillating(root, gid)
+        if osc:
+            rec["status"] = "blocked"
+            rec["blocked"] = f"no convergence: {osc}"
+            rec["finished"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+            _record(d, rec)
+            try:
+                contractmod.transition(root, gid, "blocked", why=osc)
+            except contractmod.ContractError:
+                pass
+            commons.learn(home, f"goal '{goal[:60]}' stopped: {osc[:140]}",
+                          from_expert=expert, tag="goal")
+            print(f"[goal {gid}] BLOCKED: {osc[:140]}")
             return rec
         assessment_note = assess_rel
         _record(d, rec)
@@ -313,6 +464,11 @@ def pursue(home, expert, goal, criteria="", cycles=4, drive=False,
     rec["status"] = "exhausted"
     rec["finished"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     _record(d, rec)
+    try:
+        contractmod.transition(root, gid, "exhausted",
+                               why=f"{cycles} cycle(s) spent, not achieved")
+    except contractmod.ContractError:
+        pass
     commons.learn(home, f"goal '{goal[:70]}' was not achieved within {cycles} "
                         f"cycles — re-scope it or hand the gap to a human",
                   from_expert=expert, tag="goal")
@@ -350,6 +506,12 @@ def main():
     p.add_argument("--drive", action="store_true")
     p.add_argument("--id", default=None, dest="gid",
                    help="name this pursuit (default: a timestamp)")
+    p.add_argument("--accept", action="append", default=[],
+                   help="frozen acceptance test, 'what::command'; the "
+                        "harness runs these itself and only they can make "
+                        "the outcome VERIFIED")
+    p.add_argument("--max-usd", type=float, default=0.0)
+    p.add_argument("--max-minutes", type=int, default=0)
     p.add_argument("--home", default=HOME)
     p = sub.add_parser("list")
     p.add_argument("--home", default=HOME)
@@ -359,8 +521,11 @@ def main():
     args = ap.parse_args()
 
     if args.cmd == "pursue":
+        import contract as _c
         r = pursue(args.home, args.expert, args.goal, args.criteria,
-                   args.cycles, args.drive, args.timeout, args.gid)
+                   args.cycles, args.drive, args.timeout, args.gid,
+                   accept=_c.parse_accept(args.accept),
+                   max_usd=args.max_usd, max_minutes=args.max_minutes)
         print(f"\n[goal {r['id']}] {r['status'].upper()}"
               + (f" — {r.get('error','')}" if r.get("error") else ""))
         sys.exit(0 if r["status"] == "achieved" else 1)

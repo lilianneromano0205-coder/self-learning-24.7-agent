@@ -2,6 +2,7 @@
 """Run every offline acceptance test. One command: python tests/run_all.py"""
 
 import os
+import re
 import subprocess
 import sys
 
@@ -42,19 +43,50 @@ TESTS = ["test_resume.py", "test_lock.py", "test_json_toolcall.py",
          "test_awareness.py", "test_design.py", "test_backup.py", "test_package.py",
          "test_preflight.py", "test_chaos.py", "test_endurance.py", "test_candidates.py",
          "test_curriculum.py", "test_research.py", "test_cases.py",
-         "test_gotcha_retire.py", "test_discover.py"]
+         "test_gotcha_retire.py", "test_discover.py", "test_contract.py"]
 
 
 def main():
-    failed = []
+    # EXPLICIT COUNTS, NEVER ONE GREEN PHRASE. This used to end "ALL TESTS
+    # PASSED", which the audit called out precisely: test_shutdown SKIPS on
+    # Windows (there is no SIGTERM to catch), so "all passed" was read as
+    # "every test file ran", which was false. A skip is a third outcome —
+    # not a failure, not a proof — and compressing the three into one word
+    # is how a gap hides inside a green line. evidence.py already learned
+    # this lesson; the runner now says the same numbers.
+    failed, skipped = [], []
     for t in TESTS:
         # flush: to a pipe this print is block-buffered, so without it the
         # header can land long after the test output it labels
         print(f"\n=== {t} ===", flush=True)
-        r = subprocess.run([sys.executable, os.path.join(HERE, t)], cwd=HERE)
+        # UTF-8 pinned at BOTH ends, the lesson evidence.py already paid
+        # for: a child that sees a pipe encodes with the locale (cp1252 on
+        # Windows) while this side decodes utf-8, and every em-dash a test
+        # prints becomes U+FFFD in the relayed output.
+        env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
+        r = subprocess.run([sys.executable, os.path.join(HERE, t)], cwd=HERE,
+                           capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", env=env)
+        sys.stdout.write(r.stdout or "")
+        sys.stderr.write(r.stderr or "")
+        sys.stdout.flush()
+        out = (r.stdout or "") + (r.stderr or "")
         if r.returncode != 0:
             failed.append(t)
-    print("\n" + ("FAILED: " + ", ".join(failed) if failed else "ALL TESTS PASSED"))
+        elif re.search(rf"^SKIP\s+{re.escape(t[:-3])}\b", out, re.M):
+            skipped.append(t)
+    passed = len(TESTS) - len(failed) - len(skipped)
+    print(f"\n{len(TESTS)} executed: {passed} passed, "
+          f"{len(skipped)} skipped, {len(failed)} failed"
+          + (f"  [skipped: {', '.join(skipped)}]" if skipped else ""))
+    if failed:
+        print("FAILED: " + ", ".join(failed))
+    elif not skipped:
+        print("ALL TESTS PASSED")
+    else:
+        print("ALL EXECUTED TESTS PASSED — the skipped ones proved nothing "
+              "here; their reasons are printed above and counted in "
+              "EVIDENCE.md")
     sys.exit(1 if failed else 0)
 
 

@@ -61,7 +61,11 @@ PASS_RE = re.compile(r"^PASS (\S+)")
 #
 # So a skip is its own outcome, carries its reason into the artifact, and the
 # system it belongs to is marked as not fully proven ON THIS RUN.
-SKIP_RE = re.compile(r"^SKIP\s+(test_\w+)(?:\.py)?\s*[:\-]\s*(.*)$")
+# The separator accepts ASCII colon/hyphen AND the em/en dashes, because
+# test_docker_live writes "SKIP test_docker_live — docker is not..."
+# and a skip whose punctuation the parser does not recognise is counted as
+# a FAILURE — the exact false alarm this regex exists to prevent.
+SKIP_RE = re.compile(r"^SKIP\s+(test_\w+)(?:\.py)?\s*[:\-–—]\s*(.*)$")
 
 # Which tests speak for which system. Every registered test must appear here.
 SYSTEMS = {
@@ -94,7 +98,7 @@ SYSTEMS = {
     "3. Work systems": {
         "what": "task, goal engine, team, deterministic workflow, "
                 "consultation, prospective intentions, routines",
-        "tests": ["test_goal.py", "test_workflows.py", "test_consult.py",
+        "tests": ["test_goal.py", "test_contract.py", "test_workflows.py", "test_consult.py",
                   "test_prospective.py", "test_routines.py", "test_wake.py",
                   "test_research.py",
                   "test_course.py", "test_exam.py", "test_verify.py",

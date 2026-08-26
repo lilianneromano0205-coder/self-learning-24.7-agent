@@ -189,7 +189,89 @@ def main():
         preflight.check_disk = original
     print("[robust] a check that threw was reported as a failed check; the "
           "audit still produced a verdict")
+    check_one_readiness_truth()
     print("PASS test_preflight")
+
+
+def check_one_readiness_truth():
+    """Doctor and preflight must give ONE answer to "can this fleet think?".
+
+    The audit found them contradicting: preflight said "ready with risks"
+    while doctor said the system cannot think, because each surface computed
+    a different question and published it under the same word. An operator
+    reading one surface made a decision the other surface would have
+    refused. The fix is structural — preflight ASKS doctor — and this pins
+    it in both directions:
+
+      * a fleet whose only live provider has NO KEY: doctor reports a
+        blocking item, and preflight must be NOT READY with a `thinking`
+        BLOCKER carrying doctor's own words — not "ready with risks";
+      * give it the key: doctor's blocker disappears and so does
+        preflight's, without either surface being edited.
+    """
+    import shutil
+    import tempfile
+
+    import doctor
+
+    home = tempfile.mkdtemp(prefix="one-truth-")
+    try:
+        os.makedirs(os.path.join(home, "experts"), exist_ok=True)
+        root = fleet.create(home, "Thinker", "needs a real provider")
+        cfg = ('[agent]\npoll_interval_seconds = 1\nreflect_after = []\n'
+               'daily_budget_usd = 5\nmax_task_usd = 1\n\n'
+               '[providers.real]\nbase_url = "https://api.example.com/v1"\n'
+               'api_key_env = "ONE_TRUTH_TEST_KEY"\n'
+               'input_per_mtok = 1.0\noutput_per_mtok = 1.0\n\n'
+               '[roles.default]\nprovider = "real"\nmodel = "m"\n')
+        # doctor scans the HOME's settings as well as every expert's, and
+        # fleet.create seeds the home with the shipped template (whose live
+        # providers are keyless here) — so both files must be this test's,
+        # or the assertion measures the template instead of the fixture
+        for p in (os.path.join(home, "settings.toml"),
+                  os.path.join(root, "settings.toml")):
+            with open(p, "w", encoding="utf-8") as f:
+                f.write(cfg)
+        os.environ.pop("ONE_TRUTH_TEST_KEY", None)
+
+        doc = doctor.readiness(home)
+        doc_blockers = [i for i in doc["items"] if i["blocking"]]
+        assert doc_blockers and not doc["ready"], (
+            f"doctor should refuse a keyless live provider: {doc['items']}")
+
+        rep = preflight.run(home)
+        assert rep["verdict"] == "NOT READY", (
+            f"doctor says this fleet cannot think and preflight says "
+            f"{rep['verdict']!r} — the exact contradiction the audit filed. "
+            f"Two surfaces, one word, two meanings.")
+        think = [f for f in rep["findings"]
+                 if f["area"] == "thinking" and f["level"] == preflight.BLOCKER]
+        assert think, rep["findings"]
+        assert any(d["what"] == t["what"] for d in doc_blockers
+                   for t in think), (
+            f"preflight's thinking blocker is not doctor's own item — a "
+            f"paraphrase is a second computation wearing a quote's clothes: "
+            f"doctor={doc_blockers} preflight={think}")
+
+        # the key arrives -> BOTH surfaces clear, neither was edited
+        os.environ["ONE_TRUTH_TEST_KEY"] = "sk-test-not-real"
+        try:
+            doc2 = doctor.readiness(home)
+            assert not [i for i in doc2["items"] if i["blocking"]], doc2
+            rep2 = preflight.run(home)
+            assert not [f for f in rep2["findings"]
+                        if f["area"] == "thinking"
+                        and f["level"] == preflight.BLOCKER], (
+                "doctor cleared and preflight still blocks — the two "
+                "surfaces have diverged again")
+        finally:
+            os.environ.pop("ONE_TRUTH_TEST_KEY", None)
+        print("[one-truth] a keyless fleet is NOT READY on BOTH surfaces, "
+              "with preflight quoting doctor's own blocking item verbatim; "
+              "supplying the key cleared both at once — one computation, "
+              "two renderers, no second opinion")
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
 
 
 if __name__ == "__main__":

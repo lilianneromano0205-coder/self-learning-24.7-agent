@@ -3,7 +3,7 @@
 **A file-backed, stdlib-only platform for building expert AI agents that work
 continuously, prove what they did, and remember what they learned.**
 
-77 Python modules · 107 acceptance tests · one HTML control panel · no
+78 Python modules · 108 acceptance tests · one HTML control panel · no
 database, no framework, no build step. Python 3.11+ and your own API keys.
 
 ```bash
@@ -35,7 +35,7 @@ claim it works, and what is not proven.
 
 ---
 
-## The six ideas you need to know
+## The seven ideas you need to know
 
 **1. "Done" is a command, not an opinion.**
 A task can carry a definition of done. When the model calls `finish_task`,
@@ -102,6 +102,35 @@ python discover.py "CRISPR off-target" --rails pubmed --min-tier 1
 python discover.py "raft consensus" --commands --root experts/dbexpert
 ```
 
+**7. A goal's graders are frozen before the work begins.**
+An external audit found the hole in every "the agent checks its own work"
+design, including this one's: *the planner writes its own graders* — the
+milestone checks are authored by the same model family that then satisfies
+them. The goal contract (`contract.py`) closes it structurally. Acceptance
+tests come from the caller, are hashed and **sealed outside the expert's
+working root**, and the harness runs them itself. The worker's file tools
+cannot write contract files; a worker that shells around that and edits them
+anyway gets a **TAMPER** verdict — nothing runs, nothing passes. Completion
+is a state transition (`verified` only when every frozen test passed in a
+harness-run), budgets end pursuits **blocked by name**, and a pursuit that
+fails the same wall twice in a row is stopped with the wall named instead of
+burning its remaining cycles on it. A goal with no mechanical acceptance
+tests can end *achieved* (the judge's checked opinion) but never *verified*
+— that ceiling is printed, not hidden. Every transition is an event in an
+append-only ledger that replays; a snapshot forged to "verified" with no
+event behind it is detected as divergence.
+
+```bash
+python goal.py pursue "migrate the reports module" --expert builder --drive \
+    --accept "tests pass::python -m pytest tests/reports -q" \
+    --max-usd 2.50 --max-minutes 180
+python contract.py verify experts/builder <goal-id>   # re-run the graders
+```
+
+**[GOAL_SPECIALIST.md](GOAL_SPECIALIST.md)** is the deep account: the
+architecture, the evidence (8/8 mutations killed), and the audit's complete
+115-gap register with an honest status for every row.
+
 ---
 
 ## Why you should believe any of it
@@ -109,7 +138,7 @@ python discover.py "raft consensus" --commands --root experts/dbexpert
 Five kinds of evidence, weakest first — and the last is the only one produced
 on a computer this project does not own.
 
-**The suite passes — on three platform/version pairs now, not one.** 107
+**The suite passes — on three platform/version pairs now, not one.** 108
 acceptance tests, green on Windows under Python 3.14 and on Linux under
 Python 3.11 and 3.13. Each test prints a sentence describing what it
 observed; `EVIDENCE.md` quotes them verbatim. CI runs the same suite on
@@ -123,7 +152,7 @@ does not test through an example — it walks the tree: every subprocess call
 site in 77 modules, every declared control file, 12 traversal spellings, all
 4 credential sources against every subsystem that must exclude them, all 9
 provider-call purposes, all 9 roles, every module that mints an expert, every
-reader of the exam file, all 152 sandbox names across 107 test files, all
+reader of the exam file, the sandbox names across all test files, all
 64 CLI subcommands the manual promises, and — parsing every module — every
 comparison that puts a file timestamp on both sides, which is how two
 silent staleness bugs were found at once rather than one at a time.
@@ -254,7 +283,7 @@ build is cleared.** The full table is in
 
 ```bash
 python demo.py            # the whole platform, keyless, in one run
-python tests/run_all.py   # 107 acceptance tests
+python tests/run_all.py   # 108 acceptance tests
 python proof.py           # what is proven, and to what level
 python evidence.py        # why we believe it, and where belief runs out
 python metrics.py         # is it working — and the numbers it refuses to invent
@@ -302,6 +331,8 @@ the panel teaches the terminal instead of hiding it.
 |---|---|
 | **[ARCHITECTURE.md](ARCHITECTURE.md)** | **the complete technical account — start here** |
 | [MANUAL.md](MANUAL.md) | the operator's guide: every command, every setting |
+| **[GOAL_SPECIALIST.md](GOAL_SPECIALIST.md)** | the goal contract: graders the worker cannot write, and the audit's 115-gap register with honest statuses |
+| [SECURITY.md](SECURITY.md) | trust boundaries, the five authorities, and the seven things deliberately NOT defended |
 | **[CLOUDFLARE.md](CLOUDFLARE.md)** | can this run on Cloudflare? what fits, what cannot, and what it costs |
 | [deploy/README.md](deploy/README.md) | running it in a container: the R2 restore/snapshot lifecycle an ephemeral disk makes mandatory |
 | [deploy/worker/README.md](deploy/worker/README.md) | the Cloudflare Worker: a Durable Object alarm that wakes the fleet, and a REST sandbox |

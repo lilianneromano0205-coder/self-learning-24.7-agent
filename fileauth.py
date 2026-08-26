@@ -63,6 +63,16 @@ CONTROL_DIRS = {"prompts", "approvals", "variants", "effects", "org"}
 # harness.LEDGERS and asserts every one lands in ZONE_CONTROL, so a ledger
 # added later cannot quietly land in the workspace.
 CONTROL_PATHS = {"skills/graph.json"}
+# Files that are CONTROL wherever they appear under a workspace head. The
+# goal contract is the definition of done, frozen before work begins, and
+# its event ledger is the record of what happened — the two things a worker
+# under pressure to finish would most profit from editing. goals/ stays a
+# workspace (the worker writes plans and evidence notes there); these names
+# inside it do not. The seal in org/ is the second lock: even a shell edit
+# that gets past this zone check produces a TAMPER verdict, not a pass.
+CONTROL_NAMES_IN = {
+    "goals": {"contract.json", "events.jsonl", "goal.json"},
+}
 RUNTIME_DIRS = {"logs", "contexts", "checkpoints", "events", "archive"}
 # the agent's own workspace: everything it is FOR
 WORKSPACE_DIRS = {
@@ -96,6 +106,8 @@ def zone_of(rel):
     if r.lower() in CONTROL_PATHS:
         return ZONE_CONTROL
     if head in CONTROL_DIRS or name in CONTROL_FILES:
+        return ZONE_CONTROL
+    if name in CONTROL_NAMES_IN.get(head, ()):
         return ZONE_CONTROL
     if head in RUNTIME_DIRS:
         return ZONE_RUNTIME

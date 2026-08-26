@@ -750,9 +750,14 @@ def apply_template(root, slug_name, tpl_slug):
             "deliverable_hint": tpl.get("deliverable_hint")}
 
 
-def start_goal(home, slug, root, goal_text, gid=None, cycles=4, criteria=None):
+def start_goal(home, slug, root, goal_text, gid=None, cycles=4, criteria=None,
+               accept=None, max_usd=0.0, max_minutes=0):
     """Launch the goal engine for an expert (shared by the Goal action and
-    the Learner lane). The same id goes to goal.py and the log file."""
+    the Learner lane). The same id goes to goal.py and the log file.
+
+    `accept` is the list of frozen acceptance tests ('what::command' each) —
+    the graders the worker cannot write. Passing them here is how a goal
+    started from the panel can end VERIFIED rather than merely achieved."""
     gid = gid or time.strftime("g-%Y%m%d-%H%M%S")
     if not re.fullmatch(r"[\w.-]{1,64}", gid):
         raise ValueError("invalid goal id")
@@ -761,6 +766,12 @@ def start_goal(home, slug, root, goal_text, gid=None, cycles=4, criteria=None):
            "--id", gid, "--drive", "--cycles", str(int(cycles or 4))]
     if criteria:
         cmd += ["--criteria", criteria]
+    for a in (accept or []):
+        cmd += ["--accept", str(a)]
+    if max_usd:
+        cmd += ["--max-usd", str(float(max_usd))]
+    if max_minutes:
+        cmd += ["--max-minutes", str(int(max_minutes))]
     logdir = os.path.join(root, "goals")
     os.makedirs(logdir, exist_ok=True)
     out = open(os.path.join(logdir, f"{gid}.log"), "a", encoding="utf-8")
@@ -1891,14 +1902,23 @@ class Handler(BaseHTTPRequestHandler):
                                      "authority is the one gap a machine must "
                                      "not resolve for itself."})
                     return
+                accept = [str(a) for a in (d.get("accept") or [])][:12]
                 gid = start_goal(self.home, slug, root, want,
                                  cycles=d.get("cycles") or 4,
-                                 criteria=criteria or None)
+                                 criteria=criteria or None,
+                                 accept=accept,
+                                 max_usd=float(d.get("max_usd") or 0.0),
+                                 max_minutes=int(d.get("max_minutes") or 0))
                 self._json({"started": True, "goal_id": gid,
                             "verdict": plan.get("verdict"),
                             "actions": plan.get("actions") or [],
+                            "acceptance": len(accept),
                             "message": f"resolved what could be resolved, "
-                                       f"then started {gid}"})
+                                       f"then started {gid}"
+                                       + ("" if accept else
+                                          " — no acceptance tests were "
+                                          "given, so the outcome can be "
+                                          "achieved but never VERIFIED")})
             elif path == "/api/learner":
                 # LANE 4: give a topic, get an expert that studies it to
                 # mastery — created, then handed the learning goal at once
