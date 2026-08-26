@@ -181,7 +181,22 @@ def status(root, name):
 def record(root, name, won, why=""):
     """The HARNESS records an outcome. Nothing else may — trust.json is
     CONTROL-zoned against the worker's file tools, and this function is the
-    single writer the platform uses."""
+    single writer the platform uses.
+
+    UNDER THE LOCK, because this is a read-modify-write on a shared ledger
+    and locks.py's own docstring names that the platform's standing race.
+    Found live, not theorised: two swarm workers finishing at once called
+    record() concurrently, one thread's os.replace hit the other's open
+    read handle, and the worker died with WinError 32 (sharing violation)
+    — its outcome unrecorded. A trust ledger that can lose outcomes under
+    exactly the concurrency the swarm creates is a trust ledger only when
+    nobody is working."""
+    import locks
+    with locks.holding(os.path.join(root, TRUST), timeout=10.0, stale=8.0):
+        return _record_locked(root, name, won, why)
+
+
+def _record_locked(root, name, won, why=""):
     t = _trust(root)
     rec = t.setdefault(name, {"status": "candidate", "wins": 0, "losses": 0,
                               "streak_losses": 0, "history": []})
@@ -205,7 +220,15 @@ def record(root, name, won, why=""):
 
 
 def clear_quarantine(root, name):
-    """Owner-only in spirit: exposed on the CLI, never called by the loop."""
+    """Owner-only in spirit: exposed on the CLI, never called by the loop.
+    Locked for the same reason record() is: one ledger, many possible
+    writers, one critical section."""
+    import locks
+    with locks.holding(os.path.join(root, TRUST), timeout=10.0, stale=8.0):
+        return _clear_locked(root, name)
+
+
+def _clear_locked(root, name):
     t = _trust(root)
     if name in t and t[name].get("status") == "quarantined":
         t[name]["status"] = "candidate"
@@ -325,6 +348,31 @@ def run(root, name, allow_candidate=False, cfg=None, record_outcome=True):
 
 # --------------------------------------------------------------- reconcile
 
+def settle(root, gid):
+    """Run the frozen graders and, ONLY if every one passes, move the
+    contract to verified. The single definition of "the graders decide" —
+    reconcile and swarm both call this, because two copies of the
+    verify-then-transition step is two chances for one of them to trust
+    something other than the graders."""
+    import contract
+    vr = contract.verify(root, gid)
+    if vr.get("tamper") or not vr.get("mechanical"):
+        return {"verified": False, "vr": vr}
+    if not vr.get("all"):
+        return {"verified": False, "vr": vr}
+    try:
+        c = contract.load(root, gid)
+        if c["state"] in ("ready", "blocked"):
+            contract.transition(root, gid, "running", why="settling")
+        if contract.load(root, gid)["state"] == "running":
+            contract.transition(root, gid, "verified",
+                                why="all acceptance tests passed, run by "
+                                    "the harness")
+    except Exception:
+        pass
+    return {"verified": True, "vr": vr}
+
+
 def reconcile(root, gid, allow_candidates=False, max_rounds=3):
     """THE MODEL-FREE GOAL LOOP — observe, apply, verify, repeat.
 
@@ -354,17 +402,7 @@ def reconcile(root, gid, allow_candidates=False, max_rounds=3):
                     "blocked": "no mechanical acceptance tests — nothing "
                                "a machine can reconcile toward"}
         if vr["all"]:
-            try:
-                c = contract.load(root, gid)
-                if c["state"] in ("ready", "running", "blocked"):
-                    if c["state"] != "running":
-                        contract.transition(root, gid, "running",
-                                            why="reconcile")
-                    contract.transition(root, gid, "verified",
-                                        why="all acceptance tests passed "
-                                            "under model-free reconcile")
-            except Exception:
-                pass
+            settle(root, gid)
             return {"verified": True, "rounds": rounds, "blocked": ""}
         c = contract.load(root, gid)
         cands = match(root, c["goal"], allow_candidates=allow_candidates)
@@ -386,14 +424,9 @@ def reconcile(root, gid, allow_candidates=False, max_rounds=3):
         if not rr["ok"]:
             return {"verified": False, "rounds": rounds,
                     "blocked": f"runbook {chosen!r} stopped: {rr['why']}"}
-    vr = contract.verify(root, gid)
-    if vr.get("all"):
-        try:
-            contract.transition(root, gid, "verified",
-                                why="reconciled")
-        except Exception:
-            pass
+    if settle(root, gid)["verified"]:
         return {"verified": True, "rounds": rounds, "blocked": ""}
+    vr = contract.verify(root, gid)
     return {"verified": False, "rounds": rounds,
             "blocked": f"{max_rounds} reconcile round(s) spent and "
                        f"{len(vr.get('failed') or [])} acceptance test(s) "

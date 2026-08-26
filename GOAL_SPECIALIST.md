@@ -208,6 +208,55 @@ event preceded the state), budget block receiving machine repairs, revision
 overwriting its parent, identical repairs repeating, the attempt bound
 ignored.
 
+### Swarm — multiplication only where the evidence says it pays
+
+The owner asked for an agent "capable of multiplying itself until achieving
+the goal". The controlled evidence says exactly when that helps and when it
+destroys the work, and `swarm.py` is gated on it rather than inspired by it:
+
+- **[Nature Machine Intelligence 2026](https://www.nature.com/articles/s42256-026-01268-y)**
+  (260 controlled experiments): centralized coordination on genuinely
+  decomposable tasks gained up to **+81%**; on sequential tasks **every**
+  multi-agent variant tested degraded performance **−39% to −70%**.
+- **[MAST — Why Do Multi-Agent LLM Systems Fail?](https://arxiv.org/abs/2503.13657)**
+  (NeurIPS 2025 spotlight): 14 failure modes in 3 clusters — system design,
+  inter-agent misalignment, and workers certifying their own success.
+
+Four structural rules, each mutation-tested:
+
+1. **Sequential by default; independence is declared, not guessed.** The
+   caller who wrote the graders gives acceptance tests a `group`
+   (`--accept "what::command::group"`); tests in different groups may run
+   in parallel, ungrouped tests never do. No declaration, no fan-out.
+2. **Fan out only when it can pay**: ≥2 groups, each with its own
+   *distinct* proven runbook. Groups without a procedure are the frontier,
+   named — never improvised in parallel.
+3. **Workers do not talk and do not grade.** One immutable assignment
+   each; no inter-worker channel exists (MAST cluster ii has no syntax
+   here); the only reducer is `runbook.settle` running **all** the frozen
+   acceptance tests centrally. Tested: a swarm whose workers all report
+   success still fails when the graders refuse, with the refusing test
+   named.
+4. **One worker per group, ever** — a per-group lease on the platform's
+   own lock primitive makes duplicate execution across concurrent swarms
+   impossible, not unlikely.
+
+`goal.pursue` routes its machine-first path through `swarm.auto`: parallel
+where declared and payable, sequential reconcile everywhere else, one
+result shape either way. Proven end to end: a grouped goal fanned out to
+two workers and ended VERIFIED with **zero tasks and zero model calls**,
+against a provider rigged to fail any task.
+
+**Three real concurrency defects, found by this layer's own test and fixed:**
+the event ledger lost rows under concurrent append (Windows append-mode
+handles are not atomic across writers — `contract.event` now takes the
+platform lock, and a 4-thread × 25-event hammer counts exactly 100 rows);
+a worker that died between acting and reporting vanished silently (workers
+now report every exception as a result row and an event); and the trust
+ledger's read-modify-write raced under two workers finishing at once
+(WinError 32, sharing violation — `runbook.record` now locks). Each fix
+carries the measured failure in its comment.
+
 ### One readiness truth (audit gap #16)
 
 The audit found the surfaces contradicting: *"Preflight reports 'ready with

@@ -192,9 +192,14 @@ def pursue(home, expert, goal, criteria="", cycles=4, drive=False,
     # nothing lost but a few compute-seconds.
     try:
         import runbook as _rb
+        import swarm as _sw
         _c = contractmod.load(root, gid)
         if _c.get("acceptance") and _rb.match(root, goal):
-            rr = _rb.reconcile(root, gid)
+            # swarm.auto: parallel where the caller DECLARED independent
+            # groups and distinct proven procedures exist for them
+            # (evidence-gated — Nature MI 2026, MAST); plain sequential
+            # reconcile everywhere else. Same result shape either way.
+            rr = _sw.auto(root, gid)
             if rr["verified"]:
                 rec["status"] = "achieved"
                 rec["verified"] = True

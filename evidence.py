@@ -99,7 +99,7 @@ SYSTEMS = {
         "what": "task, goal engine, team, deterministic workflow, "
                 "consultation, prospective intentions, routines",
         "tests": ["test_goal.py", "test_contract.py", "test_runbook.py",
-                  "test_repair.py",
+                  "test_repair.py", "test_swarm.py",
                   "test_workflows.py", "test_consult.py",
                   "test_prospective.py", "test_routines.py", "test_wake.py",
                   "test_research.py",

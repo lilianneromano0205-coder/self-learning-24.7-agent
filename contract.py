@@ -137,12 +137,29 @@ def seal_path(root):
 # ------------------------------------------------------------------ events
 
 def event(root, gid, kind, **data):
-    """Append one event. The ledger is the source of truth; the snapshot in
-    contract.json is a convenience projection of it."""
+    """Append one event, UNDER THE LOCK. The ledger is the source of truth;
+    the snapshot in contract.json is a convenience projection of it.
+
+    The lock is not decoration. On Windows, append mode seeks to
+    end-of-file when the handle OPENS, not per write — so two concurrent
+    appenders (two swarm workers; a pursuit beside a panel action) can land
+    at the same offset and one row silently clobbers the other. Measured
+    live: a swarm's two workers emitted two events and the ledger held one
+    — the source of truth lost truth. The platform's lock primitive
+    (O_EXCL, stale-broken, ownership-verified release) makes the append a
+    critical section across threads AND processes.
+    """
     p = events_path(root, gid)
     os.makedirs(os.path.dirname(p), exist_ok=True)
     row = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "kind": str(kind)}
     row.update(data)
+    import locks
+    with locks.holding(p, timeout=10.0, stale=8.0):
+        _append(p, row)
+    return row
+
+
+def _append(p, row):
     with open(p, "a", encoding="utf-8") as f:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
         f.flush()
@@ -181,18 +198,32 @@ def _accept_hash(accept):
 
 
 def parse_accept(items):
-    """CLI shape: 'what it proves::the command'. -> [{"id","what","check"}]"""
+    """CLI shape: 'what it proves::command[::group]'.
+
+    -> [{"id","what","check"[,"group"]}]. The optional GROUP declares
+    separability: tests in DIFFERENT groups may be worked in parallel by
+    swarm.py; tests without a group never are. Declared rather than
+    inferred, because the caller who wrote the graders is the only party
+    who knows whether two tests share hidden state — assumed separability
+    is exactly where multi-agent work degrades (Nature MI 2026).
+    """
     out = []
     for i, raw in enumerate(items or [], 1):
         raw = str(raw)
-        if "::" in raw:
-            what, check = raw.split("::", 1)
+        parts = raw.split("::")
+        if len(parts) >= 3:
+            what, check, group = parts[0], "::".join(parts[1:-1]), parts[-1]
+        elif len(parts) == 2:
+            what, check, group = parts[0], parts[1], ""
         else:
-            what, check = raw, raw
-        what, check = what.strip(), check.strip()
+            what, check, group = raw, raw, ""
+        what, check, group = what.strip(), check.strip(), group.strip()
         if not check:
             raise ContractError(f"acceptance {i} has an empty command")
-        out.append({"id": f"A{i}", "what": what or check, "check": check})
+        row = {"id": f"A{i}", "what": what or check, "check": check}
+        if group:
+            row["group"] = group
+        out.append(row)
     return out
 
 
