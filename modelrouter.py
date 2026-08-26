@@ -66,6 +66,40 @@ def record(root, task, provider, model, cost=0.0):
     return rec
 
 
+def record_served(root, task, servedmap):
+    """One row PER provider:model pair that served this task.
+
+    The audit's finding, confirmed in this codebase: the terminal outcome
+    was credited to the last provider, so failover polluted the evidence
+    this router learns from. Each pair's row carries its own steps, its own
+    accumulated cost, and its SHARE of the task's steps; `sole` marks the
+    clean case where one pair served everything. stats() weights by share,
+    so a provider that served nine of ten steps of a failure carries 0.9 of
+    that failure — not 0.0 because someone else happened to finish it.
+    """
+    total = sum(int(v.get("steps") or 0) for v in servedmap.values()) or 1
+    rows = []
+    for v in servedmap.values():
+        n = int(v.get("steps") or 0)
+        rec = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+               "task": task.get("id"), "role": task.get("role"),
+               "provider": v.get("provider") or "unknown",
+               "model": v.get("model") or "unknown",
+               "status": task.get("status"),
+               "verified": bool(task.get("done_check")),
+               "steps": n,
+               "share": round(n / total, 4),
+               "sole": len(servedmap) == 1,
+               "cost_usd": float(v.get("cost_usd") or 0.0)}
+        rows.append(rec)
+    p = _path(root)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "a", encoding="utf-8") as f:
+        for rec in rows:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    return rows
+
+
 def outcomes(root, limit=5000):
     out = []
     try:
@@ -111,16 +145,26 @@ def profiles(root, role=None):
                                  "model": r.get("model"), "n": 0, "passes": 0,
                                  "verified_n": 0, "verified_passes": 0,
                                  "cost": 0.0, "steps": 0})
-        a["n"] += 1
+        # SHARE-WEIGHTED (audit P1). Older rows carry no share (one row per
+        # task, credited to the last provider) and count as weight 1 — the
+        # ledger is append-only, so history keeps its old meaning. New rows
+        # carry each pair's share of the task's steps: a provider that
+        # served nine of ten steps of a failure carries 0.9 of that
+        # failure, not 0.0 because another provider happened to finish it.
+        # Cost needs no weighting — each new row already carries only the
+        # cost THAT pair incurred.
+        w = float(r.get("share", 1.0) or 1.0)
+        a["n"] += w
         a["cost"] += float(r.get("cost_usd") or 0)
         a["steps"] += int(r.get("steps") or 0)
         ok = r.get("status") == "done"
-        a["passes"] += 1 if ok else 0
+        a["passes"] += w if ok else 0
         if r.get("verified"):
-            a["verified_n"] += 1
-            a["verified_passes"] += 1 if ok else 0
+            a["verified_n"] += w
+            a["verified_passes"] += w if ok else 0
     agree = _replay_agreement(root)
     for a in agg.values():
+        a["n"] = round(a["n"], 3)
         a["pass_rate"] = round(a["passes"] / a["n"], 3) if a["n"] else 0.0
         a["verified_pass_rate"] = (round(a["verified_passes"] / a["verified_n"], 3)
                                    if a["verified_n"] else None)

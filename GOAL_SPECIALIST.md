@@ -348,7 +348,7 @@ audit's own recommendation in every case).
 | 15 | PARTIAL | 429/5xx ladder, Retry-After with jitter, permanent-error failover, budget metering — all tested offline. Live quota exhaustion and all-in cost: pending a key. |
 | 16 | **CLOSED** | One readiness truth: preflight asks doctor; keyless fleet is NOT READY on both surfaces with identical wording; both clear together. `test_preflight::check_one_readiness_truth`, both directions. |
 | 17 | PARTIAL | Skips are a third outcome in the runner and EVIDENCE.md. The four-level present/offline/live/outcome taxonomy on proof badges: OPEN. |
-| 18 | OPEN | Router calibration and regret tracking need representative live data. |
+| 18 | PARTIAL | **Failover attribution fixed** (second audit's confirmed defect): every provider:model pair that serves a task now gets its own outcome row with step count, own cost, and SHARE; profiles() weights by share, so the last provider no longer absorbs whole outcomes. `test_modelrouter.py::check_failover_attribution`. Live calibration/regret: needs a key. |
 | 19 | BY-DESIGN | No weight training. `training.py` exports verified trajectories; a governed external trainer is a separate product, exactly as the audit prescribes. |
 | 20 | CLOSED | The four learnings are kept distinct in docs and code: episodic (cases/events), semantic (cited atoms), procedural (skills promoted on gated outcomes), weights (not claimed). |
 | 21 | OPEN | No model-version pin/replay/canary pipeline. |
@@ -359,7 +359,7 @@ audit's own recommendation in every case).
 |---:|---|---|
 | 22 | PARTIAL | Typed refusals exist throughout ingest; a published supported-format matrix does not. |
 | 23 | PARTIAL | 11 keyless curated rails (`discover.py`), relevance-gated, tier-ranked, tested live and offline. A governed general-web frontier: OPEN. |
-| 24 | PARTIAL | Tiers are heuristic + owner override (`[agent.source_tier]`). Per-domain source policies: OPEN. |
+| 24 | PARTIAL→IMPROVED | **Discovery authority split from evidence quality** (second audit's P0, verified against Crossref's own membership page): DOI resolvers/Crossref/DataCite and preprint servers are now tier 2 provenance — real, citable, learnable, but never "normative"; DOAJ/PubMed keep tier 1 with reasons naming the actual review bar. `test_sources.py`, written red-first. Per-domain policies beyond this: OPEN. |
 | 25 | PARTIAL | Conflicts module catches polarity/numeric disagreement; claim-level entailment is OPEN and stated as a blind spot in EVIDENCE.md. |
 | 26 | OPEN | No retraction feeds, TTLs, or supersession chains for learned claims. |
 | 27 | OPEN | Semantic contradiction beyond text rules — needs typed claims. |

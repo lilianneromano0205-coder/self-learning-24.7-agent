@@ -140,7 +140,60 @@ def main():
     finally:
         stop_panel(proc, base)
     print("[panel] the measured profile of every model is served to the owner")
+    check_failover_attribution_is_per_attempt(  )
     print("PASS test_modelrouter")
+
+
+def check_failover_attribution_is_per_attempt(home=None):
+    """The audit's confirmed defect: the terminal outcome was credited to
+    the LAST provider that served, so failover polluted the router's
+    evidence in both directions — the cheap model escaped blame for
+    failures it mostly caused, and the fallback was blamed for finishing
+    them. The router then learned exactly wrong economics.
+
+    Per-attempt rows fix it: each provider:model pair that served carries
+    its own steps, its own cost, and its SHARE of the task, and profiles()
+    weights by share. Old single rows (no share) keep weight 1, so the
+    append-only history keeps its old meaning.
+    """
+    import tempfile
+    root = tempfile.mkdtemp(prefix="router-attr-")
+    # a failover failure: cheap served 9 of 10 steps, big finished it
+    rows = modelrouter.record_served(
+        root, {"id": "t1", "role": "practitioner", "status": "failed",
+               "done_check": "gate"},
+        {"cheap:small": {"provider": "cheap", "model": "small",
+                         "steps": 9, "cost_usd": 0.009},
+         "big:large": {"provider": "big", "model": "large",
+                       "steps": 1, "cost_usd": 0.020}})
+    assert len(rows) == 2, rows
+    by = {r["provider"]: r for r in rows}
+    assert abs(by["cheap"]["share"] - 0.9) < 1e-6, by
+    assert abs(by["big"]["share"] - 0.1) < 1e-6, by
+    assert not by["cheap"]["sole"] and not by["big"]["sole"], by
+    assert abs(by["cheap"]["cost_usd"] - 0.009) < 1e-9, (
+        "each pair must carry only the cost IT incurred")
+    # a clean sole-provider success for the cheap pair
+    modelrouter.record_served(
+        root, {"id": "t2", "role": "practitioner", "status": "done",
+               "done_check": "gate"},
+        {"cheap:small": {"provider": "cheap", "model": "small",
+                         "steps": 5, "cost_usd": 0.005}})
+    st = modelrouter.profiles(root)
+    c, b = st["cheap:small"], st["big:large"]
+    assert abs(c["n"] - 1.9) < 1e-6, (
+        f"cheap should weigh 0.9 (its share of the failure) + 1.0 (its "
+        f"sole success) = 1.9, got {c['n']} — under the old scheme it "
+        f"weighed 1.0 and its record was untouched by the failure it "
+        f"mostly caused")
+    assert abs(c["pass_rate"] - round(1.0 / 1.9, 3)) < 1e-3, c
+    assert abs(b["n"] - 0.1) < 1e-6 and b["pass_rate"] == 0.0, (
+        f"big should carry only its 0.1 share of the failure, got {b}")
+    print("[attribution] a failover failure was split 0.9/0.1 by served "
+          "share: the cheap model that did nine steps carries nine tenths "
+          "of the failure, the fallback that finished it carries one tenth "
+          "— the router's economics are no longer polluted by whoever "
+          "happened to serve last")
 
 
 if __name__ == "__main__":

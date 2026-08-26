@@ -94,14 +94,32 @@ REGISTRY = (
         "r-project.org", "llvm.org", "gnu.org", "kernel.org", "git-scm.com",
         "sqlite.org", "postgresql.org", "openssl.org", "curl.se")),
     (1, "peer-reviewed research, or the primary index of it", (
-        "doi.org", "acm.org", "ieee.org", "nature.com", "science.org",
+        "doaj.org", "acm.org", "ieee.org", "nature.com", "science.org",
         "sciencedirect.com", "springer.com", "wiley.com", "plos.org",
         "jstor.org", "pnas.org", "cell.com", "thelancet.com", "bmj.com",
         "nejm.org", "nih.gov", "ncbi.nlm.nih.gov",
         "pubmed.ncbi.nlm.nih.gov", "europepmc.org")),
-    (1, "a preprint server: the paper itself, but NOT peer reviewed -- "
-        "demote it in [agent.source_tier] if your field needs review", (
-        "arxiv.org", "biorxiv.org", "medrxiv.org", "ssrn.com")),
+    # WAS tier 1 while its own why-text said "NOT peer reviewed" — the
+    # internal contradiction the external audit caught. The tier now matches
+    # the sentence: real scholarship, real provenance, no review bar.
+    (2, "a preprint server: the paper itself, but NOT peer reviewed -- "
+        "raise it in [agent.source_tier] only if your field treats "
+        "preprints as citable", (
+        "arxiv.org", "export.arxiv.org", "biorxiv.org", "medrxiv.org",
+        "ssrn.com")),
+    # DISCOVERY AUTHORITY IS NOT EVIDENCE QUALITY. Crossref's own
+    # membership page (checked 2026-08-27) says eligibility is open to
+    # producers of "professional and scholarly materials" with deliberately
+    # low barriers and that it does not assess content quality — a DOI is
+    # an identifier, not a review mark. Anything with a DOI, junk journals
+    # included, resolves through these hosts, so tier 1 here was false
+    # authority feeding the learning pipeline. Tier 2 keeps every such
+    # work learnable without the halo.
+    (2, "scholarly provenance infrastructure: a DOI or registration is "
+        "real, citable provenance but NOT a mark of review or quality -- "
+        "Crossref itself does not assess members' content", (
+        "doi.org", "dx.doi.org", "crossref.org", "api.crossref.org",
+        "datacite.org", "api.datacite.org")),
     (2, "primary vendor documentation for the vendor's own product", (
         "developer.mozilla.org", "web.dev", "developer.chrome.com",
         "developer.apple.com", "developers.google.com", "cloud.google.com",
@@ -261,16 +279,36 @@ PUBLIC_RESEARCH = (
 # through them could ever become a cited atom. The discovery rails would have
 # worked perfectly and produced nothing learnable.
 #
-# Tier 1 (normative/peer-reviewed): the index only admits reviewed work, or
-# the identifier IS the citation.
-SCHOLARLY_REVIEWED = (
-    "doaj.org",                 # only peer-reviewed open-access journals
-    "doi.org", "dx.doi.org",    # the DOI resolver: the citation itself
-    "crossref.org", "api.crossref.org",
-    "datacite.org", "api.datacite.org",
-    "pubmed.ncbi.nlm.nih.gov", "ncbi.nlm.nih.gov", "europepmc.org",
-    "arxiv.org", "export.arxiv.org",
-)
+# DISCOVERY AUTHORITY IS NOT EVIDENCE QUALITY.
+#
+# The external audit caught this table conflating the two, and the primary
+# sources agree with the audit. The first version put doi.org, Crossref and
+# arXiv at tier 1 with the reason "admits only reviewed work, or the
+# identifier IS the citation" — and that is false for those hosts. Crossref's
+# own membership page (checked 2026-08-27) says eligibility is open to
+# producers of "professional and scholarly materials" with deliberately low
+# barriers, and it does not assess content quality: A DOI IS AN IDENTIFIER,
+# NOT A REVIEW MARK. arXiv is a preprint server — a comment in this very
+# file said so while the table said tier 1. An internal contradiction, in
+# the module whose one job is honesty about origins.
+#
+# Why it matters more than a label: tier feeds LEARN_MIN_TIER, which decides
+# what may become a CITED ATOM — durable knowledge. A junk-journal article
+# reached through its DOI would have entered the knowledge base wearing
+# "tier 1 (normative)". False authority in the learning pipeline is the one
+# contamination that compounds.
+#
+# So the split, per the audit: hosts that genuinely admit only reviewed or
+# editorially selected work keep tier 1; provenance INFRASTRUCTURE — the
+# registries and resolvers whose value is identity and citation, not
+# quality — is tier 2: real scholarly provenance, still learnable, no halo.
+
+# The reviewed and provenance hosts now live in REGISTRY above — the table
+# that calls itself the single source of truth. Keeping second copies here
+# was this codebase's recurring defect (two descriptions of one truth), and
+# it bit exactly as usual: the registry's doi.org entry and this file's
+# later branch disagreed about WHY doi.org rated what it rated, and the
+# registry answered first, so the later branch's honesty never ran.
 # Tier 2 (professional): curated aggregators and archives. Real provenance,
 # but they index preprints and datasets alongside reviewed work, so the
 # CONTAINER cannot promise review the way the ones above can.
@@ -279,7 +317,7 @@ SCHOLARLY_ARCHIVE = (
     "semanticscholar.org", "api.semanticscholar.org",
     "core.ac.uk", "openaire.eu", "explore.openaire.eu",
     "zenodo.org",               # CERN's research repository
-    "osf.io", "hal.science", "biorxiv.org", "medrxiv.org",
+    "osf.io", "hal.science",
     "repec.org", "ideas.repec.org",
     "softwareheritage.org", "archive.softwareheritage.org",
     "loc.gov",                  # Library of Congress
@@ -485,10 +523,6 @@ def classify(ref, kind_hint="", cfg=None):
                 f"{host} is a SEARCH ENGINE, not a source. Its results are "
                 f"personalised and change hourly, so a citation to it cites "
                 f"nothing. Follow the link and rate where it lands.")
-        if _in(host, SCHOLARLY_REVIEWED):
-            return kind, 1, (f"{host} is open scholarly infrastructure that "
-                             f"admits only reviewed work, or is the citation "
-                             f"identifier itself -- tier 1 (normative)")
         if _in(host, SCHOLARLY_ARCHIVE):
             return kind, 2, (f"{host} is a curated scholarly index or public "
                              f"research archive -- tier 2 (professional). It "

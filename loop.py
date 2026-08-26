@@ -986,6 +986,7 @@ class Agent:
                 self._record_spend(cost)
                 self._meter(purpose, role, prov_name, model,
                             self._mock_usage, cost, task_id, t0)
+                self.last_call = {"provider": prov_name, "model": model}
                 return msg, self._mock_usage, prov_name
             for attempt in range(5):
                 _t0 = time.time()
@@ -1047,6 +1048,11 @@ class Agent:
                     # on the longest tasks, so the ceiling under-counted worst
                     # exactly where it mattered most.
                     self._record_spend(_cost)
+                    # the pair that ACTUALLY served this call, for per-step
+                    # attribution — task["provider"]/["model"] alone recorded
+                    # only the LAST step's server, so a failover task's whole
+                    # outcome was credited to whichever provider finished it
+                    self.last_call = {"provider": prov_name, "model": model}
                     return msg, usage, prov_name
                 except urllib.error.HTTPError as e:
                     last_err = f"{prov_name} HTTP {e.code}"
@@ -1598,8 +1604,25 @@ class Agent:
                 task["role"], messages, escalated=bool(task.get("escalated")),
                 purpose="step", task_id=task["id"])
             task["provider"] = prov_name
-            task["model"] = (routed.get("model") if routed.get("routed")
-                             else self.role_cfg(task["role"]).get("model"))
+            # the model that ACTUALLY served, not the one routing intended:
+            # on failover the fallback provider answers with its own model,
+            # and recording the routed one polluted the router's evidence
+            served = getattr(self, "last_call", None) or {}
+            task["model"] = (served.get("model")
+                             or (routed.get("model") if routed.get("routed")
+                                 else self.role_cfg(task["role"]).get("model")))
+            # PER-ATTEMPT ATTRIBUTION (audit P1): tally every provider:model
+            # pair that serves any step of this task, with its own step count
+            # and cost share. The terminal outcome is then recorded per pair,
+            # weighted by share — a task where the cheap model did nine steps
+            # and the fallback did one no longer credits (or blames) the
+            # fallback for the whole task.
+            _pk = f"{prov_name}:{task['model'] or 'unknown'}"
+            _sv = task.setdefault("served", {})
+            _rec = _sv.setdefault(_pk, {"provider": prov_name,
+                                        "model": task["model"] or "unknown",
+                                        "steps": 0, "cost_usd": 0.0})
+            _rec["steps"] += 1
         except RuntimeError as e:
             task["status"] = "failed"
             task["error"] = str(e)
@@ -1612,6 +1635,7 @@ class Agent:
         # the provider that actually served this step, not the role default
         step_cost = self._cost(task.get("provider"), usage, task["role"])
         task["cost_usd"] = round(task["cost_usd"] + step_cost, 6)
+        _rec["cost_usd"] = round(_rec["cost_usd"] + step_cost, 6)
         # (the daily ledger was already credited inside call_model, which is
         # the only place that knows about EVERY call, not just this one)
 
@@ -2349,10 +2373,22 @@ class Agent:
         if not will_retry_s:
             try:
                 import modelrouter
-                modelrouter.record(self.root, task,
-                                   task.get("provider") or "unknown",
-                                   task.get("model") or "unknown",
-                                   task.get("cost_usd", 0))
+                # PER-ATTEMPT ATTRIBUTION (audit P1). task["provider"] holds
+                # only the LAST step's server, so a failover task's whole
+                # outcome — pass or fail, and its full cost — was credited
+                # to whichever provider finished it. The router then learned
+                # polluted economics: "the cheap model succeeded" when the
+                # fallback did the work, or the reverse. Every pair that
+                # served now gets its own row carrying its own step count,
+                # its own cost, and its SHARE of the task.
+                servedmap = task.get("served") or {}
+                if servedmap:
+                    modelrouter.record_served(self.root, task, servedmap)
+                else:                        # no step ever completed
+                    modelrouter.record(self.root, task,
+                                       task.get("provider") or "unknown",
+                                       task.get("model") or "unknown",
+                                       task.get("cost_usd", 0))
             except Exception as e:
                 self.log.error(json.dumps({"event": "route_record_failed",
                                            "error": str(e)}))

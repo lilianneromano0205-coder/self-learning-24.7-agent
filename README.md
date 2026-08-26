@@ -3,7 +3,7 @@
 **A file-backed, stdlib-only platform for building expert AI agents that work
 continuously, prove what they did, and remember what they learned.**
 
-81 Python modules · 111 acceptance tests · one HTML control panel · no
+82 Python modules · 112 acceptance tests · one HTML control panel · no
 database, no framework, no build step. Python 3.11+ and your own API keys.
 
 ```bash
@@ -177,7 +177,7 @@ status for every row.
 Five kinds of evidence, weakest first — and the last is the only one produced
 on a computer this project does not own.
 
-**The suite passes — on three platform/version pairs now, not one.** 111
+**The suite passes — on three platform/version pairs now, not one.** 112
 acceptance tests, green on Windows under Python 3.14 and on Linux under
 Python 3.11 and 3.13. Each test prints a sentence describing what it
 observed; `EVIDENCE.md` quotes them verbatim. CI runs the same suite on
@@ -322,7 +322,7 @@ build is cleared.** The full table is in
 
 ```bash
 python demo.py            # the whole platform, keyless, in one run
-python tests/run_all.py   # 111 acceptance tests
+python tests/run_all.py   # 112 acceptance tests
 python proof.py           # what is proven, and to what level
 python evidence.py        # why we believe it, and where belief runs out
 python metrics.py         # is it working — and the numbers it refuses to invent

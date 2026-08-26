@@ -100,7 +100,12 @@ def check_ranking_dedupe_and_filtering():
 
     tiers = [h["tier"] for h in res["hits"]]
     assert tiers == sorted(tiers), f"not ranked by tier: {tiers}"
-    assert res["hits"][0]["tier"] == 1, res["hits"][0]
+    # tier 2, not 1: the source-authority audit split discovery authority
+    # from evidence quality — a DOI is provenance, not a review mark, so
+    # doi.org now honestly rates tier 2 (still learnable). This assertion
+    # used to encode the false halo.
+    assert res["hits"][0]["tier"] == 2, res["hits"][0]
+    assert res["hits"][0]["tier"] <= 2, res["hits"][0]
 
     assert not any("medium.com" in h["url"] for h in res["hits"]), (
         "a source below the learn bar was returned as learnable")
