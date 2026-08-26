@@ -370,6 +370,7 @@ the panel teaches the terminal instead of hiding it.
 |---|---|
 | **[ARCHITECTURE.md](ARCHITECTURE.md)** | **the complete technical account — start here** |
 | [MANUAL.md](MANUAL.md) | the operator's guide: every command, every setting |
+| **[GOAL_SYSTEM_COMPLETE.md](GOAL_SYSTEM_COMPLETE.md)** | **the goal system end to end** — every module, loop, file format, the reasoning, and what is missing |
 | **[GOAL_SPECIALIST.md](GOAL_SPECIALIST.md)** | the goal contract: graders the worker cannot write, and the audit's 115-gap register with honest statuses |
 | [SECURITY.md](SECURITY.md) | trust boundaries, the five authorities, and the seven things deliberately NOT defended |
 | **[CLOUDFLARE.md](CLOUDFLARE.md)** | can this run on Cloudflare? what fits, what cannot, and what it costs |
