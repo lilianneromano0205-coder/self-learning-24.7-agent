@@ -1,0 +1,32 @@
+{
+ "id": "t3",
+ "goal": "Build a three-tier annual-billing pricing page for an accounting SaaS at out/t3/pricing.html \u2014 semantic, accessible, responsive, three priced tiers with CTAs.",
+ "competencies": [
+  "semantic-structure",
+  "accessibility",
+  "responsive-layout",
+  "pricing-ux"
+ ],
+ "accept": [
+  {
+   "id": "A1",
+   "what": "semantic structure floor",
+   "check": "python \"{PACK}/validators/check_semantics.py\" out/t3/pricing.html"
+  },
+  {
+   "id": "A2",
+   "what": "accessibility floor",
+   "check": "python \"{PACK}/validators/check_a11y.py\" out/t3/pricing.html"
+  },
+  {
+   "id": "A3",
+   "what": "responsive floor",
+   "check": "python \"{PACK}/validators/check_responsive.py\" out/t3/pricing.html"
+  },
+  {
+   "id": "A4",
+   "what": "3 priced tiers with CTAs",
+   "check": "python \"{PACK}/validators/check_pricing.py\" out/t3/pricing.html 3"
+  }
+ ]
+}

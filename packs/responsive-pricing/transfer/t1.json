@@ -1,0 +1,26 @@
+{
+ "id": "t1",
+ "goal": "Build a four-tier pricing comparison for a developer-tools product at out/t1/pricing.html \u2014 free, team, business and enterprise tiers, each priced with its own call to action, semantic and accessible throughout.",
+ "competencies": [
+  "semantic-structure",
+  "accessibility",
+  "pricing-ux"
+ ],
+ "accept": [
+  {
+   "id": "A1",
+   "what": "semantic structure floor",
+   "check": "python \"{PACK}/validators/check_semantics.py\" out/t1/pricing.html"
+  },
+  {
+   "id": "A2",
+   "what": "accessibility floor",
+   "check": "python \"{PACK}/validators/check_a11y.py\" out/t1/pricing.html"
+  },
+  {
+   "id": "A3",
+   "what": "4 priced tiers with CTAs",
+   "check": "python \"{PACK}/validators/check_pricing.py\" out/t1/pricing.html 4"
+  }
+ ]
+}

@@ -1,0 +1,25 @@
+{
+ "id": "e3",
+ "goal": "Build a keyboard-operable pricing card at out/e3/pricing.html \u2014 every control reachable and labeled, no focus-order tricks, no clickable divs.",
+ "competencies": [
+  "accessibility",
+  "semantic-structure"
+ ],
+ "accept": [
+  {
+   "id": "A1",
+   "what": "accessibility floor",
+   "check": "python \"{PACK}/validators/check_a11y.py\" out/e3/pricing.html"
+  },
+  {
+   "id": "A2",
+   "what": "semantic structure floor",
+   "check": "python \"{PACK}/validators/check_semantics.py\" out/e3/pricing.html"
+  },
+  {
+   "id": "A3",
+   "what": "1 priced tiers with CTAs",
+   "check": "python \"{PACK}/validators/check_pricing.py\" out/e3/pricing.html 1"
+  }
+ ]
+}

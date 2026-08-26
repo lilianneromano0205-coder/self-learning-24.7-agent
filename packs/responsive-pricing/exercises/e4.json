@@ -1,0 +1,32 @@
+{
+ "id": "e4",
+ "goal": "Build a full three-tier responsive accessible pricing page at out/e4/pricing.html.",
+ "competencies": [
+  "semantic-structure",
+  "accessibility",
+  "responsive-layout",
+  "pricing-ux"
+ ],
+ "accept": [
+  {
+   "id": "A1",
+   "what": "semantic structure floor",
+   "check": "python \"{PACK}/validators/check_semantics.py\" out/e4/pricing.html"
+  },
+  {
+   "id": "A2",
+   "what": "accessibility floor",
+   "check": "python \"{PACK}/validators/check_a11y.py\" out/e4/pricing.html"
+  },
+  {
+   "id": "A3",
+   "what": "responsive floor",
+   "check": "python \"{PACK}/validators/check_responsive.py\" out/e4/pricing.html"
+  },
+  {
+   "id": "A4",
+   "what": "3 priced tiers with CTAs",
+   "check": "python \"{PACK}/validators/check_pricing.py\" out/e4/pricing.html 3"
+  }
+ ]
+}

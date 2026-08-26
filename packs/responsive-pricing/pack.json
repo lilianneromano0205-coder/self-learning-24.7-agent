@@ -1,0 +1,28 @@
+{
+  "name": "responsive-pricing",
+  "version": 1,
+  "domain": "accessible responsive pricing components",
+  "competencies": {
+    "semantic-structure": {
+      "study": "semantic HTML landmarks headings document structure",
+      "why": "a page assembled from divs cannot be navigated, styled or audited"
+    },
+    "accessibility": {
+      "study": "WCAG accessible components keyboard focus aria labels",
+      "why": "an interface only some people can operate is a broken interface"
+    },
+    "responsive-layout": {
+      "study": "responsive layout media queries fluid grid mobile first CSS",
+      "why": "most visits are not at the width the author designed at"
+    },
+    "pricing-ux": {
+      "study": "pricing page UX tiers comparison call to action conversion",
+      "why": "a pricing component exists to let someone choose and act"
+    }
+  },
+  "mastery": {
+    "practice_pass": 0.75,
+    "transfer_pass": 0.7,
+    "note": "the bar is the validators' MECHANICAL FLOOR; excellence beyond the floor is not claimed by a MASTERED verdict"
+  }
+}

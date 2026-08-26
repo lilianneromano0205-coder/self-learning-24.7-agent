@@ -2,7 +2,7 @@
 
 **What this is.** A file-backed, stdlib-only platform for building expert AI
 agents that work continuously, prove what they did, and remember what they
-learned. 81 Python modules, 112 acceptance tests, one HTML control panel, no
+learned. 83 Python modules, 113 acceptance tests, one HTML control panel, no
 database, no framework, no build step. Python 3.11+ and your own API keys.
 
 **Who this document is for.** Somebody who has just been handed the
@@ -823,15 +823,25 @@ is cleared:
 **Work systems** — `goal.py` `mission.py` `workflows.py` `consult.py`
 `prospective.py` `routines.py` `research.py`
 
+**The goal system's spine** — `contract.py` (acceptance frozen before
+planning, sealed outside the expert's root) `runbook.py` (typed do+verify
+procedures, earned trust, the model-free reconcile loop) `repair.py`
+(signal-grounded self-repair under four laws) `swarm.py` (evidence-gated
+multiplication, central graders) `universal.py` (readiness assessment)
+`grants.py` (scoped expiring authority) `capability.py` (sealed capability
+packs — the exam the student cannot touch) `mastery.py` (pretest → study →
+practice → sealed exam → diagnose → verdict → distill → retest)
+
 **Memory** — `memory.py` `skills.py` `commons.py` `recall.py` `gotchas.py`
 `premise.py` `memrouter.py` `cases.py` `selfmodel.py`
 
 **Knowing what it knows** — `sources.py` `conflicts.py` `standards.py`
 `curriculum.py` `ingest.py` `verify.py` `memcheck.py` `citecheck.py`
-`designcheck.py`
+`designcheck.py` `discover.py` `knowledge.py` `experience.py`
 
 **Governance** — `variants.py` `approvals.py` `replay.py` `benchmark.py`
 `modelrouter.py` `org.py` `training.py` `proof.py` `evidence.py` `metrics.py`
+`evalsuite.py` `mutate_check.py`
 
 **Infrastructure** — `workers.py` `acquire.py` `toolbox.py` `providers.py`
 `mcp.py` `federation.py` `trace.py` `backup.py` `package.py` `preflight.py`

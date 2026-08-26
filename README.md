@@ -3,7 +3,7 @@
 **A file-backed, stdlib-only platform for building expert AI agents that work
 continuously, prove what they did, and remember what they learned.**
 
-81 Python modules · 112 acceptance tests · one HTML control panel · no
+83 Python modules · 113 acceptance tests · one HTML control panel · no
 database, no framework, no build step. Python 3.11+ and your own API keys.
 
 ```bash
@@ -57,7 +57,7 @@ control defends the path its author was thinking about, and does not know
 about the other paths.* Six places executed shell; one was tested. The answer
 is one mandatory gateway per kind of power — Execution, File, Credential,
 Model Gateway, Effect — and `python execution.py --audit` fails the build if
-any module bypasses one. Today: **0 violations across 81 modules**, 16 declared platform-internal.
+any module bypasses one. Today: **0 violations across 83 modules**, 16 declared platform-internal.
 
 **4. Proof is derived, never claimed.**
 Six levels from SPEC to PRODUCTION PROVEN, computed from evidence bound to a
@@ -165,10 +165,30 @@ python runbook.py draft     experts/builder <goal-id>   # skeleton from a win
 python repair.py  apply     experts/builder <goal-id> --resume
 ```
 
+**9. Competence is proven on sealed unseen work, never self-declared.**
+Learning information (sources → cited notes → closed-book exam) is not the
+same as being able to *build*. A **Capability Pack** (`capability.py`) is a
+sealed exam for a domain: competencies, practice exercises, transfer tasks
+the student meets for the first time at exam-time, and stdlib validator
+scripts — stored **outside every expert's root** (the worker's file tools
+can neither read nor edit its own exam) and content-hashed like a contract;
+an edited validator is a TAMPER verdict that grades nothing. The mastery
+loop (`mastery.py`) runs pretest (baseline *before* study) → study →
+practice → sealed exam → diagnose (failing checks as evidence) → bounded
+targeted re-study → verdict → distill (wins become runbook drafts) →
+retest (retention under fresh ids). The MASTERED verdict is computed only
+from harness-run grader results against the pack's frozen thresholds, and
+it is recorded with its honest ceiling: a mechanical floor, not taste.
+
+```bash
+python mastery.py run    <home> <expert> responsive-pricing --drive
+python mastery.py retest <home> <expert> responsive-pricing   # retention
+```
+
 **[GOAL_SPECIALIST.md](GOAL_SPECIALIST.md)** is the deep account: the
-architecture, the evidence (21/21 mutations killed across the contract,
-runbook and repair layers), and the audit's complete 115-gap register with an honest
-status for every row.
+architecture, the evidence (32/32 mutations killed across the contract,
+runbook, repair, swarm and mastery layers), and the audit's complete
+115-gap register with an honest status for every row.
 
 ---
 

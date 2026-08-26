@@ -396,7 +396,7 @@ audit's own recommendation in every case).
 
 | # | Status | The honest state |
 |---:|---|---|
-| 51 | PARTIAL | Runbooks ARE the SOP half of a capability pack: typed executable procedures with per-step verification, earned trust, and a draft path from verified pursuits. The ontology/operators/HTN-methods half remains OPEN. |
+| 51 | PARTIAL→IMPROVED | Runbooks ARE the SOP half of a capability pack; **Capability Packs now exist as artifacts** (`capability.py`): sealed exam definitions (competencies, exercises, transfer tasks, stdlib validators) living OUTSIDE the expert's root, content-hashed like contracts, with `packs/responsive-pricing/` shipped as the first. The mastery loop (`mastery.py`) runs pretest → study → practice → sealed exam → diagnose → bounded targeted re-study → verdict → distill → retest; verdicts come only from harness-run graders (`test_mastery.py`, 9 laws; 5/5 mutations killed). The ontology/operators/HTN-methods half remains OPEN. |
 | 52 | PARTIAL | Plans parse to bounded milestones; missing-verifier milestones get evidence-note gates. Full typed-DAG static checks: OPEN. |
 | 53 | PARTIAL | Capability probes are live (toolbox scans on every assess); goal-implication inference is a keyword table, stated as a blind spot. |
 | 54 | OPEN | No semantic state estimation with freshness/confidence. |
@@ -503,10 +503,12 @@ those two inputs.
    ledgers this session built.
 3. **Then the paired lift experiment** (A3) on `evalsuite`'s sealed holdout:
    same model bare vs in-system. Publish the four ratios, whatever they say.
-4. **Choose the first capability pack** (E51) — the audit recommends
-   Technical Research-to-Execution because compilation, tests and diffs make
-   verification honest. The contract is its acceptance layer, discovery its
-   research rail, the sandbox its isolation.
+4. **Run the first capability pack live** (E51) — the pack format and the
+   mastery loop are built and tested (`capability.py`, `mastery.py`,
+   `packs/responsive-pricing/`); what remains is running
+   `python mastery.py run <home> <expert> responsive-pricing --drive`
+   against a real provider and publishing the pretest→exam→retest deltas,
+   whatever they say.
 5. **Deploy the container to Cloudflare** (H102) when you want the phone
    path: the artifacts are built and dry-run verified; the first live
    deploy is the first real test, and it is labeled as such.

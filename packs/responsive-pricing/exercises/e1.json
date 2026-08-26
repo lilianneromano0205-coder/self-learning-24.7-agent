@@ -1,0 +1,25 @@
+{
+ "id": "e1",
+ "goal": "Build a single-tier pricing card as semantic, accessible HTML at out/e1/pricing.html \u2014 real structure, real labels, one priced plan with a call to action.",
+ "competencies": [
+  "semantic-structure",
+  "accessibility"
+ ],
+ "accept": [
+  {
+   "id": "A1",
+   "what": "semantic structure floor",
+   "check": "python \"{PACK}/validators/check_semantics.py\" out/e1/pricing.html"
+  },
+  {
+   "id": "A2",
+   "what": "accessibility floor",
+   "check": "python \"{PACK}/validators/check_a11y.py\" out/e1/pricing.html"
+  },
+  {
+   "id": "A3",
+   "what": "1 priced tiers with CTAs",
+   "check": "python \"{PACK}/validators/check_pricing.py\" out/e1/pricing.html 1"
+  }
+ ]
+}

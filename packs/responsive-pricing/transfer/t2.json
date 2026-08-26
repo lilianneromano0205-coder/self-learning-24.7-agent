@@ -1,0 +1,25 @@
+{
+ "id": "t2",
+ "goal": "Build a responsive two-tier pricing section for a fitness app at out/t2/pricing.html that reads correctly on a phone \u2014 breakpointed layout, no fixed page width, accessible controls.",
+ "competencies": [
+  "responsive-layout",
+  "accessibility"
+ ],
+ "accept": [
+  {
+   "id": "A1",
+   "what": "responsive floor",
+   "check": "python \"{PACK}/validators/check_responsive.py\" out/t2/pricing.html"
+  },
+  {
+   "id": "A2",
+   "what": "accessibility floor",
+   "check": "python \"{PACK}/validators/check_a11y.py\" out/t2/pricing.html"
+  },
+  {
+   "id": "A3",
+   "what": "2 priced tiers with CTAs",
+   "check": "python \"{PACK}/validators/check_pricing.py\" out/t2/pricing.html 2"
+  }
+ ]
+}

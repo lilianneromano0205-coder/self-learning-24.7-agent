@@ -191,10 +191,15 @@ def pursue(home, expert, goal, criteria="", cycles=4, drive=False,
     # reconcile that cannot finish falls through to the model loop with
     # nothing lost but a few compute-seconds.
     try:
-        import runbook as _rb
         import swarm as _sw
         _c = contractmod.load(root, gid)
-        if _c.get("acceptance") and _rb.match(root, goal):
+        # OBSERVE FIRST. reconcile's first move is to RUN the frozen
+        # acceptance tests, so a goal already met on disk settles here with
+        # zero model calls even when no runbook exists yet. The old gate
+        # required a PROVEN runbook match before even observing — so a
+        # pre-satisfied contract still paid for a model loop. The mastery
+        # tests caught it: grading a correct artifact touched the queue.
+        if _c.get("acceptance"):
             # swarm.auto: parallel where the caller DECLARED independent
             # groups and distinct proven procedures exist for them
             # (evidence-gated — Nature MI 2026, MAST); plain sequential

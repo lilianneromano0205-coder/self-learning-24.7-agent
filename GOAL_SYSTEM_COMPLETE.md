@@ -274,6 +274,43 @@ oscillation ends non-convergence early; a repaired pursuit opens with the
 repair signal in context. *Test:* `test_goal.py` + the end-to-end halves of
 `test_contract/runbook/swarm/repair`.
 
+### `capability.py` + `mastery.py` — competence proven on unseen work
+Both external audits converged on the same missing piece: the platform
+learned *information* (sources → cited notes → closed-book exam) but never
+proved *procedural competence* — an expert is not an expert because it
+scores 95% on a quiz; it must **build something it has never seen and pass
+graders it cannot touch**. A **Capability Pack** (`capability.py`) is a
+sealed exam definition: competencies (each with a study query and a stated
+*why*), practice exercises, **sealed transfer tasks** the student meets for
+the first time at exam-time, and stdlib validator scripts — all living in
+`<home>/packs/<name>/`, **outside every expert's root** where the worker's
+file tools cannot resolve (read *or* write — the student can neither edit
+nor pre-read its exam), content-hashed at freeze into
+`org/pack-seals.jsonl` exactly like a contract. Validation refuses a pack
+whose competency has no sealed transfer task ("mastery of an unexamined
+competency is memorisation wearing a medal") and a task with no acceptance.
+`mastery.py` conducts the loop over existing primitives: **pretest**
+(sealed baseline *before* study — improvement claims need a floor),
+**study** (per-competency discovery + learning pursuits), **practice**
+(exercises as contract pursuits), **exam** (the sealed set, fresh contract
+per task), **diagnose** (failing tasks → competencies, carrying the failing
+checks as evidence — repair's LAW 1 one level up), bounded
+oscillation-aware **targeted re-study**, a **verdict** computed only from
+harness-run grader results against the pack's frozen thresholds (recorded
+with its ceiling: "the pack's MECHANICAL FLOOR"), **distill** (verified
+practice → runbook drafts), and **retest** (same sealed tasks, fresh ids,
+no study artifacts injected — retention measured, not assumed).
+*Test:* `test_mastery.py` — 9 laws, run against a provider rigged to fail
+every task so any PASS proves the machine path; it caught a real `goal.py`
+bug (the cheap path required a runbook match before even *observing*, so a
+pre-satisfied contract still paid for a model loop — fixed: observe first).
+First shipped pack: `packs/responsive-pricing/` (4 competencies, 4
+exercises, 3 sealed transfer tasks, 4 stdlib validators).
+*Mutations killed:* 5/5 — "unexamined competency validates anyway",
+"an edited pack still grades", "every task passes regardless of the
+graders", "mastered unconditionally", "identical failure signatures
+never stop the loop".
+
 ### `universal.py` + `discover.py` — readiness and learning
 Before pursuing, `universal.assess` answers "can this expert do this yet,
 and if not, what exactly is missing?" from mechanical probes — capability
@@ -295,7 +332,7 @@ decide done; retries, escalation between model tiers, cost brakes per task
 and per day, Retry-After honored with jitter, graceful SIGTERM drain,
 context compiled fresh every task (measured flat at ~1083 tokens while
 fleet history grows). **The five authorities**: Execution (every subprocess
-in 81 modules flows through one gateway — audited, 0 violations), File
+in 83 modules flows through one gateway — audited, 0 violations), File
 (zones: workspace/control/runtime), Credential (4 sources, excluded from
 packaging/backups/model-visible env), Model Gateway (every call metered and
 ledgered), Effect (external side effects get idempotency keys and
@@ -374,9 +411,13 @@ the outside reference `verify()` checks the contract against.
 2. **Live learning at scale.** Discovery works live (tested against the
    real catalogues); *studying* — notes, atoms, exams — needs a model key.
    Multi-GB, multi-hour ingestion is unproven.
-3. **Capability packs** (the audit's E51): domain ontologies, typed
-   operators, HTN methods. Runbooks are the SOP half; the ontology half is
-   the next major build.
+3. **Capability packs, the ontology half** (the audit's E51): the pack
+   *artifact* and the mastery loop now exist (`capability.py`,
+   `mastery.py`, `packs/responsive-pricing/`, `test_mastery.py`) — sealed
+   exams, harness-only verdicts, retention retests. Still open: domain
+   ontologies, typed operators, HTN methods, and a **live** mastery run
+   against a real provider (the shipped tests prove the laws with a rigged
+   provider; the pretest→exam lift with a real model is unmeasured).
 4. **Cross-machine scale.** Leases are single-host; distributed fencing
    tokens, multi-host reducers, and horizontal scaling are not built.
 5. **Time-scale evidence.** Endurance is minutes; 24h/7d/30d soaks, DST

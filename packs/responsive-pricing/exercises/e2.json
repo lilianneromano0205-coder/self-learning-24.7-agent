@@ -1,0 +1,25 @@
+{
+ "id": "e2",
+ "goal": "Build a responsive two-tier pricing section at out/e2/pricing.html \u2014 fluid layout with a real breakpoint, no fixed page width.",
+ "competencies": [
+  "responsive-layout",
+  "pricing-ux"
+ ],
+ "accept": [
+  {
+   "id": "A1",
+   "what": "responsive floor",
+   "check": "python \"{PACK}/validators/check_responsive.py\" out/e2/pricing.html"
+  },
+  {
+   "id": "A2",
+   "what": "2 priced tiers with CTAs",
+   "check": "python \"{PACK}/validators/check_pricing.py\" out/e2/pricing.html 2"
+  },
+  {
+   "id": "A3",
+   "what": "semantic structure floor",
+   "check": "python \"{PACK}/validators/check_semantics.py\" out/e2/pricing.html"
+  }
+ ]
+}
