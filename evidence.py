@@ -98,7 +98,8 @@ SYSTEMS = {
     "3. Work systems": {
         "what": "task, goal engine, team, deterministic workflow, "
                 "consultation, prospective intentions, routines",
-        "tests": ["test_goal.py", "test_contract.py", "test_workflows.py", "test_consult.py",
+        "tests": ["test_goal.py", "test_contract.py", "test_runbook.py",
+                  "test_workflows.py", "test_consult.py",
                   "test_prospective.py", "test_routines.py", "test_wake.py",
                   "test_research.py",
                   "test_course.py", "test_exam.py", "test_verify.py",

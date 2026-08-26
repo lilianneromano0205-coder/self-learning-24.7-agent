@@ -111,6 +111,64 @@ events and reports divergence from the snapshot — a snapshot forged to
 resumes against the same contract (the ledger knows what was spent and how
 many cycles ran) instead of starting a fresh id with amnesia.
 
+### Runbooks — the goal agent's power that needs no model at all
+
+The owner's directive, and it is the right one: the pre-AI agents that did
+regulated, hard work reliably — crawlers with persistent frontiers,
+spacecraft autonomy, workflow engines, cluster controllers — were not
+intelligent. They were reliable because **the work was written down as
+executable procedure and the machine replayed it, verifying as it went.**
+The model-era mistake is re-deriving the same procedure with an LLM every
+time, paying tokens, latency and hallucination risk for work that stopped
+being novel after the first success.
+
+`runbook.py` is that principle in this platform:
+
+- **A runbook is typed steps, each `do` + `verify`,** executed through the
+  Execution Authority — every `do` gets the full model-command stack
+  (policy, sandbox, approval tier: `rm -rf /` in a runbook is refused, not
+  run), and every step must pass its own `verify` before the next runs. A
+  procedure that cannot prove its last step does not take its next one.
+- **Trust is earned, never self-declared.** Anyone — the worker included —
+  may *author* a runbook (`runbooks/*.json` is workspace; authoring is
+  where the model's intelligence lands). But the trust ledger
+  (`runbooks/trust.json`) is CONTROL: the worker's file tools are refused,
+  only the harness records outcomes, and a `"status": "proven"` written
+  inside the runbook file itself is ignored. Three all-verified wins
+  promote candidate → proven; two consecutive losses quarantine; a
+  quarantined runbook matches nothing until an owner clears it.
+- **`reconcile` is the model-free goal loop** — the Kubernetes-controller
+  shape applied to a contract: run the frozen acceptance tests (observe),
+  apply the matching proven runbook (act), re-verify, repeat. No model at
+  any point. And the boundary is honest: no matching runbook means
+  **BLOCKED with the frontier named**, never improvisation — brittleness
+  at the frontier is exactly what killed the old deterministic agents, and
+  the frontier is where the model (or the owner) is the right tool.
+- **`goal.pursue` tries the machine first.** Before spending a single model
+  cycle, a pursuit whose goal matches a proven runbook is reconciled; only
+  when that cannot finish does planning begin. Proven end to end in
+  `test_runbook.py`: a pursuit completed **VERIFIED with zero tasks
+  created**, against a mock provider *rigged to fail any task instantly* —
+  so the model path could not have produced the outcome even by accident.
+- **A verified pursuit becomes a draft runbook.** `runbook.py draft <gid>`
+  emits a skeleton from the event ledger carrying every proven
+  verification, with the `do` steps as named TODOs — because the machine
+  can recover *what was proven* but not *how it was done*. Validation
+  refuses a draft until a model or an owner fills the TODOs. The model
+  authors once; the machine replays forever.
+
+**This is where the multiplier actually lives.** The division of labour is:
+the model for the frontier (goals the library has never seen — plan, work,
+fail, recover, then write the procedure down), the machine for everything
+behind it (pennies of compute, zero tokens, no drift, identical at 3am).
+As the proven library grows, the system does less and less model-work per
+goal — and unlike a model, the library is auditable line by line.
+
+Seven more mutations, seven killed: verify-gating removed, losses never
+quarantine, quarantined volunteers, candidates run unsupervised, pursue
+unwired from the machine path, trust ledger reopened to the worker, TODO
+drafts accepted as runnable.
+
 ### One readiness truth (audit gap #16)
 
 The audit found the surfaces contradicting: *"Preflight reports 'ready with
@@ -150,6 +208,14 @@ python contract.py show   experts/builder g-20260825-...
 python contract.py events experts/builder g-20260825-...
 python contract.py verify experts/builder g-20260825-...
 python contract.py replay experts/builder g-20260825-...
+```
+
+```bash
+# the model-free path: procedures the machine executes and verifies itself
+python runbook.py list      experts/builder
+python runbook.py run       experts/builder deploy-report
+python runbook.py reconcile experts/builder <goal-id>   # observe-apply-verify
+python runbook.py draft     experts/builder <goal-id>   # skeleton from a win
 ```
 
 From the panel: `POST /api/achieve` with `"accept": ["what::command", ...]`,
@@ -242,11 +308,11 @@ audit's own recommendation in every case).
 
 | # | Status | The honest state |
 |---:|---|---|
-| 51 | OPEN | The first capability pack (Technical Research-to-Execution, per the audit's recommendation) is the next major build: ontology, operators, HTN methods, SOPs, evaluators. The contract is its foundation, not its substitute. |
+| 51 | PARTIAL | Runbooks ARE the SOP half of a capability pack: typed executable procedures with per-step verification, earned trust, and a draft path from verified pursuits. The ontology/operators/HTN-methods half remains OPEN. |
 | 52 | PARTIAL | Plans parse to bounded milestones; missing-verifier milestones get evidence-note gates. Full typed-DAG static checks: OPEN. |
 | 53 | PARTIAL | Capability probes are live (toolbox scans on every assess); goal-implication inference is a keyword table, stated as a blind spot. |
 | 54 | OPEN | No semantic state estimation with freshness/confidence. |
-| 55 | PARTIAL | Acceptance tests are the desired state; verify-observe at cycle granularity; oscillation detection ends non-convergence. Single-action reconcile loops: OPEN. |
+| 55 | CLOSED (goal system) | `runbook.reconcile` is the desired-state controller: observe (acceptance tests) -> act (one proven runbook) -> verify -> repeat, bounded rounds, blocked-with-frontier-named when nothing matches. Tested with zero model involvement. |
 | 56 | PARTIAL | For goals: durable events, resume, replay — tested. Persisted timers/signals/compensations: OPEN. |
 | 57 | OPEN | No one-vs-many controlled comparison. The audit's citation says more agents are not monotonically better; nothing here contradicts it. |
 | 58 | OPEN | Worker registry is records; live provisioning unexercised. |

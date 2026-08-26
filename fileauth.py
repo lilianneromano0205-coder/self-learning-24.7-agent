@@ -72,6 +72,12 @@ CONTROL_PATHS = {"skills/graph.json"}
 # that gets past this zone check produces a TAMPER verdict, not a pass.
 CONTROL_NAMES_IN = {
     "goals": {"contract.json", "events.jsonl", "goal.json"},
+    # A runbook is worker-authored (that is the point — the model writes
+    # down what worked), but its TRUST is not: candidate/proven/quarantined
+    # lives in trust.json and only the harness records outcomes there. An
+    # author who could edit the ledger could promote their own procedure to
+    # "proven" without the three verified wins that word means.
+    "runbooks": {"trust.json"},
 }
 RUNTIME_DIRS = {"logs", "contexts", "checkpoints", "events", "archive"}
 # the agent's own workspace: everything it is FOR
@@ -80,7 +86,7 @@ WORKSPACE_DIRS = {
     "consults", "goals", "research", "gotchas", "cases", "briefing",
     "inbox", "exports", "federation", "reviews", "docs", "analysis",
     "seo", "copy", "radar", "scout", "finance", "tradeops", "ops",
-    "exam", "proof", "missions",
+    "exam", "proof", "missions", "runbooks",
 }
 
 ZONE_WORKSPACE = "workspace"

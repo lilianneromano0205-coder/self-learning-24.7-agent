@@ -175,6 +175,43 @@ def pursue(home, expert, goal, criteria="", cycles=4, drive=False,
     learning = _is_learning(goal)
     print(f"[goal {gid}] {'LEARNING ' if learning else ''}pursuit on {expert}")
 
+    # DETERMINISTIC FIRST, MODEL AT THE FRONTIER.
+    #
+    # Before spending a single model cycle, try the runbook library: if a
+    # PROVEN procedure matches this goal, reconcile the acceptance tests
+    # against it — observe, apply, verify, the controller loop the reliable
+    # pre-AI agents ran. A goal whose procedure is already known completes
+    # for pennies of compute and zero tokens; the model is reserved for
+    # goals nobody here has done before. This is where the economics of
+    # "a cheap model made powerful" actually live: the system does less
+    # and less model-work per goal as its library grows.
+    #
+    # Only PROVEN runbooks run here (three verified wins each). Candidates
+    # run supervised inside pursuits, never on the free path. And a
+    # reconcile that cannot finish falls through to the model loop with
+    # nothing lost but a few compute-seconds.
+    try:
+        import runbook as _rb
+        _c = contractmod.load(root, gid)
+        if _c.get("acceptance") and _rb.match(root, goal):
+            rr = _rb.reconcile(root, gid)
+            if rr["verified"]:
+                rec["status"] = "achieved"
+                rec["verified"] = True
+                rec["runbook"] = [r["runbook"] for r in rr["rounds"]]
+                rec["finished"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+                _record(d, rec)
+                print(f"[goal {gid}] VERIFIED by runbook "
+                      f"{', '.join(rec['runbook']) or '(already met)'} — "
+                      f"zero model calls")
+                return rec
+            elif rr["rounds"]:
+                contractmod.event(root, gid, "reconcile_fell_through",
+                                  why=rr["blocked"][:200])
+    except Exception as e:                    # the cheap path must never
+        contractmod.event(root, gid, "reconcile_error",   # block the real one
+                          error=f"{type(e).__name__}: {e}"[:200])
+
     assessment_note = ""
     for cycle in range(1, cycles + 1):
         # BUDGETS END A PURSUIT BY NAME, NEVER BY SURPRISE. Checked at the
@@ -439,6 +476,11 @@ def pursue(home, expert, goal, criteria="", cycles=4, drive=False,
                 pass
             if not rec["verified"]:
                 print(f"[goal {gid}] achieved but NOT verified: {vr['why']}")
+            else:
+                print(f"[goal {gid}] turn this success into deterministic "
+                      f"capability: python runbook.py draft {root} {gid} "
+                      f"(then fill the TODO steps and let three verified "
+                      f"runs promote it)")
             return rec
         # A PLAN THAT HITS THE SAME WALL TWICE IN A ROW WILL HIT IT A THIRD
         # TIME. Burning the remaining cycles on an identical failure is a
