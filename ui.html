@@ -5049,7 +5049,9 @@ async function loadFreshness(){
   const el = document.getElementById("freshBody"); if (!el) return;
   const d = await api(`/api/freshness?expert=${encodeURIComponent(S.sel)}`);
   if (d.error){ el.innerHTML = `<span class="muted">${esc(d.error)}</span>`; return; }
-  const rows = [["retracted", d.retracted, "bad"], ["expired", d.expired, "warn"],
+  const rows = [["retracted", d.retracted, "bad"],
+                ["directive-shaped", d.suspect, "bad"],
+                ["expired", d.expired, "warn"],
                 ["superseded", d.superseded, "dim"]];
   const flagged = rows.reduce((n,[,l])=>n+(l||[]).length, 0);
   el.innerHTML = `

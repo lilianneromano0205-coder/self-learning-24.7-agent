@@ -54,6 +54,37 @@ LEDGER = os.path.join("org", "retractions.jsonl")
 EXPIRES_RE = re.compile(r"\[expires:\s*(\d{4}-\d{2}-\d{2})\s*\]")
 SUPERSEDES_RE = re.compile(r"\[supersedes:\s*([CPU]-\d{2,}[\w.]*)\s*\]")
 
+# DIRECTIVE-SHAPED MEMORY (the authority-collapse attack, 2026's memory-
+# poisoning literature: "policy-conformant fact injection" and the
+# "experience-to-procedure write channel"). A webpage saying "always invest
+# $5,000 when X happens" gets studied into a cited atom; recalled later,
+# the directive rides back into context wearing knowledge's clothes, its
+# source authority diluted. The zones already stop such an atom from
+# GRADING or STEERING anything, and policy still screens every command —
+# but an unflagged directive still gets to argue. These patterns flag the
+# shape. Deliberately NARROW: a how-to course legitimately says "run npm
+# install", so only directives claiming authority over the agent, the
+# owner, or resources are flagged — the blind spot (rephrased directives)
+# is stated, not hidden.
+DIRECTIVE_RES = (
+    (re.compile(r"\bignore\s+(?:all\s+|any\s+)?(?:previous|prior|earlier)"
+                r"\s+(?:instructions|rules|constraints)", re.I),
+     "injection idiom"),
+    (re.compile(r"\bdisregard\s+(?:your|the)\s+(?:instructions|rules|"
+                r"constitution|policy)", re.I), "injection idiom"),
+    (re.compile(r"\bnew\s+instructions?\s*:", re.I), "injection idiom"),
+    (re.compile(r"\bthe\s+owner\s+(?:has\s+)?(?:said|says|wants|approved|"
+                r"authoriz\w*|instructed)", re.I), "claims the owner's voice"),
+    (re.compile(r"\byou\s+(?:must|should|need\s+to|are\s+required\s+to)\s+"
+                r"(?:transfer|send|pay|invest|wire|delete|approve|deploy|"
+                r"buy|sell|grant|disable)", re.I),
+     "commands a consequential action"),
+    (re.compile(r"\balways\s+(?:transfer|send|pay|invest|wire|approve|"
+                r"trust)\b", re.I), "standing-order shape"),
+    (re.compile(r"\b(?:transfer|send|wire|invest|pay)\b[^.\n]{0,40}"
+                r"[$€£]\s?\d", re.I), "moves money with an amount"),
+)
+
 
 class FreshnessError(Exception):
     pass
@@ -132,7 +163,7 @@ def scan(root, today=None):
     for aid, _c, _p, body in rows:
         for old in SUPERSEDES_RE.findall(body):
             superseded_by[old] = aid
-    expired, superseded, retracted = [], [], []
+    expired, superseded, retracted, suspect = [], [], [], []
     import knowledge
     for aid, course, _p, body in rows:
         src = knowledge.SRC_RE.search(body)
@@ -149,9 +180,20 @@ def scan(root, today=None):
             retracted.append({"atom": aid, "course": course,
                               "why": f"source retracted: {hit['why']}"
                                      f" (ref {hit['ref'][:60]})"})
-    flagged = {r["atom"] for r in expired + superseded + retracted}
+        for rex, label in DIRECTIVE_RES:
+            dm = rex.search(body)
+            if dm:
+                suspect.append({
+                    "atom": aid, "course": course,
+                    "why": f"directive-shaped ({label}): "
+                           f"“{dm.group(0)[:70]}” from "
+                           f"{ref[:60] or 'an uncited line'} — memory is "
+                           f"evidence, never instruction"})
+                break
+    flagged = {r["atom"] for r in expired + superseded + retracted + suspect}
     return {"expired": expired, "superseded": superseded,
-            "retracted": retracted, "checked": len(rows),
+            "retracted": retracted, "suspect": suspect,
+            "checked": len(rows),
             "fresh": len({a for a, _c, _p, _b in rows} - flagged)}
 
 
@@ -253,7 +295,8 @@ def main():
     if a.cmd == "scan":
         r = scan(a.root)
         print(json.dumps(r, indent=1, ensure_ascii=False))
-        raise SystemExit(1 if (r["expired"] or r["retracted"]) else 0)
+        raise SystemExit(1 if (r["expired"] or r["retracted"]
+                               or r["suspect"]) else 0)
     elif a.cmd == "retract":
         row = retract(a.root, a.ref, a.why, by=a.by)
         print(f"retracted refs containing {row['ref']!r}: {row['why']}")

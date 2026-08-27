@@ -84,12 +84,24 @@ def _contained(root, rel):
 def add(root, when, then, note=""):
     kind = when.get("kind")
     if kind not in ("at", "every_days", "file_exists", "file_contains",
-                    "task_done", "event"):
+                    "task_done", "event", "check"):
         raise ValueError(f"unknown condition kind: {kind}")
     if kind in ("file_exists", "file_contains"):
         when["path"] = _contained(root, when.get("path"))
     if kind == "file_contains" and not when.get("needle"):
         raise ValueError("file_contains needs a needle")
+    if kind == "check":
+        # WHEN a probe command exits 0 — the condition kind that expresses
+        # "when the competitor's price gap exceeds 15%", which no file
+        # pattern can. The probe runs through the Execution Authority as a
+        # gate (policy-screened, like a runbook's when.requires), and is
+        # rate-limited per intention because a probe is a subprocess, not
+        # a stat call.
+        if not str(when.get("cmd") or "").strip():
+            raise ValueError("check needs a cmd that exits 0 when the "
+                             "condition holds")
+        when["every_s"] = max(30, int(when.get("every_s") or 300))
+        when["last_probe"] = 0.0
     if kind == "event":
         name = (when.get("name") or "").strip()
         if not re.fullmatch(r"[a-z0-9_.-]{1,64}", name):
@@ -184,6 +196,21 @@ def _due(root, it, agent, now, fired_map=None):
         # wake-on-event: an events/<ts>-<name>.json file this intention has
         # not consumed yet (written by POST /api/experts/<s>/wake)
         return bool(_unconsumed_events(root, w))
+    if k == "check":
+        if now - float(w.get("last_probe") or 0) < float(w.get("every_s",
+                                                               300)):
+            return False
+        w["last_probe"] = now                # persisted by the caller's save
+        try:
+            sys.path.insert(0, sys_path_dir)
+            import execution
+            rc, _o, _e = execution.run(
+                "gate", w["cmd"], root, cfg=None, role="practitioner",
+                timeout=int(w.get("timeout") or 30),
+                reason=f"prospective probe {it['id']}")
+            return rc == 0
+        except Exception:
+            return False                     # an unrunnable probe never fires
     return False
 
 
@@ -220,6 +247,11 @@ def _check_locked(root, agent=None):
         return 0
     now = time.time()
     fired = 0
+    # probe rate-limiting bookkeeping (when.last_probe) mutates in _due;
+    # it must persist even when nothing fires, or every idle tick re-runs
+    # every probe subprocess and the rate limit is decorative
+    probe_before = {it["id"]: it["when"].get("last_probe")
+                    for it in items if it["when"].get("kind") == "check"}
     fired_map = {x["id"]: x.get("fired_task") for x in items if x.get("fired_task")}
     for it in items:
         if it["status"] != "armed":
@@ -245,6 +277,8 @@ def _check_locked(root, agent=None):
                 "task_done": lambda: f"task {w.get('task')} completed",
                 "event": lambda: f"event '{w.get('name')}' arrived "
                                  f"(payload fenced in context at events/{event_file})",
+                "check": lambda: f"the probe `{(w.get('cmd') or '')[:80]}` "
+                                 f"exited 0 — the condition now holds",
                 }[w["kind"]]()
         goal = (f"PROSPECTIVE INTENTION FIRED — {trig}.\n{then['goal']}"
                 + (f"\n(Why this was armed: {it['note']})" if it["note"] else ""))
@@ -276,7 +310,9 @@ def _check_locked(root, agent=None):
         else:
             it["status"] = "fired"
         fired += 1
-    if fired:
+    probed = any(it["when"].get("last_probe") != probe_before.get(it["id"])
+                 for it in items if it["when"].get("kind") == "check")
+    if fired or probed:
         save(root, items)
     return fired
 
@@ -297,6 +333,10 @@ def main():
     p.add_argument("--file-exists")
     p.add_argument("--file-contains", help='REL::needle')
     p.add_argument("--after-task")
+    p.add_argument("--when-check",
+                   help="a probe command; the intention fires when it "
+                        "exits 0 (policy-screened, rate-limited)")
+    p.add_argument("--probe-every-s", type=int, default=300)
     p = sub.add_parser("list")
     p.add_argument("--root", default=".")
     p = sub.add_parser("cancel")
@@ -323,9 +363,13 @@ def main():
             when = {"kind": "file_contains", "path": rel, "needle": needle}
         elif a.after_task:
             when = {"kind": "task_done", "task": a.after_task}
+        elif a.when_check:
+            when = {"kind": "check", "cmd": a.when_check,
+                    "every_s": a.probe_every_s}
         else:
             raise SystemExit("pick a condition: --at/--in-days/--every-days/"
-                             "--file-exists/--file-contains/--after-task")
+                             "--file-exists/--file-contains/--after-task/"
+                             "--when-check")
         it = add(root, when, {"role": a.role, "goal": a.goal,
                               "course": a.course, "done_check": a.done_check},
                  a.note)

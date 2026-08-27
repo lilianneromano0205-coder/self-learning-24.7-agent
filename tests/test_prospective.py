@@ -110,6 +110,41 @@ def main():
                 if x["id"] == it4["id"])["status"] == "cancelled"
     print("[safety] path escapes refused; cancellation is a recorded status")
 
+    # --- check: WHEN a probe command exits 0 (the condition no file
+    #     pattern can express — "when the price gap exceeds 15%"), with the
+    #     probe policy-screened and rate-limited per intention
+    marker = os.path.join(sb, "watch", "gap-alert.txt")
+    count = os.path.join(sb, "watch", "probe-count.txt")
+    py = sys.executable.replace("\\", "/")
+    probe = (f'"{py}" -c "import io,os,sys;'
+             f"p=r'{count.replace(chr(92), '/')}';"
+             f"n=int(io.open(p).read()) if os.path.exists(p) else 0;"
+             f"io.open(p,'w').write(str(n+1));"
+             f"sys.exit(0 if os.path.exists(r'{marker.replace(chr(92), '/')}') else 1)\"")
+    it5 = pm.add(sb, {"kind": "check", "cmd": probe, "every_s": 3600},
+                 {"role": "tester", "goal": "re-run the gap analysis"})
+    assert pm.check(sb, agent) == 0, "probe exits 1 -> must not fire"
+    n1 = int(open(count).read())
+    assert n1 == 1, f"the probe should have run exactly once, ran {n1}"
+    assert pm.check(sb, agent) == 0
+    assert int(open(count).read()) == n1, (
+        "a second tick inside every_s re-ran the probe — the rate limit is "
+        "decorative and every idle tick pays a subprocess")
+    open(marker, "w").close()
+    rec5 = next(x for x in pm.load(sb) if x["id"] == it5["id"])
+    rec5["when"]["last_probe"] = 0.0          # window elapsed (simulated)
+    items = pm.load(sb)
+    for i, x in enumerate(items):
+        if x["id"] == it5["id"]:
+            items[i] = rec5
+    pm.save(sb, items)
+    assert pm.check(sb, agent) == 1, "condition holds -> must fire"
+    goals = [t["goal"] for t in read_state(sb)["tasks"]]
+    assert any("gap analysis" in g and "exited 0" in g for g in goals)
+    print("[probe] a check-condition held silent while its command exited "
+          "1 (probed once, rate-limited across ticks), then fired when the "
+          "condition became true — the trigger names the probe")
+
     # --- 5. the RUNNING LOOP fires intentions and executes the fired work
     sb2 = make_sandbox("prospective_loop",
                        providers={"m": {"script": "s.json"}},

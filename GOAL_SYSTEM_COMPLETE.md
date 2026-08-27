@@ -11,9 +11,9 @@ needs it; [ARCHITECTURE.md](ARCHITECTURE.md) and
 
 **Where the claims come from.** Every "this works" in this document names
 the test that proves it, and every protection has been *broken on purpose*
-(mutation testing) to prove the test would notice. 41 mutations across
+(mutation testing) to prove the test would notice. 42 mutations across
 the goal layers (contract, runbook, repair, swarm, mastery, steering,
-freshness, the declared state machine), 41 killed. Full suite: 116
+freshness, the declared state machine), 42 killed. Full suite: 116
 tests, green on six CI platforms (Ubuntu + Windows × Python
 3.11/3.12/3.13).
 
@@ -336,7 +336,13 @@ flags a claim past its window; `[supersedes: C-01]` flags the OLD atom and
 names its successor (lineage kept, like runbook revisions); and
 `org/retractions.jsonl` — CONTROL-zoned, so an agent cannot retract the
 source of a claim it would rather not defend — flags every atom whose
-`[src:]` contains a retracted ref. `scan()` reads the SAME notes files
+`[src:]` contains a retracted ref. A fourth scan flags DIRECTIVE-SHAPED
+memory (the authority-collapse channel in the 2026 memory-poisoning
+taxonomy — "policy-conformant fact injection"): atoms that command
+consequential actions, move money, claim the owner's voice, or carry
+injection idioms are flagged with the matched shape and their source
+named, while ordinary how-to imperatives are not — a deliberately narrow
+floor with its blind spot stated. `scan()` reads the SAME notes files
 citecheck validates (one walker — the two-walkers bug stays fixed) and
 FLAGS, never deletes. `check_doi()` live-probes Crossref's update-to
 relation for retraction notices, keyless; the verdict is a pure function

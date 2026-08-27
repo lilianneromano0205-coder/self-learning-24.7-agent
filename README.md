@@ -7,7 +7,7 @@ continuously, prove what they did, and remember what they learned.**
 ![python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![dependencies](https://img.shields.io/badge/dependencies-stdlib%20only-brightgreen)
 ![tests](https://img.shields.io/badge/tests-116%20passing%20%C2%B7%206%20platforms-brightgreen)
-![mutations](https://img.shields.io/badge/mutation%20tests-43%2F43%20killed-brightgreen)
+![mutations](https://img.shields.io/badge/mutation%20tests-46%2F46%20killed-brightgreen)
 ![license](https://img.shields.io/badge/license-AGPL--3.0-orange)
 
 85 Python modules · 116 acceptance tests · one HTML control panel · no
@@ -233,7 +233,16 @@ A cited atom, once earned, used to be true forever. `freshness.py` adds
 expiry (`[expires: 2026-01-01]`), supersession (`[supersedes: C-01]` — the
 old atom is flagged, its successor named, lineage kept), and a
 **retraction ledger**: retract a source ref once and every atom citing it
-is flagged fleet-wide. Flags, never deletions — the owner decides.
+is flagged fleet-wide. Flags, never deletions — the owner decides. It also
+flags **directive-shaped memory** — the authority-collapse attack from the
+2026 memory-poisoning literature, where "always invest $5,000 when X" gets
+studied off a webpage into a cited atom and later recalls as knowledge:
+atoms that command money, claim the owner's voice, or carry injection
+idioms are flagged with the matched shape and source named (narrow by
+design — a how-to's "run npm install" is not an attack, and the blind spot
+is stated). Memory is evidence here, never instruction: the zones already
+keep any atom from grading or steering anything, and policy still screens
+every command.
 The ledger is CONTROL-zoned, so an agent cannot retract the source of a
 claim it would rather not defend. `freshness.py doi <doi>` live-probes
 Crossref for retraction notices, keyless.
@@ -244,9 +253,9 @@ python freshness.py retract experts/builder "10.1234/withdrawn" --why "publisher
 ```
 
 **[GOAL_SPECIALIST.md](GOAL_SPECIALIST.md)** is the deep account: the
-architecture, the evidence (43/43 mutations killed across the contract,
-runbook, repair, swarm, mastery, steering, freshness and provider-hub
-layers), and
+architecture, the evidence (46/46 mutations killed across the contract,
+runbook, repair, swarm, mastery, steering, freshness, provider-hub and
+memory-law layers), and
 the audit's complete 115-gap register with an honest status for every
 row.
 
