@@ -438,6 +438,7 @@ const COMMANDS = [
   ["Mastery — sealed exams and scores", "resources", "S.sub='mastery';go('agents')", "python mastery.py status <home> <expert> <pack>", "mastery capability pack exam competence transfer retention verdict"],
   ["What may no longer be true?", "resources", "S.sub='teach';go('agents')", "python freshness.py scan experts/<slug>", "freshness expired superseded retracted stale decay"],
   ["Switch light / dark theme", "nav", "toggleTheme()", "", "theme light dark palette appearance mode color"],
+  ["Adjust intelligence & cost lane", "admin", "openModelPolicy()", "python providers.py set-role <role> --provider openrouter --model <id>", "lane models cheap free dirt intelligence dial cost per step wiring adjust llm"],
 ];
 async function runPreflight(){
   showDlg("Production preflight", `<p class="muted">auditing this installation…</p>`);
@@ -3412,11 +3413,84 @@ async function setPolicy(name){
   } else toast((r&&r.error)||"could not apply that policy");
 }
 
+/* THE INTELLIGENCE DIAL — the founding thesis as a control: capability
+   comes from the system (graders, judge, repair, runbooks, memory), so
+   the model choice is a COST decision, and the user holds the dial.
+   One click applies a whole lane across every role; any role can then
+   be fine-tuned individually below. Estimates use the platform's
+   measured ~1.1k-token window + ~500-token reply; real spend is
+   ledgered per task and shown in the cockpit. */
+const COST_LANES = [
+  ["free", "$0 — Free", "OpenRouter :free ids. Rate-limited; ideal for testing and overnight study.",
+   "~$0.000/step",
+   {worker: "deepseek/deepseek-chat-v3-0324:free",
+    examiner: "meta-llama/llama-3.3-70b-instruct:free", escalate: null}],
+  ["house", "¢ Dirt-cheap — THE HOUSE LANE", "Workers on DeepSeek V4-Flash; the judge on Gemini Flash-Lite — a DIFFERENT family (what a judge needs), not a pricier one. The system supplies the intelligence.",
+   "~$0.001/step",
+   {worker: "deepseek/deepseek-v4-flash",
+    examiner: "google/gemini-2.5-flash-lite",
+    escalate: "deepseek/deepseek-v4-pro"}],
+  ["value", "$ Value", "Workers on V4-Pro for harder day-to-day work; judge on Gemini 3.5 Flash.",
+   "~$0.005/step",
+   {worker: "deepseek/deepseek-v4-pro",
+    examiner: "google/gemini-3.5-flash",
+    escalate: "deepseek/deepseek-v4-pro"}],
+  ["frontier", "$$ Frontier judge", "V4-Pro workers with a Gemini 3.1 Pro judge. Rarely needed — the graders, not the judge's brand, decide completion.",
+   "~$0.01/step",
+   {worker: "deepseek/deepseek-v4-pro",
+    examiner: "google/gemini-3.1-pro",
+    escalate: "google/gemini-3.1-pro"}],
+];
+const LANE_ROLES = ["default", "ripper", "watcher", "librarian",
+                    "practitioner", "student", "reflector", "consultant"];
+async function applyLane(key){
+  const lane = COST_COST_LANES.find(l=>l[0]===key); if (!lane) return;
+  const m = lane[4];
+  const posts = [];
+  for (const role of LANE_ROLES)
+    posts.push({role, provider: "openrouter", model: m.worker,
+                escalate_provider: m.escalate ? "openrouter" : undefined,
+                escalate_model: m.escalate || undefined});
+  posts.push({role: "examiner", provider: "openrouter", model: m.examiner});
+  let ok = 0, err = null;
+  for (const body of posts){
+    const r = await api('/api/experts/'+S.sel+'/role', {method:"POST", body});
+    if (r.error) err = r.error; else ok++;
+  }
+  toast(err ? `applied ${ok}/${posts.length} — ${err}`
+            : `${lane[1]} applied to ${ok} roles — run loop.py check to prove the wiring`);
+  render();
+}
 async function renderWiring(b){
   const st = await api('/api/experts/'+S.sel+'/settings');
   const provs = st.providers||{}; const roles = st.roles||{};
+  const orWired = !!provs.openrouter;
   b.innerHTML = `
-  <div class="card" style="border-color:var(--acc)"><h3>How should it choose a model?
+  <div class="card" style="border-color:var(--acc)"><h3>🎚 Intelligence &amp; cost — pick a lane, fine-tune any role
+    <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:11.5px">
+    the system supplies the intelligence; this dial sets what you pay for the model</span></h3>
+  <div class="body">
+    ${orWired ? "" : `<p class="muted" style="font-size:12px">Lanes apply via
+      OpenRouter (one key, every model). Wire it first: put
+      <span class="mono">OPENROUTER_API_KEY</span> in <span class="mono">agent.env</span>
+      — it auto-wires — or add any provider below and set roles by hand.</p>`}
+    <div class="row" style="gap:10px;flex-wrap:wrap;align-items:stretch">
+      ${COST_LANES.map(([key,name,desc,est])=>`
+        <div class="card" style="flex:1;min-width:200px;margin:0${key==='house'?';border-color:var(--acc)':''}">
+          <div class="body">
+            <div class="row"><b>${name}</b><span class="spacer"></span>
+              <span class="pill ${key==='house'?'ok':'dim'}">${est}</span></div>
+            <p class="muted" style="font-size:11.5px;min-height:52px">${desc}</p>
+            <button class="btn sm ${key==='house'?'pri':''}"
+              ${orWired?"":"disabled"} onclick="applyLane('${key}')">apply to every role</button>
+          </div></div>`).join("")}
+    </div>
+    <p class="muted" style="font-size:11.5px;margin:8px 0 0">Every lane keeps the law:
+    the examiner sits on a DIFFERENT model family than the workers (uncorrelated blind
+    spots), escalation fires only on [[ESCALATE]] or repeated errors, and real spend —
+    not these estimates — is ledgered per task and capped by your budgets.</p>
+  </div></div>
+  <div class="card"><h3>How should it choose a model?
     <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:11.5px">
     UI spec §11 — a policy, not a model name</span></h3>
     <div class="body" id="polBody"><span class="muted">loading…</span></div></div>
