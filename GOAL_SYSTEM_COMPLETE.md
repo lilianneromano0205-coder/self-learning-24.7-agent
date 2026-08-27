@@ -365,7 +365,7 @@ dropped *and counted* (an off-topic paper reached by a trusted route
 becomes a cited atom — a wrong belief with a real citation attached).
 
 ### The floor under all of it (one paragraph each)
-**`loop.py` — the task engine**: one tool call per step; five tools; gates
+**`loop.py` — the task engine**: one tool call per step; six tools; gates
 decide done; retries, escalation between model tiers, cost brakes per task
 and per day, Retry-After honored with jitter, graceful SIGTERM drain,
 context compiled fresh every task (measured flat at ~1083 tokens while

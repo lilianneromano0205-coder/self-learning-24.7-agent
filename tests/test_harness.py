@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The harness as an inspectable, self-auditing object (M1).
 
-1. manifest(): the five tools with their per-role allowlists, the gates,
+1. manifest(): the six tools with their per-role allowlists, the gates,
    policies, memory tiers, budgets, loop events, versions — read from the
    code and settings that run, never inferred.
 2. check_contracts(): the harness audits itself — a tool declared without an
@@ -39,7 +39,7 @@ def main():
     m = harness.manifest(sb)
     names = [t["name"] for t in m["tools"]]
     assert names == ["read_file", "write_file", "run_command", "finish_task",
-                     "ask_human"], names
+                     "subquery", "ask_human"], names
     rc = next(t for t in m["tools"] if t["name"] == "run_command")
     assert "student" in rc["denied_roles"], rc
     fin = next(t for t in m["tools"] if t["name"] == "finish_task")

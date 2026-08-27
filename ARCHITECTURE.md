@@ -2,7 +2,7 @@
 
 **What this is.** A file-backed, stdlib-only platform for building expert AI
 agents that work continuously, prove what they did, and remember what they
-learned. 85 Python modules, 116 acceptance tests, one HTML control panel, no
+learned. 85 Python modules, 117 acceptance tests, one HTML control panel, no
 database, no framework, no build step. Python 3.11+ and your own API keys.
 
 **Who this document is for.** Somebody who has just been handed the
@@ -379,8 +379,10 @@ budget breaker, a step cap, a repetition detector (identical tool call warned
 at 3, failed at 5), a declared stop condition (criteria, max attempts,
 deadline, max steps), and retry-with-fresh-eyes on failure.
 
-**The five tools**, and nothing else: `read_file`, `write_file`,
-`run_command`, `finish_task`, `ask_human`. Each role gets an allowlist — the
+**The six tools**, and nothing else: `read_file`, `write_file`,
+`run_command`, `subquery` (a disposable sub-model call over a file slice —
+the material never enters the window), `finish_task`, `ask_human`. Each
+role gets an allowlist — the
 Student has no shell and no `read_file`, because its exam is closed-book;
 no role that handles untrusted material holds `run_command`.
 

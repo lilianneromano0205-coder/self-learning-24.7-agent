@@ -70,7 +70,7 @@ SKIP_RE = re.compile(r"^SKIP\s+(test_\w+)(?:\.py)?\s*[:\-–—]\s*(.*)$")
 # Which tests speak for which system. Every registered test must appear here.
 SYSTEMS = {
     "1. Harness & loop": {
-        "what": "the engine: context assembly, five tools, gates, brakes, "
+        "what": "the engine: context assembly, six tools, gates, brakes, "
                 "retries, escalation, policy, effects, compaction",
         "tests": ["test_harness.py", "test_faults.py", "test_stop.py",
                   "test_checkpoint.py", "test_retry.py", "test_compaction.py",
