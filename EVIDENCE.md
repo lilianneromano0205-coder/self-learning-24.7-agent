@@ -1,6 +1,6 @@
 # Evidence — why we believe this works
 
-Generated 2026-08-27T14:06:53 from an actual suite run: **114/116 tests passed**, **576 observations** recorded.
+Generated 2026-08-27T14:53:21 from an actual suite run: **114/116 tests passed**, **577 observations** recorded.
 
 Each test below prints its own sentence describing what it proved; those sentences are quoted verbatim, not summarised. Every system also carries a **blind spot** — what these tests do not cover.
 
@@ -12,7 +12,7 @@ Each test below prints its own sentence describing what it proved; those sentenc
 |---|---|---|---|
 | 1. Harness & loop | **proven except skipped** | 23/24 | 87 |
 | 2. Fleet & creation lanes | **proven** | 6/6 | 21 |
-| 3. Work systems | **proven** | 22/22 | 110 |
+| 3. Work systems | **proven** | 22/22 | 111 |
 | 4. Memory institution | **proven** | 18/18 | 74 |
 | 5. Improvement & governance | **proven** | 8/8 | 34 |
 | 6. Control plane & interop | **proven** | 19/19 | 116 |
@@ -112,7 +112,7 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_candidates.py` **[discriminates]** a real answer scores 1.0, a one-character one 0.75, an unfinished one carrying TODO 0.75, and a .json that does not parse 0.6 — the composite can now tell attempts apart on ordinary work, where every other component declines to answer and six attempts previously tied at 0.0
 - `test_retention.py` **[bounded]** 300 tasks done, hot queue holds 40 finished (62 KB); queued and blocked work untouched
 - `test_retention.py` **[lossless]** all 302 tasks accounted for — 260 archived, every field intact and findable by id
-- `test_retention.py` **[flat]** the hot state is capped at 50 finished task(s) after 400 more were run (limit 65), so persist is bounded work forever — measured 10 ms -> 13 ms here, but the COUNT is the guarantee and the clock is only a smoke check
+- `test_retention.py` **[flat]** the hot state is capped at 50 finished task(s) after 400 more were run (limit 65), so persist is bounded work forever — measured 10 ms -> 12 ms here, but the COUNT is the guarantee and the clock is only a smoke check
 - `test_retention.py` **[context]** finished transcripts tidied into contexts/archive/, the verbatim never-lose tier left in place and still recallable
 - `test_retention.py` **[heartbeat]** the loop pulses with its current task; a stale pulse is what separates 'wedged' from 'idle'
 - `test_context.py` **[manifest]** the compiled window names every source it used and the files inside it; the transcript matches the manifest
@@ -149,7 +149,7 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_team.py` **[isolation]** beta:1 task, gamma:1 task, alpha:plan+synthesis — memories separate
 - `test_team.py` **[result]** one deliverable, citations preserved, run listed
 - `test_toolbox.py` **[scan]** capabilities reflect this machine; the note instructs, not hints
-- `test_toolbox.py` **[gallery]** 20 specialists, all kinds covered, identities carry standards and refusals
+- `test_toolbox.py` **[gallery]** 24 specialists, all kinds covered, identities carry standards and refusals
 - `test_toolbox.py` **[quick]** capability note injected first; template identity installed
 - `test_local.py` **[env]** agent.env loaded automatically, comments and quotes handled
 - `test_local.py` **[inbox]** daemon scanned its own inbox on idle: file -> lesson -> watcher -> done
@@ -163,9 +163,9 @@ Each test below prints its own sentence describing what it proved; those sentenc
 
 *task, goal engine, team, deterministic workflow, consultation, prospective intentions, routines, procedural mastery (sealed capability packs)*
 
-**Verdict: proven** — 22 of 22 declared tests ran and passed, producing 110 observations.
+**Verdict: proven** — 22 of 22 declared tests ran and passed, producing 111 observations.
 
-<details><summary>What the tests observed (110)</summary>
+<details><summary>What the tests observed (111)</summary>
 
 - `test_goal.py` **[judge]** a judge claiming ACHIEVED while a check failed was OVERRULED; the pursuit continued and finished the work for real
 - `test_goal.py` **[replan]** cycle 2 planned WITH the previous assessment in hand
@@ -193,6 +193,7 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_runbook.py` **[draft]** a verified pursuit yields a skeleton carrying the proven VERIFICATIONS with the HOW left as named TODOs — validation refuses to run it until they are filled, because the machine can recover what was proven but not how it was done
 - `test_runbook.py` **[applicable]** a negative trigger vetoed a matching runbook; an unmet when.requires probe made a PROVEN match inapplicable and reconcile blocked NAMING the precondition; satisfying it let the identical goal reconcile to VERIFIED
 - `test_runbook.py` **[compose]** a parent runbook ran its child in place with the child's own trust gate enforced and its own wins recorded (candidate child stopped an unsupervised parent; the child earned proven through composition); a mutual cycle was refused with the chain named
+- `test_runbook.py` **[record]** a demonstrated procedure landed as a CANDIDATE with recorded provenance; a step without verify was refused; the rehearsal replayed the demo through the authority stack and counted as the first of three wins toward PROVEN
 - `test_repair.py` **[law1]** a blocked goal's diagnosis and every grounded repair action carry the failing check and its recorded error VERBATIM from the ledger — there is no 'reflect and try again' action anywhere in the plan
 - `test_repair.py` **[law3]** a budget block and a tamper block both plan exactly one action — OWNER — and a repair pass left the contract's budget bit-for-bit unchanged: the machine cannot lift its own ceiling or forgive edits to its own graders
 - `test_repair.py` **[law4]** revising a failing runbook wrote publisher-v2 BESIDE its parent — parent file and earned trust untouched, child a zero-trust candidate carrying the exact failure it must answer, refused by validation until the TODO is filled
@@ -445,7 +446,7 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_csrf.py` **[catalogue]** GET /api/gates lists what a caller may ask for
 - `test_frontend.py` **[syntax]** the page's JavaScript parses under node --check
 - `test_frontend.py` **[page]** the six job-shaped sections each state their purpose and route to a renderer; guide/memory/models/system were MOVED, not deleted, and each is still reachable from a clickable control; every endpoint the page names exists; both themes defined
-- `test_frontend.py` **[serve]** page served from ui.html (311029 bytes)
+- `test_frontend.py` **[serve]** page served from ui.html (311116 bytes)
 - `test_frontend.py` **[fresh]** a newly created expert answers on all six read endpoints, no 500s
 - `test_frontend.py` **[live]** frontend edits appear on reload with no server restart
 - `test_package.py` **[secrets]** 306 archive members checked four ways — by basename, by containing directory, by extension, and by READING every text member for assigned credential values. The content scan was calling a path-taking function on a line of text, so it had never evaluated true; now live, it finds exactly the 7 synthetic fixtures the tests are built from and nothing else, and an unlisted hit or a stale exemption both fail
@@ -484,7 +485,7 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_mcp.py` **[toolbox]** the capability note advertises the server with the exact commands
 - `test_mcp.py` **[a2a]** A2A v1.0 card served at the standard well-known path: exposed experts as skills, signed transport declared, zero secret material
 - `test_mcp.py` **[url-args]** 6 tool arguments pointing at file://, loopback, private and link-local addresses are refused BEFORE the server is called — including nested ones, which is how a browser server passes its options — and 4 ordinary argument shapes still pass
-- `test_mcp.py` **[sees]** an image block is written to tmp/ (mcp-1787853635-1.png) and the result names the exact `ingest.py vision` command that reads it, so a screenshot becomes something the agent can answer questions about; an undecodable blob is reported as gone, not hidden
+- `test_mcp.py` **[sees]** an image block is written to tmp/ (mcp-1787856418-1.png) and the result names the exact `ingest.py vision` command that reads it, so a screenshot becomes something the agent can answer questions about; an undecodable blob is reported as gone, not hidden
 - `test_federation.py` **[card]** each fleet has its own identity; the card exposes only what the owner chose, signed, with a fingerprint (never the secret)
 - `test_federation.py` **[trust]** unknown fleet, forged signature, and unexposed expert all refused before a single model call
 - `test_federation.py` **[ask]** a signed request became a citation-gated consultation, framed as coming from outside the fleet
@@ -682,9 +683,9 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_live_provider.py` **[wire]** one real HTTP call carried the model, the messages, the configured 4096-token ceiling, exactly the 5 tools this role is allowed, the bearer key and the configured extra header — and with the ceiling left at its default, max_tokens is omitted rather than sent as 0
 - `test_live_provider.py` **[cost]** the provider reported 1M+1M tokens and the ledger charged $18.00 at the configured rates — spend is read from the response, never estimated by the client
 - `test_live_provider.py` **[retry]** 429 then 503 then success in 3 calls with growing backoff; a 400 stopped after exactly 1 call instead of burning five
-- `test_live_provider.py` **[retry-after]** a 429 asking for 45s slept 45.6s (the blind backoff would have been 2s and retried into a closed window), a 503 asking for 1s slept 1.2s instead of 2s or more, and both carry jitter so simultaneous experts do not return in lockstep
+- `test_live_provider.py` **[retry-after]** a 429 asking for 45s slept 45.3s (the blind backoff would have been 2s and retried into a closed window), a 503 asking for 1s slept 1.1s instead of 2s or more, and both carry jitter so simultaneous experts do not return in lockstep
 - `test_live_provider.py` **[retry-after]** the header parser pinned across 15 shapes: both legal formats, the 120s cap, negatives and past dates clamped to 0, and every unreadable value falling back to blind backoff rather than to 0
-- `test_live_provider.py` **[unreachable]** a refused connection failed over to the fallback in 2.02s and was logged as unreachable, instead of costing five backoffs per step forever
+- `test_live_provider.py` **[unreachable]** a refused connection failed over to the fallback in 2.05s and was logged as unreachable, instead of costing five backoffs per step forever
 - `test_live_provider.py` **[keys]** all 3 configured key sources (env, inline, file) reached the Authorization header and were accepted by a server that checks them
 - `test_live_provider.py` **[malformed]** a non-JSON body and a body with no choices are each retried through the full ladder, then failed over to the configured fallback, and logged against the provider that sent them — they used to raise straight out of the loop, killing the task and never trying the fallback
 - `test_live_provider.py` **[timeout]** a provider that hung for 20s was cut off by the 2s ceiling and retried, finishing in 2.0s — the timeout is a real bound, not a suggestion
@@ -705,8 +706,8 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_first_day.py` **[first-task]** with the probe green, a gated task ran to completion over the same provider — the artefact exists, the gate passed, and the key appears nowhere in 2435 characters of log
 - `test_first_day.py` **[activate]** one key repoints every role at the provider that key belongs to, writes its verified endpoint and leaves the file's comments intact; 11 providers are catalogued, ranked by what they actually give away; incomplete credentials are refused rather than half-applied; and running it twice changes nothing
 - `test_endurance.py` **[soak]** driving 120 real tasks through a real loop (AGENT_SOAK_TASKS to change)
-- `test_endurance.py` **[queue]** 120 tasks completed; the hot queue held 20 then 42 against a retention of 20, 78 moved to the append-only archive with none lost, and state.json went 32417 -> 68014 bytes (2.1x)
-- `test_endurance.py` **[latency]** per-task wall time across 6 batches: 0.11s, 0.12s, 0.13s, 0.12s, 0.12s, 0.12s — median 0.12s, and the last batch is not an outlier: the loop does not get slower as its own history grows
+- `test_endurance.py` **[queue]** 120 tasks completed; the hot queue held 20 then 42 against a retention of 20, 78 moved to the append-only archive with none lost, and state.json went 32422 -> 68004 bytes (2.1x)
+- `test_endurance.py` **[latency]** per-task wall time across 6 batches: 0.12s, 0.12s, 0.13s, 0.13s, 0.13s, 0.13s — median 0.13s, and the last batch is not an outlier: the loop does not get slower as its own history grows
 - `test_endurance.py` **[logs]** agent.log is 116 KB and rotates at 5 MB x 5 backups — a hard ceiling of 29 MB per expert, whatever happens
 - `test_endurance.py` **[locks]** no lock file survived 120+ tasks and 6 loop restarts — every one was released by its holder or reclaimed as stale
 - `test_endurance.py` **[ledgers]** the whole expert directory is 1.3 MB after 120+ tasks (11.1 KB per task): the model gateway 48 KB, routing outcomes 24 KB, compiled context windows 972 KB

@@ -86,6 +86,7 @@ def main():
     check_draft_is_an_honest_skeleton(root)
     check_applicability_is_probed(root)
     check_composition_keeps_every_gate(root)
+    check_recording_earns_nothing(root)
     print("PASS test_runbook")
 
 
@@ -425,6 +426,40 @@ def check_composition_keeps_every_gate(root):
           "(candidate child stopped an unsupervised parent; the child "
           "earned proven through composition); a mutual cycle was refused "
           "with the chain named")
+
+
+def check_recording_earns_nothing(root):
+    """Teach-by-demonstration, the honest version: a recorded procedure is
+    a CANDIDATE (a demo you watched is a claim), a step with no verify is
+    refused (recording does not relax the law), and a --rehearse replay
+    through the full authority stack is win #1 of the three that earn
+    PROVEN."""
+    art = os.path.join(root, "out", "recorded.txt")
+    if os.path.exists(art):
+        os.remove(art)
+    try:
+        runbook.record_demo(root, "half-demo", ["demo"],
+                       [{"do": _touch_cmd(art)}])
+        raise AssertionError("a demonstrated step with no verify was "
+                             "accepted — recording relaxed the law")
+    except runbook.RunbookError as e:
+        assert "verify" in str(e), e
+    r = runbook.record_demo(root, "demoed", ["recorded", "artifact"],
+                       [{"do": _touch_cmd(art), "verify": _exists(art)}])
+    assert r["status"] == "candidate", (
+        f"a fresh recording came out {r['status']} — trust must be earned, "
+        f"not conferred by the demo")
+    r2 = runbook.record_demo(root, "demoed2", ["recorded", "again"],
+                        [{"do": _touch_cmd(art), "verify": _exists(art)}],
+                        rehearse=True)
+    assert r2["rehearsed"] is True, r2
+    assert runbook._trust(root).get("demoed2", {}).get("wins") == 1, (
+        "a verified rehearsal must be recorded as win #1")
+    assert runbook.load(root, "demoed")["provenance"]["recorded"] is True
+    print("[record] a demonstrated procedure landed as a CANDIDATE with "
+          "recorded provenance; a step without verify was refused; the "
+          "rehearsal replayed the demo through the authority stack and "
+          "counted as the first of three wins toward PROVEN")
 
 
 if __name__ == "__main__":

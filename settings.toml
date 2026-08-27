@@ -295,6 +295,14 @@ api_key_env = "OPENROUTER_API_KEY"
 # api_key_env = "OLLAMA_API_KEY"
 # free = true
 
+# THE PRIVACY LANE — sensitive work that must never leave this machine.
+# Pin a role to a local rail and it has zero egress BY WIRING, not by
+# promise: no key, no cloud, nothing to leak. Pair with the
+# `privacy-warden` archetype, whose charter also refuses cloud fallback.
+#   [roles.private]
+#   provider = "ollama"
+#   model = "qwen3:30b"        # any tools-capable local model you pulled
+
 # ----------------------------------------------------------------- roles
 # One block per role; switching provider/model is a one-line change.
 # Role -> model mapping per the master document Part 7: Ripper/Reflector on

@@ -555,6 +555,42 @@ def reconcile(root, gid, allow_candidates=False, max_rounds=3):
 
 # ------------------------------------------------------------------ drafts
 
+def record_demo(root, name, triggers, steps, rehearse=False):
+    """TEACH BY DEMONSTRATION: the owner shows the procedure ONCE — each
+    step a `do` command and the `verify` that proves it — and it becomes a
+    runbook. The 2026 consumer agents advertise exactly this ("walk it
+    through a workflow and it repeats it"); the difference here is what
+    happens after the demo: the recording lands as a CANDIDATE with zero
+    trust, `--rehearse` replays it immediately through the full authority
+    stack so the demonstration proves itself before anyone relies on it,
+    and only three all-verified wins make it PROVEN. A demo you watched is
+    a claim; a demo the graders re-ran is evidence.
+
+    `steps` is [{"do": cmd, "verify": cmd, "timeout"?}] — same shape as
+    every runbook, validated the same way (a step with no verify is
+    refused: recording does not relax the law)."""
+    rb = {"name": str(name),
+          "triggers": [str(t).strip() for t in (triggers or []) if str(t).strip()],
+          "steps": list(steps or []),
+          "provenance": {"recorded": True, "by": "owner",
+                         "at": time.strftime("%Y-%m-%dT%H:%M:%S")}}
+    problems = validate(rb)
+    if problems:
+        raise RunbookError("the recording is not a runnable procedure: "
+                           + "; ".join(problems))
+    os.makedirs(_dir(root), exist_ok=True)
+    with open(path(root, name), "w", encoding="utf-8") as f:
+        json.dump(rb, f, indent=1)
+    out = {"name": name, "steps": len(rb["steps"]),
+           "status": status(root, name), "rehearsed": None}
+    if rehearse:
+        rr = run(root, name, allow_candidate=True)
+        out["rehearsed"] = rr["ok"]
+        out["rehearse_why"] = rr["why"]
+        out["status"] = status(root, name)   # a verified rehearsal is win #1
+    return out
+
+
 def draft(root, gid):
     """A SKELETON runbook from a verified pursuit's event ledger.
 
@@ -610,6 +646,16 @@ def main():
     p.add_argument("--allow-candidates", action="store_true")
     p = sub.add_parser("reconcile"); p.add_argument("root"); p.add_argument("gid")
     p.add_argument("--allow-candidates", action="store_true")
+    p = sub.add_parser("record")
+    p.add_argument("root"); p.add_argument("name")
+    p.add_argument("--trigger", action="append", default=[],
+                   help="words that select this procedure (repeatable)")
+    p.add_argument("--steps-file",
+                   help="a file of alternating lines: do: <cmd> / "
+                        "verify: <cmd>; omit to type steps interactively")
+    p.add_argument("--rehearse", action="store_true",
+                   help="replay the demonstration immediately — a verified "
+                        "rehearsal is win #1 of the three that earn PROVEN")
     p = sub.add_parser("draft"); p.add_argument("root"); p.add_argument("gid")
     p = sub.add_parser("clear"); p.add_argument("root"); p.add_argument("name")
     a = ap.parse_args()
@@ -637,6 +683,36 @@ def main():
         r = reconcile(a.root, a.gid, allow_candidates=a.allow_candidates)
         print(json.dumps(r, indent=1))
         raise SystemExit(0 if r["verified"] else 1)
+    elif a.cmd == "record":
+        steps = []
+        if a.steps_file:
+            cur = {}
+            with open(a.steps_file, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line.lower().startswith("do:"):
+                        if cur.get("do"):
+                            steps.append(cur); cur = {}
+                        cur["do"] = line[3:].strip()
+                    elif line.lower().startswith("verify:"):
+                        cur["verify"] = line[7:].strip()
+            if cur.get("do"):
+                steps.append(cur)
+        else:
+            print("Demonstrate the procedure. Empty `do` finishes.")
+            while True:
+                d = input("do>     ").strip()
+                if not d:
+                    break
+                v = input("verify> ").strip()
+                steps.append({"do": d, "verify": v})
+        r = record_demo(a.root, a.name, a.trigger, steps,
+                        rehearse=a.rehearse)
+        print(f"recorded {r['name']}: {r['steps']} step(s), "
+              f"status {r['status'].upper()}"
+              + (f", rehearsal {'VERIFIED' if r['rehearsed'] else 'FAILED — ' + (r.get('rehearse_why') or '')[:120]}"
+                 if r["rehearsed"] is not None else
+                 " — rehearse it or let three verified wins promote it"))
     elif a.cmd == "draft":
         out, rb = draft(a.root, a.gid)
         print(f"skeleton written to {out} — {len(rb['steps'])} step(s), "

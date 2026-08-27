@@ -64,6 +64,42 @@ graders. Everything else is these two, scaled.
 
 ---
 
+## Why this, in a world of agent frameworks
+
+2026's agent landscape is crowded and genuinely impressive — OpenClaw's
+five-component runtime and enormous ecosystem, Hermes Agent's
+self-improving loop, Grokbot's named no-code agents with connectors,
+schedules and demonstration recording, NemoClaw wrapping agents in
+sandboxing, privacy routing and audit. This platform covers that ground —
+and differs from all of it on one structural axis: **here, the guarantees
+are laws with tests that would fail, not features with descriptions.**
+
+| Property | The well-known harnesses | Expert Fleet |
+|---|---|---|
+| Who says "done"? | the model or its framework judges its own run | frozen, caller-authored graders sealed before planning, run only by the harness; even the judge is overruled when they disagree — **46/46 mutation-tested laws** |
+| Self-improvement | trust the loop to compound | validation-gated: a procedure is PROVEN only after 3 all-verified wins; oscillation stops the lane; drafts refuse to run — matching what the 2026 fragility literature demands |
+| Learn by demonstration | recorded, then trusted | `runbook.py record`: recorded → **CANDIDATE**; a rehearsal replayed through the full authority stack is win #1; a demo you watched is a claim, a demo the graders re-ran is evidence |
+| Security | wrapper products exist *because* the frameworks need wrapping (see the published security analyses of the popular ones) | five mandatory authorities inside the platform — Execution, File, Credential, Model Gateway, Effect — `--audit` at 0 bypasses **in CI**, plus directive-shaped memory flagged at the source |
+| Competence claims | self-reported benchmarks | sealed capability packs the student can neither read nor edit; pretest → exam lift measured by harness-run validators; the author never sits its own exam |
+| Memory over years | vectors and summaries | file-backed cited atoms with expiry, supersession, and a **retraction feed** — plus the compaction-cliff law: safety rules are never summarized, ever |
+| Dependencies | large stacks | Python stdlib. Zero. 116 tests on 6 CI platforms |
+| Your state | often hosted, often theirs | files you own, provider-universal (any key, or a zero-key local model) — the model is a swappable part; the memory, graders, runbooks and ledgers are the asset |
+
+Four shipped archetypes cover the famous products' ground on this
+machinery — **Chief of Staff** (Grokbot-class personal automation),
+**Deep Researcher** (Hermes-class compounding research), **Nightwatch
+Optimizer** (AVO-class long-horizon improvement), **Privacy Warden**
+(NemoClaw-class zero-egress operation) — each inheriting the graders,
+earned trust and control-zoned ledgers those products do not have.
+
+And the honest counterweight, because a lab states it: those platforms
+have vast integration ecosystems, hosted polish and mobile apps this
+local-first platform does not chase — and this platform's measured
+model-lift experiment still awaits an API key. What is claimed here is
+what is tested here.
+
+---
+
 ## The idea in one paragraph
 
 An LLM with a shell is not an employee. It forgets everything between
