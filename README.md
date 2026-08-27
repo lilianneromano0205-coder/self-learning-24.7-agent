@@ -7,7 +7,7 @@ continuously, prove what they did, and remember what they learned.**
 ![python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![dependencies](https://img.shields.io/badge/dependencies-stdlib%20only-brightgreen)
 ![tests](https://img.shields.io/badge/tests-116%20passing%20%C2%B7%206%20platforms-brightgreen)
-![mutations](https://img.shields.io/badge/mutation%20tests-40%2F40%20killed-brightgreen)
+![mutations](https://img.shields.io/badge/mutation%20tests-43%2F43%20killed-brightgreen)
 ![license](https://img.shields.io/badge/license-AGPL--3.0-orange)
 
 85 Python modules · 116 acceptance tests · one HTML control panel · no
@@ -244,8 +244,9 @@ python freshness.py retract experts/builder "10.1234/withdrawn" --why "publisher
 ```
 
 **[GOAL_SPECIALIST.md](GOAL_SPECIALIST.md)** is the deep account: the
-architecture, the evidence (40/40 mutations killed across the contract,
-runbook, repair, swarm, mastery, steering and freshness layers), and
+architecture, the evidence (43/43 mutations killed across the contract,
+runbook, repair, swarm, mastery, steering, freshness and provider-hub
+layers), and
 the audit's complete 115-gap register with an honest status for every
 row.
 

@@ -29,7 +29,11 @@ import urllib.request
 HOME = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HOME)
 
-# well-known rails, so "add" is one word instead of a URL hunt
+# well-known rails, so "add" is one word instead of a URL hunt — and so a
+# key dropped into agent.env can be AUTO-WIRED (see detect() and
+# loop.Agent.provider_cfg). Every base_url was verified against the
+# provider's own documentation; the settings.toml catalog carries the
+# citations and the honest free-tier notes.
 KNOWN = {
     "openrouter": ("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"),
     "tokenrouter": ("https://api.tokenrouter.io/v1", "TOKENROUTER_API_KEY"),
@@ -42,7 +46,68 @@ KNOWN = {
     "mistral": ("https://api.mistral.ai/v1", "MISTRAL_API_KEY"),
     "cerebras": ("https://api.cerebras.ai/v1", "CEREBRAS_API_KEY"),
     "openai": ("https://api.openai.com/v1", "OPENAI_API_KEY"),
+    # official APIs through their OpenAI-compatible layers (verified:
+    # platform.claude.com/docs/en/api/openai-sdk, ai.google.dev/gemini-api/
+    # docs/openai, docs.x.ai/developers/quickstart)
+    "anthropic": ("https://api.anthropic.com/v1", "ANTHROPIC_API_KEY"),
+    "gemini": ("https://generativelanguage.googleapis.com/v1beta/openai",
+               "GEMINI_API_KEY"),
+    "xai": ("https://api.x.ai/v1", "XAI_API_KEY"),
+    # Cloudflare Workers AI: the account id is part of the URL (it is not a
+    # secret); {CLOUDFLARE_ACCOUNT_ID} is expanded from the environment at
+    # add/auto-wire time, and its absence is a named error, not a 404 later
+    "cloudflare": ("https://api.cloudflare.com/client/v4/accounts/"
+                   "{CLOUDFLARE_ACCOUNT_ID}/ai/v1", "CLOUDFLARE_API_TOKEN"),
+    # local rails — zero keys, zero spend, zero egress. The protocol wants a
+    # bearer string, so OLLAMA_API_KEY=local satisfies it; the value is
+    # never checked by the server
+    "ollama": ("http://127.0.0.1:11434/v1", "OLLAMA_API_KEY"),
+    "lmstudio": ("http://127.0.0.1:1234/v1", "OLLAMA_API_KEY"),
 }
+LOCAL_RAILS = {"ollama", "lmstudio"}
+
+
+def rail(name):
+    """-> {"base_url", "api_key_env"} for a KNOWN rail, with any URL
+    placeholder expanded from the environment — or raise with the exact
+    variable that is missing. The single constructor auto-wiring and add()
+    both use, so they cannot drift."""
+    base_url, key_env = KNOWN[name]
+    if "{CLOUDFLARE_ACCOUNT_ID}" in base_url:
+        acct = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip()
+        if not acct:
+            raise RuntimeError(
+                f"provider {name!r} needs CLOUDFLARE_ACCOUNT_ID in agent.env "
+                f"(it is part of the URL, not a secret — dash.cloudflare.com "
+                f"shows it) alongside {key_env}")
+        base_url = base_url.replace("{CLOUDFLARE_ACCOUNT_ID}", acct)
+    p = {"base_url": base_url.rstrip("/"), "api_key_env": key_env}
+    if name in LOCAL_RAILS:
+        p["free"] = True
+    return p
+
+
+def detect(root=None):
+    """Which KNOWN rails could run RIGHT NOW — key present (or local), and
+    whether settings.toml already wires them. The answer to 'I put a key in
+    agent.env; what happened?' without reading any file by hand."""
+    wired = set()
+    if root:
+        try:
+            wired = set(load(root).get("providers", {}))
+        except (OSError, ValueError):
+            pass
+    out = []
+    for name in sorted(KNOWN):
+        _, key_env = KNOWN[name]
+        present = bool(os.environ.get(key_env, "").strip())
+        row = {"rail": name, "key_env": key_env, "key_present": present,
+               "local": name in LOCAL_RAILS, "wired": name in wired}
+        if name == "cloudflare":
+            row["account_id_present"] = bool(
+                os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip())
+        out.append(row)
+    return out
 
 
 # ------------------------------------------------------------ settings i/o
@@ -108,7 +173,9 @@ def add(root, name, base_url=None, key_env=None, native_tools=None,
         headers=None, prices=None):
     cfg = load(root)
     if not base_url and name in KNOWN:
-        base_url, key_env = KNOWN[name]
+        p = rail(name)                        # expands URL placeholders and
+        base_url = p["base_url"]              # names what is missing
+        key_env = key_env or p["api_key_env"]
     if not base_url:
         raise SystemExit(f"ERROR: --base-url required (or use a known rail: "
                          f"{', '.join(sorted(KNOWN))})")
@@ -224,7 +291,26 @@ def main():
     p.add_argument("--root", default=HOME)
     p = sub.add_parser("test")
     p.add_argument("--root", default=HOME)
+    p = sub.add_parser("detect")
+    p.add_argument("--root", default=HOME)
     args = ap.parse_args()
+
+    if args.cmd == "detect":
+        import bootstrap
+        bootstrap.load_env(HOME)              # see agent.env, like the loop
+        rows = detect(args.root)
+        ready = [r for r in rows if r["key_present"] or r["local"]]
+        for r in rows:
+            state = ("WIRED" if r["wired"]
+                     else "ready — auto-wires on first use" if
+                     (r["key_present"] or r["local"]) else f"needs {r['key_env']}")
+            extra = ("" if r.get("account_id_present", True)
+                     else " + CLOUDFLARE_ACCOUNT_ID")
+            print(f"{r['rail']:<12} {state}{extra}")
+        print(f"\n{len(ready)}/{len(rows)} rails could run right now. A role "
+              f"can name any of them directly; `python providers.py add "
+              f"<rail>` makes the wiring durable.")
+        return
 
     if args.cmd == "list":
         s = summary(args.root)

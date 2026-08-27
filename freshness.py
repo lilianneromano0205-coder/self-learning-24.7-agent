@@ -184,6 +184,54 @@ def check_doi(doi, timeout=20):
         return _crossref_verdict(json.loads(r.read().decode("utf-8")))
 
 
+_DOI_RE = re.compile(r"\b(10\.\d{4,9}/[^\s\]\"']+)")
+
+
+def cited_dois(root):
+    """Every distinct DOI appearing in a [src:] across this expert's notes —
+    the same walker as scan(), so the feed checks exactly what recall can
+    cite."""
+    import knowledge
+    out = set()
+    for _aid, _course, _p, body in _atom_rows(root):
+        src = knowledge.SRC_RE.search(body)
+        if src:
+            m = _DOI_RE.search(src.group(1))
+            if m:
+                out.add(m.group(1).rstrip(".,;)"))
+    return sorted(out)
+
+
+def feed(root, limit=25, probe=None, by="crossref-feed"):
+    """THE RETRACTION FEED: probe every cited DOI against Crossref's
+    retraction relations and record a ledger row for each hit — the
+    automated half of what retract() does by hand. Bounded per run
+    (Crossref is a shared public resource), idempotent (an already-retracted
+    ref is skipped), and every hit carries Crossref's own evidence as the
+    why. Wire it as a routine to run on a schedule; a failure on one DOI is
+    reported and never stops the sweep."""
+    probe = probe or check_doi
+    already = {r["ref"] for r in retractions(root)}
+    checked, hits, errors = 0, [], []
+    for doi in cited_dois(root):
+        if checked >= max(1, int(limit)):
+            break
+        if any(ref in doi for ref in already):
+            continue
+        checked += 1
+        try:
+            v = probe(doi)
+        except Exception as e:
+            errors.append({"doi": doi, "error": f"{type(e).__name__}: {e}"[:120]})
+            continue
+        if v.get("retracted"):
+            retract(root, doi, v.get("why") or "retraction on record",
+                    by=by)
+            hits.append(doi)
+    return {"checked": checked, "retracted": hits, "errors": errors,
+            "already_on_ledger": len(already)}
+
+
 # --------------------------------------------------------------------- CLI
 
 def main():
@@ -198,6 +246,9 @@ def main():
     pr.add_argument("--by", default="owner")
     pd = sub.add_parser("doi")
     pd.add_argument("doi")
+    pf = sub.add_parser("feed")
+    pf.add_argument("root")
+    pf.add_argument("--limit", type=int, default=25)
     a = ap.parse_args()
     if a.cmd == "scan":
         r = scan(a.root)
@@ -208,6 +259,10 @@ def main():
         print(f"retracted refs containing {row['ref']!r}: {row['why']}")
     elif a.cmd == "doi":
         print(json.dumps(check_doi(a.doi), indent=1))
+    elif a.cmd == "feed":
+        r = feed(a.root, limit=a.limit)
+        print(json.dumps(r, indent=1, ensure_ascii=False))
+        raise SystemExit(1 if r["retracted"] else 0)
 
 
 if __name__ == "__main__":

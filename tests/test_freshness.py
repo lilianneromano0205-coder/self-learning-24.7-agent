@@ -78,8 +78,24 @@ def main():
                             "retract half the library")
     except freshness.FreshnessError as e:
         assert "substring" in str(e), e
-    freshness.retract(root, "10.9999/retracted.2024.001",
-                      "publisher withdrew the study", by="owner")
+    # 3b. THE FEED: cited DOIs are discovered from the same notes walker,
+    #     probed (injected here — no network in tests), and hits land on
+    #     the ledger automatically. One dead probe never stops the sweep,
+    #     and a ref already on the ledger is not probed again.
+    assert freshness.cited_dois(root) == ["10.9999/retracted.2024.001"]
+    def _down(_doi):
+        raise OSError("crossref unreachable")
+    bad = freshness.feed(root, probe=_down)
+    assert bad["errors"] and not bad["retracted"], bad
+    fed = freshness.feed(root, probe=lambda d: {
+        "retracted": True, "why": "publisher withdrew the study"})
+    assert fed["checked"] == 1 \
+        and fed["retracted"] == ["10.9999/retracted.2024.001"], fed
+    again = freshness.feed(root, probe=lambda d: {"retracted": True,
+                                                  "why": "x"})
+    assert again["checked"] == 0, (
+        "the feed re-probed a ref already on the ledger — Crossref is a "
+        "shared public resource and idempotence is the manners")
     r2 = freshness.scan(root)
     ret = {x["atom"]: x["why"] for x in r2["retracted"]}
     assert "C-02" in ret and "publisher withdrew" in ret["C-02"], r2

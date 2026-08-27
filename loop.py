@@ -885,6 +885,32 @@ class Agent:
     def provider_cfg(self, name):
         providers = self.cfg.get("providers", {})
         if name not in providers:
+            # PLUG AND PLAY: a role may name any KNOWN rail; if its key is
+            # already in the environment (agent.env auto-loads), the
+            # provider is wired from the verified catalog at runtime — no
+            # settings edit needed. A settings.toml entry always wins over
+            # the catalog (this branch only fires on a MISS), the synthesis
+            # is logged, and durable wiring stays one explicit command:
+            # python providers.py add <name>
+            import providers as providershub
+            if name in providershub.KNOWN:
+                _, key_env = providershub.KNOWN[name]
+                if (os.environ.get(key_env, "").strip()
+                        or name in providershub.LOCAL_RAILS):
+                    p = providershub.rail(name)   # raises naming any missing
+                    providers[name] = p           # env var (e.g. account id)
+                    self.cfg["providers"] = providers
+                    self.log.info(json.dumps({
+                        "event": "provider_autowired", "provider": name,
+                        "key_env": key_env,
+                        "note": "from the KNOWN catalog; make it durable "
+                                "with `python providers.py add`"}))
+                    return p
+                raise RuntimeError(
+                    f"provider {name!r} is a KNOWN rail but {key_env} is not "
+                    f"set — put it in agent.env (python bootstrap.py --key "
+                    f"{key_env}=...), or wire it explicitly with "
+                    f"`python providers.py add {name}`")
             raise RuntimeError(f"No [providers.{name}] in settings.toml")
         return providers[name]
 

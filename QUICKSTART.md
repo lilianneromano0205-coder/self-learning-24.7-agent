@@ -34,10 +34,19 @@ Write the key without ever showing it on screen:
 python bootstrap.py --key OPENROUTER_API_KEY=paste-your-key-here
 ```
 
-Then activate the provider: in `settings.toml`, the openrouter/deepseek
-blocks are already live; for others, uncomment their `[providers.*]` block
-(each carries its verified base_url and honest free-tier note) and point the
-roles at it. **Set a spend cap at the provider's dashboard first.**
+That is the whole wiring: **a key in `agent.env` IS a provider.** Any
+role may name any known rail (`anthropic`, `gemini`, `xai`, `cloudflare`,
+`ollama`, …) and it auto-wires at runtime from the verified catalog — an
+explicit `[providers.*]` block in `settings.toml` always outranks the
+catalog when you want custom pricing or headers. See what could run right
+now:
+
+```bash
+python providers.py detect
+```
+
+(For Cloudflare, also set `CLOUDFLARE_ACCOUNT_ID=` — it is part of the URL,
+not a secret.) **Set a spend cap at the provider's dashboard first.**
 
 ## 3. Prove the wiring
 

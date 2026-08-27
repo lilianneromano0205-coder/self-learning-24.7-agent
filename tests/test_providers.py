@@ -162,6 +162,71 @@ def main():
         f"a fleet-home tools.json must reach its experts, got {names}"
     assert "fleet_wide_tool" in toolbox.capability_note(root2)
     print("[fleet-tools] a tools.json at the fleet home reaches every expert in it")
+
+    # --- 6. PLUG AND PLAY: a key in the environment is a provider, no
+    #     settings edit needed — and every refusal names its fix
+    sb6 = make_sandbox("providers_auto", providers={"m": {"script": "s.json"}},
+                       roles={"tester": "m"}, scripts={"s.json": []})
+    a6 = loop.Agent(sb6)
+    saved = {k: os.environ.get(k) for k in
+             ("XAI_API_KEY", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID")}
+    try:
+        # no key -> a KNOWN rail refuses NAMING the env var and the command
+        os.environ.pop("XAI_API_KEY", None)
+        try:
+            a6.provider_cfg("xai")
+            raise AssertionError("a keyless rail was wired anyway")
+        except RuntimeError as e:
+            assert "XAI_API_KEY" in str(e) and "providers.py add" in str(e), e
+        # key present -> wired from the catalog at runtime, correct base_url
+        os.environ["XAI_API_KEY"] = "test-not-a-real-key"
+        p = a6.provider_cfg("xai")
+        assert p["base_url"] == "https://api.x.ai/v1", p
+        assert a6.cfg["providers"]["xai"] is p, "not cached for the session"
+        # an unknown name still fails plainly
+        try:
+            a6.provider_cfg("nonexistent-rail")
+            raise AssertionError("an unknown provider resolved")
+        except RuntimeError as e:
+            assert "settings.toml" in str(e)
+        # cloudflare: the URL needs the account id, and its absence is a
+        # NAMED error at wire time, not an opaque 404 months later
+        os.environ["CLOUDFLARE_API_TOKEN"] = "test-not-a-real-token"
+        os.environ.pop("CLOUDFLARE_ACCOUNT_ID", None)
+        try:
+            a6.provider_cfg("cloudflare")
+            raise AssertionError("cloudflare wired without an account id")
+        except RuntimeError as e:
+            assert "CLOUDFLARE_ACCOUNT_ID" in str(e), e
+        os.environ["CLOUDFLARE_ACCOUNT_ID"] = "abc123"
+        p = a6.provider_cfg("cloudflare")
+        assert p["base_url"].endswith("/accounts/abc123/ai/v1"), p
+        # settings always outrank the catalog: a configured base_url wins
+        sb7 = make_sandbox("providers_override",
+                           providers={"m": {"script": "s.json"}},
+                           roles={"tester": "m"}, scripts={"s.json": []})
+        P.add(sb7, "xai", base_url="https://my-proxy.example/v1",
+              key_env="XAI_API_KEY")
+        a7 = loop.Agent(sb7)
+        assert a7.provider_cfg("xai")["base_url"] == \
+            "https://my-proxy.example/v1", "the catalog overrode settings"
+        # detect() reports the truth of this environment
+        rows = {r["rail"]: r for r in P.detect(sb7)}
+        assert rows["xai"]["key_present"] and rows["xai"]["wired"]
+        assert rows["ollama"]["local"] and not rows["ollama"]["wired"]
+        assert not rows["anthropic"]["key_present"] \
+            or os.environ.get("ANTHROPIC_API_KEY")
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    print("[plug] a key in the environment IS a provider: a role named a "
+          "rail with no settings entry and it wired from the verified "
+          "catalog at runtime; keyless rails refuse naming the exact env "
+          "var; cloudflare's missing account id is a named error at wire "
+          "time; an explicit settings entry always outranks the catalog")
     print("PASS test_providers")
 
 

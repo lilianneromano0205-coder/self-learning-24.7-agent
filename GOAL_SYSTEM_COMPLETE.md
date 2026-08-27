@@ -11,9 +11,9 @@ needs it; [ARCHITECTURE.md](ARCHITECTURE.md) and
 
 **Where the claims come from.** Every "this works" in this document names
 the test that proves it, and every protection has been *broken on purpose*
-(mutation testing) to prove the test would notice. 40 mutations across
+(mutation testing) to prove the test would notice. 41 mutations across
 the goal layers (contract, runbook, repair, swarm, mastery, steering,
-freshness, the declared state machine), 40 killed. Full suite: 116
+freshness, the declared state machine), 41 killed. Full suite: 116
 tests, green on six CI platforms (Ubuntu + Windows × Python
 3.11/3.12/3.13).
 

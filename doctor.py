@@ -215,6 +215,19 @@ def check_keys(r, home):
     if not have:
         r.bad("keys", "no provider key set — agents cannot think yet "
                       "(demo.py still works keyless)")
+    # a key in the environment IS a provider now: name any of these rails
+    # in a role and it wires itself from the verified catalog
+    try:
+        import providers as providershub
+        ready = [x["rail"] for x in providershub.detect(home)
+                 if x["key_present"] and not x["wired"]]
+        if ready:
+            r.ok("plug", f"key(s) present for unwired rail(s): "
+                         f"{', '.join(ready)} — any role may name them "
+                         f"directly (auto-wired), or run "
+                         f"`python providers.py add <rail>`")
+    except Exception:
+        pass
 
 
 def readiness(home):
