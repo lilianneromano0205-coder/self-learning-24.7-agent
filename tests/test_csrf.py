@@ -33,19 +33,32 @@ BASE = f"http://127.0.0.1:{PORT}"
 
 
 def call(method, path, body=None, headers=None):
-    """-> (status, payload). Never raises for an HTTP error status."""
+    """-> (status, payload). Never raises for an HTTP error status.
+
+    Retries a handful of times on a TRANSPORT abort: Windows CI runners
+    occasionally kill the first connection to a just-started local server
+    (WinError 10053, seen on windows-3.12) — a socket teardown race, not a
+    panel behavior. Retrying a request that never reached the handler
+    cannot mask a CSRF verdict: every assertion in this file is about the
+    STATUS the panel answers, and an aborted connection has no status."""
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(BASE + path, data=data, method=method)
-    for k, v in (headers or {}).items():
-        req.add_header(k, v)
-    try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            return r.status, json.loads(r.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
+    last = None
+    for attempt in range(4):
+        req = urllib.request.Request(BASE + path, data=data, method=method)
+        for k, v in (headers or {}).items():
+            req.add_header(k, v)
         try:
-            return e.code, json.loads(e.read().decode("utf-8"))
-        except Exception:
-            return e.code, {}
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return r.status, json.loads(r.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            try:
+                return e.code, json.loads(e.read().decode("utf-8"))
+            except Exception:
+                return e.code, {}
+        except (ConnectionError, urllib.error.URLError) as e:
+            last = e
+            time.sleep(0.5 * (attempt + 1))
+    raise last
 
 
 # what a browser attaches to a cross-origin simple request
