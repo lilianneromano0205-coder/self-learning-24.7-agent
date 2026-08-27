@@ -261,13 +261,32 @@ pre.out{background:var(--code);border:1px solid var(--line);border-radius:8px;
   .card{border-radius:12px} table{font-size:12px}
 }
 </style>
+<script>
+/* Theme, decided before first paint so there is no flash. The palette was
+   DESIGNED light (warm paper, serif brand); dark is its twin for people
+   who choose it. The OS preference used to decide silently — an owner who
+   loved the light panel opened it on a dark-mode machine and thought the
+   design was gone. Now: default LIGHT, remembered per browser, switched
+   from the sidebar or the ⌘K palette. */
+(function(){
+  try{
+    var t = localStorage.getItem("fleet_theme") || "light";
+    if (t === "light" || t === "dark")
+      document.documentElement.setAttribute("data-theme", t);
+  }catch(e){}
+})();
+</script>
 </head>
 <body>
 <div id="app">
   <nav id="side">
     <div id="brand"><span class="dot"></span><span class="t">Expert Fleet</span></div>
     <div id="navlist" style="display:contents"></div>
-    <div id="sideFoot">local panel · <span id="footRoot" class="mono"></span></div>
+    <div id="sideFoot">
+      <button class="btn sm ghost" id="themeBtn" onclick="toggleTheme()"
+        style="margin-bottom:6px;width:100%" title="switch between the light
+        and dark palette (remembered in this browser)">◐ theme</button>
+      local panel · <span id="footRoot" class="mono"></span></div>
   </nav>
   <main id="main"><div class="empty">loading…</div></main>
 </div>
@@ -346,6 +365,17 @@ function ago(iso){
   return Math.round(s/86400)+"d ago";
 }
 function usd(x){ return "$"+(+x||0).toFixed(2).replace(/\.00$/,""); }
+function currentTheme(){
+  return document.documentElement.getAttribute("data-theme") || "light";
+}
+function setTheme(t){
+  document.documentElement.setAttribute("data-theme", t);
+  try{ localStorage.setItem("fleet_theme", t); }catch(e){}
+  const b=document.getElementById("themeBtn");
+  if (b) b.textContent = t==="dark" ? "◑ theme: dark" : "◐ theme: light";
+}
+function toggleTheme(){ setTheme(currentTheme()==="dark" ? "light" : "dark"); }
+document.addEventListener("DOMContentLoaded", ()=>setTheme(currentTheme()));
 function toast(m){ const t=document.getElementById("toast");
   t.textContent=m; t.style.display="block";
   clearTimeout(t._h); t._h=setTimeout(()=>t.style.display="none", 2600); }
@@ -407,6 +437,7 @@ const COMMANDS = [
   ["See the knowledge graph", "resources", "S.sub='graph';go('agents')", "python knowledge.py summary experts/<slug>", "graph entities edges atoms memory map visualize"],
   ["Mastery — sealed exams and scores", "resources", "S.sub='mastery';go('agents')", "python mastery.py status <home> <expert> <pack>", "mastery capability pack exam competence transfer retention verdict"],
   ["What may no longer be true?", "resources", "S.sub='teach';go('agents')", "python freshness.py scan experts/<slug>", "freshness expired superseded retracted stale decay"],
+  ["Switch light / dark theme", "nav", "toggleTheme()", "", "theme light dark palette appearance mode color"],
 ];
 async function runPreflight(){
   showDlg("Production preflight", `<p class="muted">auditing this installation…</p>`);
@@ -3465,10 +3496,18 @@ async function renderWork(m){
     <select class="field" id="gExp">${experts.map(e=>`<option>${esc(e)}</option>`).join("")}</select>
     <label class="lb">The goal</label>
     <textarea class="field" id="gGoal" placeholder="e.g. Learn WCAG 2.2 AA and rebuild pricing.html to pass it — or: learn everything in course X to mastery"></textarea>
+    <label class="lb">Definition of done — the graders (one per line, optional but decisive)</label>
+    <textarea class="field" id="gAccept" rows="2" style="font-family:var(--mono,monospace);font-size:11.5px"
+      placeholder="report exists::python -c &quot;import os,sys;sys.exit(0 if os.path.exists('out/report.md') else 1)&quot;"></textarea>
+    <div class="row" style="margin-top:6px">
+      <input class="field" id="gBudget" placeholder="max $ (e.g. 1.00)" style="max-width:140px">
+      <span class="muted" style="font-size:11.5px">each line is <span class="mono">what::command</span> —
+      frozen &amp; sealed before planning, run only by the harness. With graders a goal can end
+      <b>VERIFIED</b>; without them it caps at "achieved" (a judged opinion).</span></div>
     <div class="row" style="margin-top:10px">
       <button class="btn pri" onclick="startGoal()">pursue it</button>
-      <span class="muted" style="font-size:12px">plan → gated work → independent judge →
-      judge re-checked (liars overruled) → re-plan, until every check passes</span></div>
+      <span class="muted" style="font-size:12px">machine path first (zero tokens) → plan → gated work →
+      independent judge → judge overruled if the graders disagree → repair → re-plan, within budget</span></div>
   </div></div>
   <div class="card"><h3>🤝 New team — chosen specialists together</h3><div class="body">
     <label class="lb">Pick 2–4 agents</label>
@@ -3605,8 +3644,17 @@ async function startGoal(){
   const expert=document.getElementById("gExp").value;
   const goalTxt=document.getElementById("gGoal").value.trim();
   if(!goalTxt){toast("write the goal");return;}
-  const r=await api('/api/experts/'+expert+'/goal',{method:"POST",body:{goal:goalTxt}});
-  toast(r.error||"goal engine started — progress appears below");
+  const accept=(document.getElementById("gAccept")?.value||"").split("\n")
+    .map(s=>s.trim()).filter(Boolean);
+  for (const a of accept){
+    if (!a.includes("::")){ toast(`grader needs what::command — "${a.slice(0,40)}"`); return; }
+  }
+  const max_usd=parseFloat(document.getElementById("gBudget")?.value)||0;
+  const r=await api('/api/experts/'+expert+'/goal',{method:"POST",
+    body:{goal:goalTxt, accept, max_usd}});
+  toast(r.error||(accept.length
+    ?`goal started with ${accept.length} frozen grader(s) — it can end VERIFIED`
+    :"goal started — no graders, so it caps at \"achieved\""));
   setTimeout(render, 800);
 }
 async function startTeam(){
@@ -4880,14 +4928,17 @@ async function renderGraphPane(b){
   if (d.error){ b.innerHTML=`<div class="empty">${esc(d.error)}</div>`; return; }
   const ents = Object.entries(d.entities||{});
   b.innerHTML = `
-  <div class="card"><h3>Knowledge graph — ${ents.length} entities, ${(d.edges||[]).length} edges
-    <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:11.5px">
-    size = evidence · color = best source tier (green 1 → red 4) · drag to untangle · click for its atoms</span></h3>
+  <div class="card"><h3>${ents.length
+      ? `Knowledge graph — ${ents.length} entities, ${(d.edges||[]).length} edges
+        <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:11.5px">
+        size = evidence · color = best source tier (green 1 → red 4) · drag to untangle · click for its atoms</span>`
+      : `Knowledge graph`}</h3>
   <div class="body">
     ${ents.length?`<canvas id="kgCanvas" style="width:100%;height:440px;border-radius:8px;
       background:var(--bg2,rgba(0,0,0,.12));cursor:grab"></canvas>`:
-    `<div class="empty">no graph yet — the graph is built from cited atoms in notes;
-      teach this agent something first</div>`}
+    `<div class="empty">no graph yet — it grows from cited atoms as this agent
+      studies. Teach it something (Knowledge tab → teach by link or files),
+      and entities that recur across two or more atoms appear here.</div>`}
     <div id="kgSide" style="margin-top:8px"></div>
   </div></div>
   <div class="grid2">

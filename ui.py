@@ -1123,7 +1123,11 @@ class Handler(BaseHTTPRequestHandler):
                 gid = start_goal(self.home, slug, root, self._data["goal"],
                                  self._data.get("id"),
                                  self._data.get("cycles") or 4,
-                                 self._data.get("criteria"))
+                                 self._data.get("criteria"),
+                                 accept=[str(a) for a in
+                                         (self._data.get("accept") or [])][:12],
+                                 max_usd=float(self._data.get("max_usd")
+                                               or 0.0))
             except ValueError as e:
                 return {"error": str(e)}
             return {"pursuing": gid}

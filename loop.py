@@ -1002,6 +1002,18 @@ class Agent:
         last_err = None
         for prov_name, model in attempts:
             prov = self.provider_cfg(prov_name)
+            # FAIL FAST ON A MISSING KEY, with the fix named. Before this,
+            # a keyless provider got a doomed HTTP round-trip and the owner
+            # read "HTTP 401" — a real error hiding the actual problem. A
+            # named miss also lets the failover ladder move on instantly
+            # instead of burning a network timeout per keyless rung.
+            if not prov.get("type") == "mock" and not prov.get("free") \
+                    and not self._api_key(prov):
+                last_err = (f"{prov_name}: no API key — set "
+                            f"{prov.get('api_key_env', 'its api_key_env')} "
+                            f"in agent.env (python bootstrap.py --key "
+                            f"{prov.get('api_key_env', 'NAME')}=...)")
+                continue
             if prov.get("type") == "mock":
                 t0 = time.time()
                 msg = self._call_mock(prov, messages)
