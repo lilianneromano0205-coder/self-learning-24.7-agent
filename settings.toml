@@ -78,9 +78,14 @@ input_per_mtok = 0.59
 output_per_mtok = 0.79
 
 [providers.nvidia]
-# NVIDIA Build: 100+ hosted models (DeepSeek, Llama, Qwen, Nemotron, vision)
-# FREE with a Developer Program key from build.nvidia.com (nvapi-…, no card,
-# ~40 req/min). OpenAI-compatible, so it drops straight into any role:
+# NVIDIA Build: 100+ hosted models — including frontier-class open weights
+# (DeepSeek V4 Pro, Kimi K2.5, GLM-5.1, Qwen 3.5, Llama 4, Nemotron) — with
+# a FREE Developer Program key from build.nvidia.com (nvapi-…, no card).
+# Verified 2026-08: 1,000 free credits at signup (≈1 credit/request; up to
+# 5,000 on request via their forum), ~40 req/min raisable to 200. Free but
+# BOUNDED — ideal as a frontier-quality escalation/judge rail beside the
+# dirt-cheap lane, not as the only rail for a busy 24/7 fleet.
+# OpenAI-compatible, so it drops straight into any role:
 #   [roles.watcher]  provider = "nvidia"  model = "deepseek-ai/deepseek-v4"
 base_url = "https://integrate.api.nvidia.com/v1"
 api_key_env = "NVIDIA_API_KEY"

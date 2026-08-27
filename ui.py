@@ -598,6 +598,8 @@ POST_PERMISSION = {
     "/api/steer":              "run",
     # re-running the frozen graders is harness work a runner may ask for
     "/api/goal/verify":        "run",
+    # the interrupt button: stopping a pursuit is a run-level power
+    "/api/goal/stop":          "run",
     # retracting a source rewrites what the fleet believes — a build power
     "/api/freshness/retract":  "create_agent",
 }
@@ -2035,6 +2037,48 @@ class Handler(BaseHTTPRequestHandler):
                                          "pursuit"}, 404)
                     return
                 self._json(contractmod.verify(root, gid))
+            elif path == "/api/goal/stop":
+                # THE INTERRUPT BUTTON. Work never stops unless the owner
+                # chooses; when they choose, it stops honestly: the pursuit
+                # driver is terminated and the contract moves
+                # running -> blocked with the reason named — a legal
+                # transition the owner can later resume (blocked ->
+                # running), so an interrupt loses nothing. Tasks already
+                # in flight finish their current step and drain; no new
+                # cycle can start against a blocked contract.
+                import contract as contractmod
+                d = self._data
+                slug = (d.get("expert") or "").strip()
+                gid = (d.get("gid") or "").strip()
+                root = expert_root(self.home, slug)
+                if not (slug and gid and os.path.isdir(
+                        os.path.join(root, "goals", gid))):
+                    self._fail({"error": "expert and gid must name a real "
+                                         "pursuit"}, 404)
+                    return
+                killed = False
+                p = TEAM_PROCS.get(f"goal:{slug}:{gid}")
+                if p is not None and p.poll() is None:
+                    p.terminate()
+                    try:
+                        p.wait(10)
+                    except subprocess.TimeoutExpired:
+                        p.kill()
+                    killed = True
+                state = None
+                try:
+                    state = contractmod.load(root, gid)["state"]
+                    if state in ("running", "ready"):
+                        contractmod.transition(
+                            root, gid, "blocked",
+                            why="interrupted by the owner from the panel")
+                        state = "blocked"
+                except Exception as e:
+                    self._json({"interrupted": killed, "state": state,
+                                "note": f"contract untouched: {e}"[:160]})
+                    return
+                self._json({"interrupted": True, "process_killed": killed,
+                            "state": state})
             elif path == "/api/freshness/retract":
                 import freshness as freshmod
                 d = self._data

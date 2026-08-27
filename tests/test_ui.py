@@ -195,6 +195,23 @@ def main():
               "all readable; a steer lands on the ledger; the graders re-run "
               "on demand and report the failing check by id")
 
+        # THE INTERRUPT BUTTON: the owner stops a pursuit; the contract
+        # moves to blocked with the reason named, and the transition is a
+        # resumable one — an interrupt loses nothing
+        contract.transition(root, "g-ui", "running", why="cycle started")
+        r = api("POST", "/api/goal/stop", {"expert": "deep-learner",
+                                           "gid": "g-ui"})
+        assert r.get("interrupted") and r.get("state") == "blocked", r
+        c = contract.load(root, "g-ui")
+        assert c["state"] == "blocked" and "interrupted by the owner" in \
+            c["state_why"], c
+        assert any(e["kind"] == "state" and e.get("to") == "blocked"
+                   for e in contract.events(root, "g-ui")), (
+            "the interrupt must land on the ledger like every transition")
+        print("[interrupt] the owner's stop button moved a running pursuit "
+              "to BLOCKED with the reason named on the ledger — resumable, "
+              "never silent")
+
         notes_dir = os.path.join(root, "courses", "gcourse", "lessons", "01")
         os.makedirs(notes_dir, exist_ok=True)
         with open(os.path.join(notes_dir, "notes.md"), "w",

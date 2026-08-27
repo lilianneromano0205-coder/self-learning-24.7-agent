@@ -565,6 +565,7 @@ its own holes as carefully as its features.
 | **[GOAL_SPECIALIST.md](GOAL_SPECIALIST.md)** | the goal contract: graders the worker cannot write, and the audit's 115-gap register with honest statuses |
 | [SECURITY.md](SECURITY.md) | trust boundaries, the five authorities, and the seven things deliberately NOT defended |
 | **[CLOUDFLARE.md](CLOUDFLARE.md)** | can this run on Cloudflare? what fits, what cannot, and what it costs |
+| **[deploy/VPS.md](deploy/VPS.md)** | **hosting it 24/7 on a $5 VPS, reachable from anywhere** — systemd, secure access, off-site snapshots |
 | [deploy/README.md](deploy/README.md) | running it in a container: the R2 restore/snapshot lifecycle an ephemeral disk makes mandatory |
 | [deploy/worker/README.md](deploy/worker/README.md) | the Cloudflare Worker: a Durable Object alarm that wakes the fleet, and a REST sandbox |
 | [REFERENCE.md](REFERENCE.md) | every system end to end, and an honest list of limits |

@@ -3635,7 +3635,7 @@ function dlgRole(role){
   showDlg("Point role · "+esc(role), `
     <label class="lb">Provider</label><input class="field" id="rProv" placeholder="openrouter">
     <label class="lb">Model id</label><input class="field" id="rModel"
-      placeholder="e.g. anthropic/claude-sonnet-4.5">`,
+      placeholder="e.g. deepseek/deepseek-v4-flash — any id the provider serves">`,
     [["Cancel","closeDlg()","ghost"],["Save","doRole('"+esc(role)+"')","pri"]]);
 }
 async function doRole(role){
@@ -5027,6 +5027,8 @@ async function renderCockpit(b, gid){
     <span class="pill ${cls}">${esc(st)}</span>
     ${c.state_why?`<span class="muted" style="font-size:12px">${esc(String(c.state_why).slice(0,120))}</span>`:""}
     <span class="spacer"></span>
+    ${["running","ready"].includes(st)?`<button class="btn sm warn"
+      onclick="stopGoal('${esc(gid)}')">⏸ interrupt</button>`:""}
     <button class="btn sm pri" onclick="reverify('${esc(gid)}', this)">▶ re-run the graders</button></div>
   <div class="card"><h3 class="mono" style="font-size:13px">${esc(gid)}</h3><div class="body">
     <div style="font-size:14px;margin-bottom:4px">${esc(c.goal||rec.goal||"")}</div>
@@ -5091,6 +5093,14 @@ async function reverify(gid, btn){
   if (btn){ btn.disabled = true; btn.textContent = "running the graders…"; }
   const r = await api('/api/goal/verify', {method:"POST", body:{expert:S.sel, gid}});
   toast(r.error?r.error:(r.all?"all acceptance tests PASS":`${(r.failed||[]).length} failing: ${(r.failed||[]).join(", ")}`));
+  render();
+}
+async function stopGoal(gid){
+  const r = await api('/api/goal/stop', {method:"POST",
+    body:{expert:S.sel, gid}});
+  toast(r.error ? r.error :
+    "interrupted — the pursuit is BLOCKED with the reason on the ledger; "
+    + "in-flight tasks drain, nothing new starts, and it can be resumed");
   render();
 }
 async function doSteer(gid){
