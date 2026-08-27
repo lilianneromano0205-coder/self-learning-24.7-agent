@@ -27,6 +27,43 @@ Cloudflare Workers AI, or a local Ollama model with no key at all).
 
 ---
 
+## See it
+
+| The fleet, at a glance | A goal's cockpit |
+|---|---|
+| ![Home: blockers with exact fixes, an onboarding checklist that reads real state, and the systems map](docs/panel/home.png) | ![The cockpit: frozen graders with live PASS/FAIL, budget bars, milestones, owner steering, and the replayable ledger](docs/panel/cockpit.png) |
+
+| Competence, measured | The knowledge graph |
+|---|---|
+| ![Mastery: sealed capability packs with pretest → exam lift and retention, against frozen bars](docs/panel/mastery.png) | ![Graph: entities sized by evidence and colored by source tier, load-bearing source concentration, and flagged directive-shaped claims](docs/panel/graph.png) |
+
+*Screenshots of the shipped control panel on a local demo fleet — every
+number in them is computed from files on disk, none is staged.*
+
+---
+
+## The systems at a glance
+
+Nine systems, one law: **"done" is always a mechanical check the worker
+cannot edit.**
+
+| System | What it is | "Done" means |
+|---|---|---|
+| **Task** | one gated job for one role | its done-check command exits 0 |
+| **Goal** | pursued across cycles until frozen graders pass; machine path first, judge overruled if the graders disagree | VERIFIED: every sealed acceptance test passes, run by the harness |
+| **Mission** | a standing objective with success criteria, held on disk across weeks | every criterion met by recorded evidence |
+| **Workflow** | fixed stages with a gate between each | each stage's gate passed, in order |
+| **Team** | 2–4 specialists + a lead; file handoffs; constraint digests | the members' gates + the lead's synthesis |
+| **Learning** | courses → cited notes → spec → closed-book exam | spec 100% · exam ≥ threshold · zero gaps |
+| **Mastery** | sealed capability packs; pretest → study → exam → retention | harness-run validators clear the pack's frozen bars |
+| **Runbooks** | machine-executed procedures, zero model calls, earned trust | every step's verify exits 0 |
+| **Consult** | answers where every claim carries a citation | cites resolve, or NOT IN MY TRAINING |
+
+Start simple: one **Task** with a done-check, then one **Goal** with
+graders. Everything else is these two, scaled.
+
+---
+
 ## The idea in one paragraph
 
 An LLM with a shell is not an employee. It forgets everything between

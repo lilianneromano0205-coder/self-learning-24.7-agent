@@ -586,6 +586,32 @@ function renderNav(){
     + (S.sel?`<button class="navbtn on" onclick="openAgent('${esc(S.sel)}')">
         <span class="ic">▸</span><span class="lbl mono">${esc(S.sel)}</span></button>`:"");
 }
+/* DEEP LINKS — every view has a shareable URL. #work, #proof,
+   #agent/<slug>, #agent/<slug>/goals, #agent/<slug>/goals/<goal-id> …
+   The hash mirrors state one-way on navigation; on load (and back/forward)
+   it is applied before the first render, so a pasted link opens exactly
+   the screen the sender was looking at. */
+function syncHash(){
+  const h = S.sel
+    ? "#agent/" + encodeURIComponent(S.sel) + "/" + (S.sub || "ov")
+      + (S.sub === "goals" && S.goalSel ? "/" + encodeURIComponent(S.goalSel) : "")
+    : "#" + (S.view || "home");
+  if (location.hash !== h){
+    try{ history.replaceState(null, "", h); }catch(e){}
+  }
+}
+function applyHash(){
+  const p = location.hash.replace(/^#/, "").split("/").filter(Boolean);
+  if (!p.length) return;
+  if (p[0] === "agent" && p[1]){
+    S.view = "agents"; S.sel = decodeURIComponent(p[1]);
+    S.sub = p[2] || "ov";
+    S.goalSel = (S.sub === "goals" && p[3]) ? decodeURIComponent(p[3]) : null;
+  } else if (/^[a-z]+$/.test(p[0])){
+    S.view = p[0]; S.sel = null;
+  }
+}
+window.addEventListener("hashchange", ()=>{ applyHash(); render(); });
 function go(view){ S.view=view; S.sel=null; closeCmd(); render(); }
 /* The model policy lives on ONE agent's Advanced tab, because that is where
    it takes effect. From the palette there may be no agent selected, so pick
@@ -600,6 +626,7 @@ function openAgent(slug, sub){ S.view="agents"; S.sel=slug;
   if(sub) S.sub=sub; S.mindPath=null; render(); }
 async function render(){
   renderNav();
+  syncHash();
   const m = document.getElementById("main");
   if (S.sel){ await renderWorkspace(m); return; }
   if (S.view==="home")   await renderHome(m);
@@ -744,6 +771,56 @@ function onboardHtml(sys){
     </div></div>`;
 }
 
+/* THE SYSTEMS MAP — the first thing a serious platform owes a visitor:
+   what the systems ARE, how they differ, and what "done" means in each.
+   One honest line per system; every row ends the same way — a mechanical
+   check the worker cannot edit. */
+function systemsMapHtml(open){
+  const rows = [
+    ["Task","one gated job for one role","a single deliverable you need now",
+     "agent → Work → ＋ task","its done-check command exits 0"],
+    ["Goal","pursued across cycles until frozen graders pass — machine path first (zero tokens), then plan → work → judge, and the judge is overruled if the graders disagree",
+     "an outcome you can test mechanically","Work → New goal",
+     "VERIFIED: every sealed acceptance test passes, run by the harness"],
+    ["Mission","a standing objective with success criteria held on disk, served by many tasks/goals over weeks",
+     "a responsibility, not a deliverable","Home bar → New mission",
+     "every criterion met by recorded evidence, never assertion"],
+    ["Workflow","fixed stages with a gate between each","a repeatable pipeline where predictability beats autonomy",
+     "Work → Workflows","each stage's gate passed, in order"],
+    ["Team","2–4 specialists + a lead; handoffs are files; dropped constraints are detected by digest",
+     "work too broad for one agent","Work → New team",
+     "the members' own gates, plus the lead's synthesis"],
+    ["Learning","courses → cited notes → spec → closed-book exam","building durable expertise it can be examined on",
+     "agent → Knowledge","spec 100% PASS · exam ≥ threshold · zero gaps"],
+    ["Mastery","sealed capability packs the student can neither read nor edit; pretest → study → exam → retention",
+     "proving competence on UNSEEN work","agent → Mastery",
+     "harness-run validators clear the pack's frozen bars"],
+    ["Runbooks","machine-executed procedures with per-step verification and earned trust — zero model calls",
+     "work the fleet has already proven","agent → Skills",
+     "every step's verify exits 0; trust only from 3 verified wins"],
+    ["Consult","answers where every claim carries a citation from its own notes",
+     "questions, not actions","agent → Access → Ask",
+     "cites resolve, or it says NOT IN MY TRAINING"],
+  ];
+  return `<details class="card" ${open?"open":""} style="padding:0">
+  <summary style="cursor:pointer;list-style:none">
+    <h3 style="margin:0">🗺 The systems — what each one is, and when to use it
+      <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:11.5px">
+      nine systems, one law: "done" is always a mechanical check the worker cannot edit</span></h3></summary>
+  <div class="body tablewrap"><table><thead>
+    <tr><th>system</th><th>what it is</th><th>use it when</th><th>where</th><th>"done" means</th></tr></thead>
+    <tbody>${rows.map(([n,w,u,wh,dn])=>`<tr>
+      <td><b>${n}</b></td><td style="max-width:300px">${w}</td>
+      <td style="max-width:180px">${u}</td>
+      <td class="mono" style="font-size:11.5px">${wh}</td>
+      <td style="max-width:220px">${dn}</td></tr>`).join("")}
+    </tbody></table>
+    <p class="muted" style="font-size:12px;margin:8px 0 2px">Start simple: one <b>Task</b>
+    with a done-check, then one <b>Goal</b> with graders. Everything else is these two,
+    scaled. The <button class="btn sm ghost" onclick="go('guide')">📖 full guide</button>
+    walks each system end to end.</p>
+  </div></details>`;
+}
 async function renderHome(m){
   const d = await refreshSys();
   if (!d){ m.innerHTML = `<div class="empty">panel unreachable</div>`; return; }
@@ -766,6 +843,7 @@ async function renderHome(m){
       </div>
     </div>
     ${onboardHtml(d)}
+    ${systemsMapHtml(true)}
     <div class="card"><h3>How it will flow</h3><div class="body">
       <div class="step"><div class="n">1</div><div><h4>Create an agent</h4>
         <p>Trained expert (studies courses deeply, exams included) or quick specialist
@@ -788,6 +866,7 @@ async function renderHome(m){
   <div id="readyBanner"></div>
   <div id="onboardBox">${onboardHtml(d)}</div>
   ${homeCommandBar()}
+  ${systemsMapHtml(false)}
   <div class="card"><h3>Active work<span class="spacer"></span>
     <span class="muted" style="font-weight:400;font-size:11.5px">
     objective · progress against its criteria · what it is doing · what blocks it</span></h3>
@@ -1195,25 +1274,54 @@ function renderGuide(m){
       A course is complete only when spec = 100% PASS, exam ≥ threshold, gaps = none.</p></div></div>
   </div></div>
 
-  <div class="card"><h3>3 · Four ways to make agents work</h3><div class="body">
+  <div class="card"><h3>3 · The work systems — eight ways to make agents work</h3><div class="body">
     <div class="tablewrap"><table>
-      <tr><th>way</th><th>where</th><th>what happens</th></tr>
+      <tr><th>system</th><th>where</th><th>what happens</th></tr>
       <tr><td><b>Task</b></td><td>agent → Board → ＋ task</td>
         <td>one job for one role. Add a <b>done check</b> (a command that must exit 0) —
         the agent cannot claim finished until it passes.</td></tr>
-      <tr><td><b>Goal</b></td><td>Work → Goals</td>
-        <td>pursued until objectively achieved: plan → gated work → judge (different
-        model family) → the judge itself is re-checked and <b>overruled if it lies</b>
-        → re-plan. Learning goals get a study-shaped plan automatically.</td></tr>
-      <tr><td><b>Team</b></td><td>Work → Teams</td>
+      <tr><td><b>Goal</b></td><td>Work → New goal</td>
+        <td>pursued until objectively achieved. The <b>machine path runs first</b>: if a
+        proven runbook or existing artifact already satisfies the frozen graders, it
+        ends VERIFIED with zero model calls. Otherwise: plan → gated work → judge
+        (different model family) → the judge itself is re-checked and <b>overruled if
+        it lies</b> → repair from recorded errors → re-plan, within budget. Give it
+        graders (<span class="mono">what::command</span>) or it caps at "achieved".
+        Mid-flight, the cockpit's <b>steering box</b> guides the next cycle — advice
+        on the ledger, never a grader.</td></tr>
+      <tr><td><b>Mission</b></td><td>Home bar → New mission</td>
+        <td>a standing objective with success criteria, held on disk across weeks.
+        The objective is immutable (amending is recorded); every criterion is met by
+        evidence, never assertion; tasks and goals serve it.</td></tr>
+      <tr><td><b>Workflow</b></td><td>Work → Workflows</td>
+        <td>fixed stages with a gate between each — a pipeline where predictability
+        beats autonomy. A failed gate stops the line; later stages never run on
+        unproven work.</td></tr>
+      <tr><td><b>Team</b></td><td>Work → New team</td>
         <td>pick 2–4 specialists + a lead. The lead splits the goal by who's trained for
         what; handoffs are files; hard constraints are hashed so a dropped one is
         detected, not discovered late.</td></tr>
+      <tr><td><b>Mastery</b></td><td>agent → Mastery</td>
+        <td>a sealed <b>capability pack</b> — an exam the student can neither read nor
+        edit, in a domain of competencies. Pretest (baseline before study) → study →
+        practice → sealed exam → retention retest. MASTERED comes only from harness-run
+        validators against the pack's frozen bars, and the author of a pack never sits
+        its exam.</td></tr>
+      <tr><td><b>Runbooks</b></td><td>agent → Skills</td>
+        <td>procedures the fleet has proven, replayed by the machine with per-step
+        verification — <b>zero model calls</b>. Trust is earned (3 verified wins →
+        proven; the ledger is control-zoned so nothing promotes itself), and
+        <span class="mono">goal.pursue</span> tries this path before spending a token.</td></tr>
       <tr><td><b>Ask</b></td><td>agent → Ask</td>
         <td>consultation for fields no agent can execute (medicine, law…). Every atom it
         cites must exist in its notes; outside them it must say
         <b>NOT IN MY TRAINING</b>. A fabricated citation is mechanically undeliverable.</td></tr>
     </table></div>
+    <p class="muted" style="font-size:12px">One law under all eight: <b>"done" is a
+    mechanical check the worker cannot edit.</b> Pick by shape: a deliverable →
+    Task; a testable outcome → Goal; a responsibility → Mission; a pipeline →
+    Workflow; breadth → Team; durable competence → Learning + Mastery; repetition →
+    Runbooks; a question → Ask.</p>
   </div></div>
 
   <div class="card"><h3>4 · Where everything is logged (nothing is lost)</h3><div class="body">
@@ -4779,6 +4887,7 @@ function paintLive(row){
   const h = new URLSearchParams(location.hash.slice(1));
   if (h.get("t")) { localStorage.setItem("fleet_token", h.get("t"));
     history.replaceState(null,"",location.pathname); }
+  applyHash();               // a pasted deep link opens that exact screen
   render();
   connectEvents();
   S.timer = setInterval(()=>{
