@@ -209,6 +209,15 @@ api_key_env = "HF_TOKEN"
 [providers.openrouter]
 base_url = "https://openrouter.ai/api/v1"
 api_key_env = "OPENROUTER_API_KEY"
+# CEILING prices for the budget breaker, deliberately set ABOVE the value
+# lane's real rates (OpenRouter prices vary per model id). The breaker
+# must be able to fire: overestimating spend trips it early — annoying
+# but safe; a provider with no price records $0 and the breaker never
+# fires — cheap-looking and unprotected. Using :free ids? Real spend is
+# $0 and this ceiling merely counts tokens against your daily cap;
+# tighten per-model if the estimate bothers you.
+input_per_mtok = 1.50
+output_per_mtok = 4.00
 # native_tools = false             # set for models without function calling;
                                    # the agent then uses the grounding header's
                                    # inline-JSON tool format automatically
