@@ -144,7 +144,7 @@ def _run_task(home, expert, pack, task, phase, drive=False, timeout=900):
             "competencies": task.get("competencies") or []}
 
 
-def _refuse_unless_sealed(home, pack):
+def _refuse_unless_sealed(home, pack, expert=None):
     import capability
     v = capability.verify_pack(home, pack)
     if not v["ok"]:
@@ -152,6 +152,20 @@ def _refuse_unless_sealed(home, pack):
             f"refusing to run against pack {pack!r}: {v['why']}"
             + (" — an exam whose graders were edited after sealing grades "
                "nothing." if v.get("tamper") else ""))
+    # THE AUTHOR LAW: file zones stop the student EDITING its exam;
+    # provenance stops the student having WRITTEN it. An expert may draft
+    # packs all day — for other experts. Examining it on its own pack would
+    # measure authorship memory and call it transfer.
+    if expert is not None:
+        try:
+            author = str(capability.load(home, pack).get("author") or "")
+        except Exception:
+            author = ""
+        if author and author == str(expert):
+            raise MasteryError(
+                f"expert {expert!r} authored pack {pack!r} — the student "
+                f"never sits an exam it wrote. Examine a different expert, "
+                f"or have a different author own this pack.")
 
 
 # ------------------------------------------------------------------ stages
@@ -162,7 +176,7 @@ def pretest(home, expert, pack, drive=False, phase="pretest",
     improvement claim is measured against. Recorded however bad: a system
     that only measures after learning can never show it learned."""
     import capability
-    _refuse_unless_sealed(home, pack)
+    _refuse_unless_sealed(home, pack, expert=expert)
     root = os.path.join(home, "experts", expert)
     results = [
         _run_task(home, expert, pack, t, phase, drive=drive,
@@ -184,7 +198,7 @@ def study(home, expert, pack, drive=False, competencies=None,
     never a lap of the whole curriculum (repair's LAW 1, one level up)."""
     import capability
     import discover
-    _refuse_unless_sealed(home, pack)
+    _refuse_unless_sealed(home, pack, expert=expert)
     root = os.path.join(home, "experts", expert)
     queries = capability.study_queries(home, pack)
     todo = {c: q for c, q in queries.items()
@@ -219,7 +233,7 @@ def practice(home, expert, pack, drive=False, timeout=900):
     """Every exercise as a graded contract pursuit. Practice is where the
     model is allowed to fail cheaply and repair is allowed to work."""
     import capability
-    _refuse_unless_sealed(home, pack)
+    _refuse_unless_sealed(home, pack, expert=expert)
     root = os.path.join(home, "experts", expert)
     results = [
         _run_task(home, expert, pack, t, "practice", drive=drive,

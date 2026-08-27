@@ -11,9 +11,11 @@ needs it; [ARCHITECTURE.md](ARCHITECTURE.md) and
 
 **Where the claims come from.** Every "this works" in this document names
 the test that proves it, and every protection has been *broken on purpose*
-(mutation testing) to prove the test would notice. 27 mutations across the
-four goal layers, 27 killed. Full suite: 111 tests, green on six CI
-platforms (Ubuntu + Windows × Python 3.11/3.12/3.13).
+(mutation testing) to prove the test would notice. 40 mutations across
+the goal layers (contract, runbook, repair, swarm, mastery, steering,
+freshness, the declared state machine), 40 killed. Full suite: 116
+tests, green on six CI platforms (Ubuntu + Windows × Python
+3.11/3.12/3.13).
 
 ---
 
@@ -311,6 +313,35 @@ exercises, 3 sealed transfer tasks, 4 stdlib validators).
 graders", "mastered unconditionally", "identical failure signatures
 never stop the loop".
 
+### `steer.py` — the owner's voice in a running pursuit
+Between "let it finish wrong" and "kill it" there was no third option: the
+owner could start a pursuit and stop one, and was mute in between. A steer
+note lands **verbatim** in the planner's context at the top of the next
+cycle (goal.pursue refreshes it per cycle), so a course correction costs a
+sentence instead of a restart. The laws, because a guidance channel is an
+attack surface: (1) advice never grades — a note cannot touch the
+acceptance, the state, or a verdict, and test_steer proves the grader
+results are bit-identical with and without a hostile "mark it verified"
+note; (2) the worker cannot write its own guidance — steering.jsonl and
+steering.md are CONTROL-zoned inside goals/ (a worker that could forge
+"the owner says ship it" has promoted itself to owner); (3) every note is
+a `steered` event on the contract ledger — influence is recorded, never
+invisible; (4) notes are capped and rendered newest-last, per the
+feedback-friction result. *Test:* `test_steer.py` (5 laws).
+
+### `freshness.py` — learned claims age, get superseded, get retracted
+Register #26: a cited atom, once earned, was true forever — remembering by
+embalming. Three additive marks and one ledger fix it: `[expires: date]`
+flags a claim past its window; `[supersedes: C-01]` flags the OLD atom and
+names its successor (lineage kept, like runbook revisions); and
+`org/retractions.jsonl` — CONTROL-zoned, so an agent cannot retract the
+source of a claim it would rather not defend — flags every atom whose
+`[src:]` contains a retracted ref. `scan()` reads the SAME notes files
+citecheck validates (one walker — the two-walkers bug stays fixed) and
+FLAGS, never deletes. `check_doi()` live-probes Crossref's update-to
+relation for retraction notices, keyless; the verdict is a pure function
+tested offline. *Test:* `test_freshness.py`.
+
 ### `universal.py` + `discover.py` — readiness and learning
 Before pursuing, `universal.assess` answers "can this expert do this yet,
 and if not, what exactly is missing?" from mechanical probes — capability
@@ -332,7 +363,7 @@ decide done; retries, escalation between model tiers, cost brakes per task
 and per day, Retry-After honored with jitter, graceful SIGTERM drain,
 context compiled fresh every task (measured flat at ~1083 tokens while
 fleet history grows). **The five authorities**: Execution (every subprocess
-in 83 modules flows through one gateway — audited, 0 violations), File
+in 85 modules flows through one gateway — audited, 0 violations), File
 (zones: workspace/control/runtime), Credential (4 sources, excluded from
 packaging/backups/model-visible env), Model Gateway (every call metered and
 ledgered), Effect (external side effects get idempotency keys and
@@ -411,13 +442,14 @@ the outside reference `verify()` checks the contract against.
 2. **Live learning at scale.** Discovery works live (tested against the
    real catalogues); *studying* — notes, atoms, exams — needs a model key.
    Multi-GB, multi-hour ingestion is unproven.
-3. **Capability packs, the ontology half** (the audit's E51): the pack
-   *artifact* and the mastery loop now exist (`capability.py`,
-   `mastery.py`, `packs/responsive-pricing/`, `test_mastery.py`) — sealed
-   exams, harness-only verdicts, retention retests. Still open: domain
-   ontologies, typed operators, HTN methods, and a **live** mastery run
-   against a real provider (the shipped tests prove the laws with a rigged
-   provider; the pretest→exam lift with a real model is unmeasured).
+3. **Capability packs — what remains of E51**: the pack artifact, the
+   mastery loop, pack DRAFTING for new domains (`capability.py draft` +
+   the author law), typed runbook applicability (`when.not`,
+   `when.requires`) and HTN-style composition (`{"run": sub}` steps) all
+   exist and are mutation-tested. Still open: full domain ontologies, and
+   a **live** mastery run against a real provider (the shipped tests
+   prove the laws with a rigged provider; the pretest→exam lift with a
+   real model is unmeasured).
 4. **Cross-machine scale.** Leases are single-host; distributed fencing
    tokens, multi-host reducers, and horizontal scaling are not built.
 5. **Time-scale evidence.** Endurance is minutes; 24h/7d/30d soaks, DST

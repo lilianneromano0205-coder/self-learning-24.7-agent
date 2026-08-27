@@ -37,7 +37,8 @@ CORE_MODULES = ["loop", "ingest", "verify", "memcheck", "recall", "citecheck",
                 "curriculum", "evidence", "research",
                 "confidence", "cases",
                 "goal", "contract", "runbook", "repair", "swarm",
-                "discover", "universal", "grants", "capability", "mastery"]
+                "discover", "universal", "grants", "capability", "mastery",
+                "steer", "freshness"]
 PROMPTS = ["constitution.md", "_grounding.md", "ripper.md", "watcher.md",
            "librarian.md", "practitioner.md", "examiner.md", "student.md",
            "reflector.md", "consultant.md"]

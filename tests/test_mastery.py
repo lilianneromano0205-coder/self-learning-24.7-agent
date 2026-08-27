@@ -107,6 +107,7 @@ def main():
     check_validation_demands_sealed_coverage(home)
     capability.freeze(home, PACK)
     check_the_anti_self_exam_law(home, root)
+    check_the_author_law_and_drafts(home)
     check_pretest_baseline_is_recorded(home, root)
     check_grading_is_mechanical_and_model_free(home, root)
     check_verdict_only_from_the_graders(home, root)
@@ -190,6 +191,45 @@ def check_the_anti_self_exam_law(home, root):
           "transfer tasks or validators (they live outside its root), and "
           "swapping a validator for `exit 0` after the freeze is a TAMPER "
           "verdict that refuses to grade anything")
+
+
+def check_the_author_law_and_drafts(home):
+    """A drafted pack is a SHAPE that refuses to freeze until the exam is
+    written; a sealed pack records its author, and mastery refuses to
+    examine the author on their own pack — the student never sits an exam
+    it wrote, enforced by provenance and not just file zones."""
+    r = capability.draft(home, "novel-domain", "some new craft",
+                         {"first-steps": "how this craft begins"},
+                         author="drafter")
+    assert r["problems"] and any("TODO" in p for p in r["problems"]), r
+    try:
+        capability.freeze(home, "novel-domain")
+        raise AssertionError("a pack of TODOs froze — an exam nobody wrote "
+                             "became a diploma mill")
+    except capability.PackError:
+        pass
+    # a sealed pack authored by the student refuses to examine the student
+    authored = "authored-by-student"
+    shutil.copytree(os.path.join(home, "packs", PACK),
+                    os.path.join(home, "packs", authored))
+    pj = os.path.join(home, "packs", authored, "pack.json")
+    pk = json.load(open(pj, encoding="utf-8"))
+    pk["name"] = authored
+    pk["author"] = "student"
+    with open(pj, "w", encoding="utf-8") as f:
+        json.dump(pk, f)
+    row = capability.freeze(home, authored)
+    assert row.get("author") == "student", row
+    try:
+        mastery.pretest(home, "student", authored, timeout=12)
+        raise AssertionError("the student sat an exam the student wrote")
+    except mastery.MasteryError as e:
+        assert "authored" in str(e), e
+    # a DIFFERENT author's pack passes the same gate
+    mastery._refuse_unless_sealed(home, PACK, expert="student")
+    print("[author] a drafted pack (all TODOs) cannot freeze; a sealed "
+          "pack records its author; the author is refused as its own "
+          "student by name, and a different expert passes the same gate")
 
 
 def check_pretest_baseline_is_recorded(home, root):

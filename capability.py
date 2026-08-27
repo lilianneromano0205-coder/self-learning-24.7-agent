@@ -141,6 +141,9 @@ def _task_problems(t, kind, seen_ids):
         for a in acc:
             if not isinstance(a, dict) or not str(a.get("check") or "").strip():
                 out.append(f"{kind} {tid}: malformed acceptance entry")
+            elif "TODO" in str(a.get("check")):
+                out.append(f"{kind} {tid}: acceptance still carries a TODO "
+                           f"— a drafted pack, not an exam")
     comps = t.get("competencies")
     if not isinstance(comps, list) or not comps:
         out.append(f"{kind} {tid}: names no competencies — a failure here "
@@ -166,6 +169,11 @@ def validate(home, name, pk=None):
         if not isinstance(v, (int, float)) or not (0 < v <= 1):
             out.append(f"mastery.{k} must be a fraction in (0, 1] — a pack "
                        f"with no bar is an exam nobody can fail")
+    author = pk.get("author")
+    if author is not None and (not isinstance(author, str)
+                               or not author.strip()):
+        out.append("author, when present, must name who wrote this exam — "
+                   "provenance the student law checks against")
     ex = _tasks_in(os.path.join(d, "exercises"))
     tr = _tasks_in(os.path.join(d, "transfer"))
     if not ex:
@@ -228,8 +236,13 @@ def freeze(home, name):
     digest = _content_hash(home, name)
     sp = os.path.join(home, SEALS)
     os.makedirs(os.path.dirname(sp), exist_ok=True)
+    try:
+        author = _read_json(os.path.join(pack_dir(home, name),
+                                         "pack.json")).get("author")
+    except (OSError, ValueError):
+        author = None
     row = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "pack": str(name),
-           "hash": digest}
+           "hash": digest, "author": str(author or "owner")}
     with open(sp, "a", encoding="utf-8") as f:
         f.write(json.dumps(row) + "\n")
     return row
@@ -303,6 +316,58 @@ def study_queries(home, name):
     return out
 
 
+# ------------------------------------------------------------------ drafts
+
+def draft(home, name, domain, competencies, author="owner"):
+    """A pack SKELETON for a NEW domain — the entry point for 'become
+    excellent at X' where no pack exists yet.
+
+    Competencies are named, curriculum stubs point discover.py at real
+    study, and every acceptance check is a TODO — so validate() REFUSES the
+    draft until a person or a different expert fills the exam in (the same
+    honesty as runbook drafts: the shape is recovered, the substance is
+    earned). The author is RECORDED, because the law lives one level down:
+    mastery refuses to examine a student on a pack that student authored.
+    Drafting your own curriculum is fine; drafting your own diploma is
+    structurally impossible."""
+    if not isinstance(competencies, dict) or not competencies:
+        raise PackError("competencies must be a non-empty {name: study} map")
+    d = pack_dir(home, name)
+    if os.path.exists(os.path.join(d, "pack.json")):
+        raise PackError(f"pack {name!r} already exists — draft a new name")
+    os.makedirs(os.path.join(d, "exercises"), exist_ok=True)
+    os.makedirs(os.path.join(d, "transfer"), exist_ok=True)
+    os.makedirs(os.path.join(d, "validators"), exist_ok=True)
+    pk = {"name": str(name), "version": 1, "domain": str(domain),
+          "author": str(author),
+          "competencies": {
+              str(c): {"study": str(s), "why": "TODO: why this matters"}
+              for c, s in competencies.items()},
+          "mastery": {"practice_pass": 0.75, "transfer_pass": 0.7,
+                      "note": "the bar is the validators' MECHANICAL FLOOR"}}
+    with open(os.path.join(d, "pack.json"), "w", encoding="utf-8") as f:
+        json.dump(pk, f, indent=1)
+    with open(os.path.join(d, "curriculum.json"), "w", encoding="utf-8") as f:
+        json.dump({c: {"study": s} for c, s in competencies.items()}, f,
+                  indent=1)
+    comps = sorted(competencies)
+    stub_accept = [{"id": "A1", "what": "TODO: what this proves",
+                    "check": "TODO: a command exiting 0 when done"}]
+    with open(os.path.join(d, "exercises", "e1.json"), "w",
+              encoding="utf-8") as f:
+        json.dump({"id": "e1", "goal": f"TODO: a practice task in {domain}",
+                   "competencies": comps, "accept": stub_accept}, f, indent=1)
+    for i in range(1, MIN_TRANSFER + 1):
+        with open(os.path.join(d, "transfer", f"t{i}.json"), "w",
+                  encoding="utf-8") as f:
+            json.dump({"id": f"t{i}",
+                       "goal": f"TODO: an UNSEEN task examining {domain}",
+                       "competencies": comps, "accept": stub_accept},
+                      f, indent=1)
+    return {"pack": str(name), "dir": d, "author": str(author),
+            "problems": validate(home, name)}
+
+
 # --------------------------------------------------------------------- CLI
 
 def main():
@@ -312,6 +377,12 @@ def main():
     for c in ("validate", "freeze", "verify", "show"):
         p = sub.add_parser(c)
         p.add_argument("home"); p.add_argument("pack")
+    pd = sub.add_parser("draft")
+    pd.add_argument("home"); pd.add_argument("pack")
+    pd.add_argument("--domain", required=True)
+    pd.add_argument("--competency", action="append", required=True,
+                    metavar="NAME=STUDY_QUERY")
+    pd.add_argument("--author", default="owner")
     a = ap.parse_args()
     if a.cmd == "validate":
         problems = validate(a.home, a.pack)
@@ -332,6 +403,17 @@ def main():
     elif a.cmd == "show":
         pk = load(a.home, a.pack)
         print(json.dumps(pk, indent=1))
+    elif a.cmd == "draft":
+        comps = {}
+        for spec in a.competency:
+            c, _, q = spec.partition("=")
+            comps[c.strip()] = q.strip() or c.strip()
+        r = draft(a.home, a.pack, a.domain, comps, author=a.author)
+        print(f"drafted {r['pack']} at {r['dir']} (author {r['author']})")
+        print(f"  {len(r['problems'])} TODO(s) before it can freeze — the "
+              f"draft is a shape, the exam is still to be written:")
+        for p in r["problems"][:8]:
+            print(f"    {p}")
 
 
 if __name__ == "__main__":

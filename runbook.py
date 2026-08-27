@@ -73,6 +73,8 @@ PROMOTE_WINS = 3           # distinct all-verified runs before PROVEN
 QUARANTINE_LOSSES = 2      # consecutive failed runs before QUARANTINED
 MAX_STEPS = 20             # a procedure longer than this is several procedures
 STEP_TIMEOUT = 300
+PROBE_TIMEOUT = 30         # when.requires probes are observations, not work
+MAX_COMPOSE = 3            # composition depth; deeper is a design smell
 
 _WORD = re.compile(r"[a-z0-9]{3,}")
 STOP = {"the", "and", "for", "with", "into", "from", "that", "this", "are",
@@ -127,6 +129,29 @@ def validate(rb):
     if not isinstance(trig, list) or not trig or \
             not all(isinstance(t, str) and t.strip() for t in trig):
         out.append("triggers must be a non-empty list of words")
+    # APPLICABILITY, typed (the audit's P1: keyword triggers alone are
+    # shallow). `when.not` are negative triggers — words whose presence in a
+    # goal means this procedure is the WRONG tool however well the positive
+    # triggers fired. `when.requires` are observe-probes — commands that must
+    # exit 0 for the procedure to be applicable HERE AND NOW (the tool is
+    # installed, the input file exists, the service answers). Both optional;
+    # a runbook without `when` behaves exactly as before.
+    if "when" in rb:
+        w = rb.get("when")
+        if not isinstance(w, dict):
+            out.append("`when` must be an object")
+        else:
+            nt = w.get("not") or []
+            if not isinstance(nt, list) or \
+                    not all(isinstance(t, str) and t.strip() for t in nt):
+                out.append("when.not must be a list of words")
+            req = w.get("requires") or []
+            if not isinstance(req, list) or \
+                    not all(isinstance(c, str) and c.strip() for c in req):
+                out.append("when.requires must be a list of probe commands")
+            elif any("TODO" in c for c in req):
+                out.append("when.requires still carries a TODO — a draft, "
+                           "not a runbook")
     steps = rb.get("steps")
     if not isinstance(steps, list) or not steps:
         out.append("steps must be a non-empty list")
@@ -137,6 +162,19 @@ def validate(rb):
         for i, st in enumerate(steps, 1):
             if not isinstance(st, dict):
                 out.append(f"step {i} is not an object")
+                continue
+            # COMPOSITION (the HTN-methods half of the audit's E51): a step
+            # may be `{"run": "<sub-runbook>"}` instead of do+verify — the
+            # sub-runbook's own per-step verifies are the proof, and its own
+            # earned trust still gates it at execution time.
+            sub = str(st.get("run") or "").strip()
+            if sub:
+                if not _slug_ok(sub):
+                    out.append(f"step {i}: `run` must name a runbook slug")
+                if str(st.get("do") or "").strip() \
+                        or str(st.get("verify") or "").strip():
+                    out.append(f"step {i}: a step is EITHER do+verify OR "
+                               f"run — both is two steps wearing one number")
                 continue
             if not str(st.get("do") or "").strip():
                 out.append(f"step {i} has no `do` command")
@@ -265,13 +303,50 @@ def match(root, goal_text, allow_candidates=False):
             rb = load(root, name)
         except (RunbookError, OSError, ValueError):
             continue
+        # negative triggers veto: a goal that names what this procedure is
+        # WRONG for does not get it, however well the positive words fired
+        neg = [t for t in ((rb.get("when") or {}).get("not") or [])
+               if _terms(t) and _terms(t) <= gw]
+        if neg:
+            continue
         fired = [t for t in rb["triggers"] if _terms(t) and _terms(t) <= gw]
         if fired:
             hits.append({"name": name, "status": st, "fired": fired,
-                         "steps": len(rb["steps"])})
+                         "steps": len(rb["steps"]),
+                         "requires": len((rb.get("when") or {})
+                                         .get("requires") or [])})
     hits.sort(key=lambda h: (0 if h["status"] == "proven" else 1,
                              -len(h["fired"])))
     return hits
+
+
+def applicable(root, name, cfg=None):
+    """-> {"ok", "blocked_by": [...]}. Runs the runbook's `when.requires`
+    observe-probes through the Execution Authority (as gates, like every
+    verify). Matching says "this procedure is ABOUT this goal"; applicable
+    says "this procedure can run HERE AND NOW" — the audit's point was that
+    the first was standing in for the second. No `requires` means
+    unconditionally applicable, which is what every existing runbook says."""
+    import execution
+    try:
+        rb = load(root, name)
+    except (RunbookError, OSError, ValueError) as e:
+        return {"ok": False, "blocked_by": [f"unloadable: {e}"[:160]]}
+    req = (rb.get("when") or {}).get("requires") or []
+    cfg = cfg or _cfg(root)
+    blocked = []
+    for cmd in req:
+        try:
+            rc, _o, err = execution.run(
+                "gate", cmd, root, cfg=cfg, role="practitioner",
+                timeout=PROBE_TIMEOUT,
+                reason=f"runbook {name} applicability probe")
+            if rc != 0:
+                blocked.append(f"`{cmd[:80]}` exited {rc}"
+                               + (f": {err[:80]}" if err else ""))
+        except execution.Refused as e:
+            blocked.append(f"`{cmd[:80]}` refused: {str(e)[:80]}")
+    return {"ok": not blocked, "blocked_by": blocked}
 
 
 # --------------------------------------------------------------- execution
@@ -285,7 +360,8 @@ def _cfg(root):
         return {}
 
 
-def run(root, name, allow_candidate=False, cfg=None, record_outcome=True):
+def run(root, name, allow_candidate=False, cfg=None, record_outcome=True,
+        _stack=None):
     """Execute one runbook, step by step, verifying each. ZERO model calls.
 
     Returns {"ok", "steps": [...], "stopped_at", "why"}. Every `do` runs as
@@ -294,8 +370,23 @@ def run(root, name, allow_candidate=False, cfg=None, record_outcome=True):
     gets exactly the containment a live model command gets. A step whose
     verify fails STOPS the run: a procedure that cannot prove its last step
     must not take its next one.
+
+    A `{"run": "<sub>"}` step executes another runbook in place (the HTN
+    half): the sub keeps its OWN trust gate (a proven parent cannot smuggle
+    a quarantined child), records its own outcome, and a cycle or a depth
+    past MAX_COMPOSE stops the run with the chain named.
     """
     import execution
+    stack = list(_stack or [])
+    if name in stack:
+        return {"ok": False, "steps": [], "stopped_at": 0,
+                "why": f"composition cycle: {' -> '.join(stack + [name])} — "
+                       f"a procedure that contains itself never finishes"}
+    if len(stack) >= MAX_COMPOSE:
+        return {"ok": False, "steps": [], "stopped_at": 0,
+                "why": f"composition deeper than {MAX_COMPOSE} "
+                       f"({' -> '.join(stack + [name])}) — flatten it"}
+    stack.append(name)
     rb = load(root, name)
     st = status(root, name)
     if st == "quarantined":
@@ -312,6 +403,18 @@ def run(root, name, allow_candidate=False, cfg=None, record_outcome=True):
     done, why, stopped = [], "", 0
     ok = True
     for i, step in enumerate(rb["steps"], 1):
+        sub = str(step.get("run") or "").strip()
+        if sub:
+            rr = run(root, sub, allow_candidate=allow_candidate, cfg=cfg,
+                     record_outcome=record_outcome, _stack=stack)
+            done.append({"n": i, "ran": sub, "ok": rr["ok"],
+                         "why": (rr["why"] or "")[:200]})
+            if not rr["ok"]:
+                ok, stopped = False, i
+                why = (f"step {i} ran runbook {sub!r} and it stopped: "
+                       f"{(rr['why'] or '')[:160]}")
+                break
+            continue
         t = int(step.get("timeout") or STEP_TIMEOUT)
         try:
             rc, _o, err = execution.run(
@@ -414,7 +517,23 @@ def reconcile(root, gid, allow_candidates=False, max_rounds=3):
                                f"fail ({', '.join(vr['failed'])}) — this "
                                f"is the frontier, where the model or the "
                                f"owner is the right tool"}
-        chosen = cands[0]["name"]
+        # matching says "about this goal"; APPLICABLE says "can run here
+        # and now" — probe each match's when.requires and take the best
+        # match that can actually run, naming the ones that cannot
+        chosen, skipped = None, []
+        for cand in cands:
+            ap = applicable(root, cand["name"])
+            if ap["ok"]:
+                chosen = cand["name"]
+                break
+            skipped.append(f"{cand['name']} needs "
+                           f"{'; '.join(ap['blocked_by'])[:120]}")
+        if chosen is None:
+            return {"verified": False, "rounds": rounds,
+                    "blocked": f"{len(cands)} runbook(s) match this goal "
+                               f"but none is applicable here: "
+                               f"{' | '.join(skipped)[:400]} — satisfy a "
+                               f"precondition or take the frontier path"}
         rr = run(root, chosen, allow_candidate=allow_candidates)
         contract.event(root, gid, "runbook_applied", runbook=chosen,
                        ok=rr["ok"], round=rnd,

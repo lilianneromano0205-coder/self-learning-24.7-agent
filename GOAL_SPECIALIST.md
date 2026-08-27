@@ -361,7 +361,7 @@ audit's own recommendation in every case).
 | 23 | PARTIAL | 11 keyless curated rails (`discover.py`), relevance-gated, tier-ranked, tested live and offline. A governed general-web frontier: OPEN. |
 | 24 | PARTIAL→IMPROVED | **Discovery authority split from evidence quality** (second audit's P0, verified against Crossref's own membership page): DOI resolvers/Crossref/DataCite and preprint servers are now tier 2 provenance — real, citable, learnable, but never "normative"; DOAJ/PubMed keep tier 1 with reasons naming the actual review bar. `test_sources.py`, written red-first. Per-domain policies beyond this: OPEN. |
 | 25 | PARTIAL | Conflicts module catches polarity/numeric disagreement; claim-level entailment is OPEN and stated as a blind spot in EVIDENCE.md. |
-| 26 | OPEN | No retraction feeds, TTLs, or supersession chains for learned claims. |
+| 26 | OPEN→IMPROVED | `freshness.py`: expiry marks (`[expires:]`), supersession chains (`[supersedes:]`, lineage kept), and a CONTROL-zoned retraction ledger that flags every atom citing a retracted ref fleet-wide — flags, never deletions. Live Crossref retraction probe (`freshness.py doi`), verdict logic pure and tested offline (`test_freshness.py`; mutation killed). Still open: automated retraction FEEDS (polling on a schedule) and TTL defaults per source type. |
 | 27 | OPEN | Semantic contradiction beyond text rules — needs typed claims. |
 | 28 | PARTIAL | Crawl bounds and rate limiting exist in ingest; a persistent per-origin frontier with RFC 9309 evaluation: OPEN. |
 | 29 | PARTIAL | User-supplied media and permitted caption paths work via yt-dlp where installed; universal video learning is not claimed. |
@@ -396,7 +396,7 @@ audit's own recommendation in every case).
 
 | # | Status | The honest state |
 |---:|---|---|
-| 51 | PARTIAL→IMPROVED | Runbooks ARE the SOP half of a capability pack; **Capability Packs now exist as artifacts** (`capability.py`): sealed exam definitions (competencies, exercises, transfer tasks, stdlib validators) living OUTSIDE the expert's root, content-hashed like contracts, with `packs/responsive-pricing/` shipped as the first. The mastery loop (`mastery.py`) runs pretest → study → practice → sealed exam → diagnose → bounded targeted re-study → verdict → distill → retest; verdicts come only from harness-run graders (`test_mastery.py`, 9 laws; 5/5 mutations killed). The ontology/operators/HTN-methods half remains OPEN. |
+| 51 | PARTIAL→IMPROVED | Runbooks ARE the SOP half of a capability pack; **Capability Packs now exist as artifacts** (`capability.py`): sealed exam definitions (competencies, exercises, transfer tasks, stdlib validators) living OUTSIDE the expert's root, content-hashed like contracts, with `packs/responsive-pricing/` shipped as the first. The mastery loop (`mastery.py`) runs pretest → study → practice → sealed exam → diagnose → bounded targeted re-study → verdict → distill → retest; verdicts come only from harness-run graders (`test_mastery.py`, 9 laws; 5/5 mutations killed). **Typed operators and HTN methods now exist in runbooks**: `when.not` negative triggers, `when.requires` observe-probes gating applicability at reconcile time, and composite `{"run": sub}` steps with per-sub trust gates and cycle refusal (`test_runbook.py` [applicable]+[compose]; 3/3 mutations killed). **Pack drafting** (`capability.py draft`) + the author law (`test_mastery.py` [author]) open the road into NEW domains. Full domain ontologies remain OPEN. |
 | 52 | PARTIAL | Plans parse to bounded milestones; missing-verifier milestones get evidence-note gates. Full typed-DAG static checks: OPEN. |
 | 53 | PARTIAL | Capability probes are live (toolbox scans on every assess); goal-implication inference is a keyword table, stated as a blind spot. |
 | 54 | OPEN | No semantic state estimation with freshness/confidence. |
@@ -407,7 +407,7 @@ audit's own recommendation in every case).
 | 59 | PARTIAL | Teamwork protocol has typed handoffs; loss scoring: OPEN. |
 | 60 | PARTIAL | Best-of-N candidates are gate-scored with strict-win promotion (tested); a general evidence-reading reducer: OPEN. |
 | 61 | OPEN | Single-host leases are real and tested; multi-host fencing tokens are not built. |
-| 62 | OPEN | No TLA+/SPIN models. Highest-value target: the contract state machine + approval/cancellation. |
+| 62 | OPEN→IMPROVED | The contract state machine is now EXHAUSTIVELY probed instead of sampled: all |S|² transition attempts against the real `transition()`, graph properties (verified's only door is `running`; terminals exitless; all states reachable), seeded ledger-replay walks, forged-snapshot detection (`test_contract_model.py`; a loosened-table mutation killed). A full TLA+/SPIN model with temporal properties remains OPEN. |
 | 63 | **CLOSED** (goal system) | The contract outranks self-written graders and a lying judge, end-to-end, 8/8 mutations killed. Platform-wide reward-hack drills beyond goals: PARTIAL. |
 | 64 | PARTIAL | Judge on a different model family; harness runs all checks itself; diverse-provider verification pending keys. |
 | 65 | OPEN | Promotion evidence is seeded/synthetic until live work exists. |

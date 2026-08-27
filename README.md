@@ -3,7 +3,7 @@
 **A file-backed, stdlib-only platform for building expert AI agents that work
 continuously, prove what they did, and remember what they learned.**
 
-83 Python modules · 113 acceptance tests · one HTML control panel · no
+85 Python modules · 116 acceptance tests · one HTML control panel · no
 database, no framework, no build step. Python 3.11+ and your own API keys.
 
 ```bash
@@ -35,7 +35,7 @@ claim it works, and what is not proven.
 
 ---
 
-## The eight ideas you need to know
+## The eleven ideas you need to know
 
 **1. "Done" is a command, not an opinion.**
 A task can carry a definition of done. When the model calls `finish_task`,
@@ -57,7 +57,7 @@ control defends the path its author was thinking about, and does not know
 about the other paths.* Six places executed shell; one was tested. The answer
 is one mandatory gateway per kind of power — Execution, File, Credential,
 Model Gateway, Effect — and `python execution.py --audit` fails the build if
-any module bypasses one. Today: **0 violations across 83 modules**, 16 declared platform-internal.
+any module bypasses one. Today: **0 violations across 85 modules**, 16 declared platform-internal.
 
 **4. Proof is derived, never claimed.**
 Six levels from SPEC to PRODUCTION PROVEN, computed from evidence bound to a
@@ -139,7 +139,17 @@ all-verified wins promote candidate → proven; the trust ledger is
 CONTROL-zoned, so a runbook cannot promote itself and a self-declared
 `"status": "proven"` is ignored). `runbook.py reconcile` is the model-free
 goal loop — observe the frozen acceptance tests, apply the matching proven
-runbook, re-verify, repeat — and `goal.pursue` tries it **before** spending a
+runbook, re-verify, repeat. Applicability is **typed**, not just keyword
+triggers: a
+runbook can carry `when.not` (negative triggers — words that mean this is
+the wrong tool however well the positive words fired) and `when.requires`
+(observe-probes that must exit 0 *here and now* — the tool is installed, the
+input exists); reconcile takes the best match that can actually run and
+names the unmet precondition when none can. And runbooks **compose**: a
+step may be `{"run": "sub-runbook"}` — the sub keeps its own earned-trust
+gate (a proven parent cannot smuggle a quarantined child), records its own
+wins, and a cycle or over-deep chain stops the run with the chain named.
+`goal.pursue` tries all of this **before** spending a
 single model cycle. Proven end to end: a pursuit completed VERIFIED with zero
 tasks created, against a mock provider rigged to fail any task instantly. The
 division of labour is the economics: the model plans and recovers at the
@@ -183,12 +193,50 @@ it is recorded with its honest ceiling: a mechanical floor, not taste.
 ```bash
 python mastery.py run    <home> <expert> responsive-pricing --drive
 python mastery.py retest <home> <expert> responsive-pricing   # retention
+python capability.py draft <home> new-domain --domain "what it is" \
+    --competency reading="study query"     # a pack skeleton for a NEW domain
+```
+
+A pack records its **author**, and mastery refuses to examine the author on
+its own pack — the student never sits an exam it wrote, enforced by
+provenance on top of the file zones. A drafted pack is all TODOs and
+refuses to freeze until a person or a *different* expert writes the exam in.
+
+**10. You can steer a running pursuit — and steering is never a grader.**
+Between "let it finish wrong" and "kill it" there is now a third option:
+`steer.py` (and the panel's cockpit) records a note that lands verbatim in
+the planner's context at the top of its **next cycle**. The laws: advice
+never touches the acceptance tests or the verdict (a note saying "mark it
+verified" is a note the graders never read); the worker cannot write its
+own guidance channel (CONTROL-zoned — a worker that could forge "the owner
+says ship it" would have promoted itself to owner); and every note lands on
+the contract ledger as a `steered` event, because influence on a pursuit
+must never be invisible.
+
+```bash
+python steer.py add experts/builder <goal-id> "mobile first — most visits are phones"
+```
+
+**11. Learned claims age — and the platform shows the decay.**
+A cited atom, once earned, used to be true forever. `freshness.py` adds
+expiry (`[expires: 2026-01-01]`), supersession (`[supersedes: C-01]` — the
+old atom is flagged, its successor named, lineage kept), and a
+**retraction ledger**: retract a source ref once and every atom citing it
+is flagged fleet-wide. Flags, never deletions — the owner decides.
+The ledger is CONTROL-zoned, so an agent cannot retract the source of a
+claim it would rather not defend. `freshness.py doi <doi>` live-probes
+Crossref for retraction notices, keyless.
+
+```bash
+python freshness.py scan    experts/builder
+python freshness.py retract experts/builder "10.1234/withdrawn" --why "publisher notice"
 ```
 
 **[GOAL_SPECIALIST.md](GOAL_SPECIALIST.md)** is the deep account: the
-architecture, the evidence (32/32 mutations killed across the contract,
-runbook, repair, swarm and mastery layers), and the audit's complete
-115-gap register with an honest status for every row.
+architecture, the evidence (40/40 mutations killed across the contract,
+runbook, repair, swarm, mastery, steering and freshness layers), and
+the audit's complete 115-gap register with an honest status for every
+row.
 
 ---
 
@@ -378,6 +426,27 @@ Center where clicking a badge shows the evidence and the command that
 reproduces it, and a failure view that names *which part* failed — the
 verifier, the platform, the provider, the budget, the command, the agent, or
 you.
+
+The panel goes as deep as the system does. Per agent:
+
+- **Goal cockpit** — every pursuit opened whole: the frozen contract with
+  each grader's live PASS/FAIL, budget bars, the cycle's milestones, the
+  append-only ledger replayed event by event (with per-task traces), a
+  **re-run-the-graders** button, and a **steering box** whose notes reach
+  the planner's next cycle — advice on the record, never a grader.
+- **Graph** — the knowledge graph drawn live on a canvas (no libraries):
+  entities sized by evidence and colored by best source tier, drag to
+  untangle, click a node for its cited atoms; beside it, the
+  **load-bearing sources** (concentration risk — one retraction here takes
+  an area of knowledge with it) and the claims resting below the learn bar.
+- **Mastery** — every capability pack with its seal state (SEALED / TAMPER
+  / draft-with-TODOs), author, competencies, and the honest score line:
+  pretest → exam (**the measured lift**) → retention, against the pack's
+  frozen bars.
+- **Knowledge → Freshness** — expired, superseded and retracted claims
+  flagged with reasons, and a retraction can be recorded from the panel.
+- **Trace** — any task's whole life: every tool call, cost, token count,
+  gate refusal and error, in order.
 
 ⌘K opens a palette where every action shows its equivalent CLI command, so
 the panel teaches the terminal instead of hiding it.

@@ -84,6 +84,8 @@ def main():
     check_reconcile_without_a_model(home, root)
     check_pursue_prefers_the_machine(home)
     check_draft_is_an_honest_skeleton(root)
+    check_applicability_is_probed(root)
+    check_composition_keeps_every_gate(root)
     print("PASS test_runbook")
 
 
@@ -328,6 +330,101 @@ def check_draft_is_an_honest_skeleton(root):
           "VERIFICATIONS with the HOW left as named TODOs — validation "
           "refuses to run it until they are filled, because the machine can "
           "recover what was proven but not how it was done")
+
+
+def check_applicability_is_probed(root):
+    """The audit's P1: matching ("about this goal") was standing in for
+    applicability ("can run here and now"). `when.not` vetoes by words;
+    `when.requires` probes by command; reconcile takes the best match that
+    can ACTUALLY run and names the ones that cannot."""
+    marker = os.path.join(root, "out", "precondition.txt")
+    if os.path.exists(marker):
+        os.remove(marker)
+    art = os.path.join(root, "out", "applic.txt")
+    if os.path.exists(art):
+        os.remove(art)
+    # negative trigger: right words, wrong domain -> excluded from match
+    _write_rb(root, {
+        "name": "gated-maker", "triggers": ["applic", "artifact"],
+        "when": {"not": ["manually"], "requires": [_exists(marker)]},
+        "steps": [{"do": _touch_cmd(art), "verify": _exists(art)}]})
+    for _ in range(runbook.PROMOTE_WINS):
+        open(marker, "w").close()
+        assert runbook.run(root, "gated-maker", allow_candidate=True)["ok"]
+    os.remove(art)
+    assert runbook.match(root, "make the applic artifact manually") == [], (
+        "a negative trigger fired and the runbook still volunteered")
+    hits = runbook.match(root, "make the applic artifact")
+    assert any(h["name"] == "gated-maker" for h in hits), hits
+    # requires-probe: not applicable until the precondition exists
+    os.remove(marker)
+    ap = runbook.applicable(root, "gated-maker")
+    assert not ap["ok"] and ap["blocked_by"], ap
+    # reconcile refuses to run an inapplicable match, NAMING the missing
+    # precondition instead of running a procedure into a wall
+    contract.create(root, "g-applic", "make the applic artifact",
+                    accept=[{"id": "A1", "what": "artifact exists",
+                             "check": _exists(art)}])
+    contract.freeze(root, "g-applic")
+    rr = runbook.reconcile(root, "g-applic")
+    assert not rr["verified"] and "applicable" in rr["blocked"], rr
+    assert "gated-maker" in rr["blocked"], rr
+    # satisfy the precondition -> the same goal reconciles to VERIFIED
+    open(marker, "w").close()
+    rr2 = runbook.reconcile(root, "g-applic")
+    assert rr2["verified"], rr2
+    assert contract.load(root, "g-applic")["state"] == "verified"
+    print("[applicable] a negative trigger vetoed a matching runbook; an "
+          "unmet when.requires probe made a PROVEN match inapplicable and "
+          "reconcile blocked NAMING the precondition; satisfying it let the "
+          "identical goal reconcile to VERIFIED")
+
+
+def check_composition_keeps_every_gate(root):
+    """HTN half of E51: a step may run another runbook — but the sub keeps
+    its own trust gate, a failure stops the parent, and a cycle is refused
+    with the chain named."""
+    a1 = os.path.join(root, "out", "comp-a.txt")
+    a2 = os.path.join(root, "out", "comp-b.txt")
+    for p in (a1, a2):
+        if os.path.exists(p):
+            os.remove(p)
+    _write_rb(root, {
+        "name": "comp-child", "triggers": ["child"],
+        "steps": [{"do": _touch_cmd(a1), "verify": _exists(a1)}]})
+    _write_rb(root, {
+        "name": "comp-parent", "triggers": ["parent"],
+        "steps": [{"run": "comp-child"},
+                  {"do": _touch_cmd(a2), "verify": _exists(a2)}]})
+    # validation: a step cannot be BOTH run and do+verify
+    problems = runbook.validate({
+        "name": "twoinone", "triggers": ["x"],
+        "steps": [{"run": "comp-child", "do": "d", "verify": "v"}]})
+    assert any("EITHER" in p for p in problems), problems
+    # the sub's own trust gates it: child is a candidate, so a parent run
+    # without allowance stops AT THE CHILD, not after it
+    rr = runbook.run(root, "comp-parent", allow_candidate=False)
+    assert not rr["ok"], "a candidate child ran inside a parent unsupervised"
+    for _ in range(runbook.PROMOTE_WINS):
+        assert runbook.run(root, "comp-parent", allow_candidate=True)["ok"]
+    assert os.path.exists(a1) and os.path.exists(a2)
+    assert runbook.status(root, "comp-child") == "proven", (
+        "the child's own outcomes were not recorded through composition")
+    # a cycle is refused with the chain named, not walked forever
+    _write_rb(root, {
+        "name": "loop-a", "triggers": ["la"], "steps": [{"run": "loop-b"}]})
+    _write_rb(root, {
+        "name": "loop-b", "triggers": ["lb"], "steps": [{"run": "loop-a"}]})
+    for n in ("loop-a", "loop-b"):
+        for _ in range(runbook.PROMOTE_WINS):
+            runbook.record(root, n, True, "seeded for the cycle check")
+    rc = runbook.run(root, "loop-a")
+    assert not rc["ok"] and "cycle" in rc["why"] and "loop-a" in rc["why"], rc
+    print("[compose] a parent runbook ran its child in place with the "
+          "child's own trust gate enforced and its own wins recorded "
+          "(candidate child stopped an unsupervised parent; the child "
+          "earned proven through composition); a mutual cycle was refused "
+          "with the chain named")
 
 
 if __name__ == "__main__":

@@ -267,6 +267,17 @@ def pursue(home, expert, goal, criteria="", cycles=4, drive=False,
         # evidence supports (arXiv:2310.01798).
         if os.path.exists(os.path.join(d, "repair.md")):
             base_mem.append(f"{rel_dir}/repair.md")
+        # OWNER STEERING, refreshed at the top of every cycle so a note
+        # added mid-pursuit lands in the very next plan. Advice only:
+        # steer.py's own laws keep it off the graders, and the worker
+        # cannot write the channel (CONTROL-zoned).
+        try:
+            import steer as steermod
+            steer_rel = steermod.render(root, gid)
+            if steer_rel:
+                base_mem.append(steer_rel)
+        except Exception:
+            pass
         if commons_rel:
             base_mem.insert(0, commons_rel)
         if assessment_note:

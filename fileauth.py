@@ -71,7 +71,13 @@ CONTROL_PATHS = {"skills/graph.json"}
 # inside it do not. The seal in org/ is the second lock: even a shell edit
 # that gets past this zone check produces a TAMPER verdict, not a pass.
 CONTROL_NAMES_IN = {
-    "goals": {"contract.json", "events.jsonl", "goal.json"},
+    # steering.jsonl / steering.md carry the OWNER'S live guidance into a
+    # pursuit (steer.py). The harness writes them and injects them into the
+    # worker's context; the worker itself must not — a worker that can
+    # write "the owner says ship it" into its own guidance channel has
+    # promoted itself to owner.
+    "goals": {"contract.json", "events.jsonl", "goal.json",
+              "steering.jsonl", "steering.md"},
     # A runbook is worker-authored (that is the point — the model writes
     # down what worked), but its TRUST is not: candidate/proven/quarantined
     # lives in trust.json and only the harness records outcomes there. An

@@ -402,6 +402,11 @@ const COMMANDS = [
   ["Give someone a panel token", "admin", "dlgInvite()", "python org.py token <email> --as you@example.com", "token access rbac member login"],
   ["How should it choose a model?", "admin", "openModelPolicy()", "python modelrouter.py", "policy cheapest balanced quality model routing"],
   ["Plan what to study first", "resources", "S.resTab='knowledge';go('resources')", "python curriculum.py --root experts/<slug> --course <c> --plan", "curriculum study order lessons"],
+  ["Open an agent's goal cockpit", "work", "S.sub='goals';go('agents')", "python contract.py show experts/<slug> <goal-id>", "cockpit pursuit contract graders ledger steering budget"],
+  ["Steer a running pursuit", "work", "S.sub='goals';go('agents')", "python steer.py add experts/<slug> <goal-id> \"guidance\"", "steer guide advise course correct nudge"],
+  ["See the knowledge graph", "resources", "S.sub='graph';go('agents')", "python knowledge.py summary experts/<slug>", "graph entities edges atoms memory map visualize"],
+  ["Mastery — sealed exams and scores", "resources", "S.sub='mastery';go('agents')", "python mastery.py status <home> <expert> <pack>", "mastery capability pack exam competence transfer retention verdict"],
+  ["What may no longer be true?", "resources", "S.sub='teach';go('agents')", "python freshness.py scan experts/<slug>", "freshness expired superseded retracted stale decay"],
 ];
 async function runPreflight(){
   showDlg("Production preflight", `<p class="muted">auditing this installation…</p>`);
@@ -1770,13 +1775,18 @@ async function toggleRun(slug, running){
    "Mind" is evocative but operationally ambiguous, so it is split into
    Knowledge / Skills / Performance / Advanced. Every old view is still
    here; only the labels and the grouping changed. */
-const SUBTABS = [["ov","Overview"],["board","Work"],["teach","Knowledge"],
-                 ["mind","Skills"],["perf","Performance"],["ask","Access"],
+const SUBTABS = [["ov","Overview"],["board","Work"],["goals","Goals"],
+                 ["teach","Knowledge"],["graph","Graph"],
+                 ["mastery","Mastery"],["mind","Skills"],
+                 ["perf","Performance"],["ask","Access"],
                  ["identity","Advanced"]];
 const SUBTAB_HELP = {
   ov: "Job, status, competence, recent work and warnings",
   board: "Missions, tasks and routines this agent owns",
+  goals: "Every pursuit as a cockpit: contract, graders, ledger, steering",
   teach: "Sources, courses, standards, coverage and exams",
+  graph: "The knowledge graph — entities, edges, weak spots, load-bearers",
+  mastery: "Capability packs: sealed exams, scores, verdicts, retention",
   mind: "Procedures it knows, with trust and win/loss record",
   perf: "Verified success, false success, failures and cost",
   ask: "Tools, computers and permissions it may use",
@@ -1810,6 +1820,9 @@ async function renderWorkspace(m){
   if (S.sub==="ov")    renderOv(b, d);
   if (S.sub==="teach") renderTeach(b, d);
   if (S.sub==="board") await renderBoard(b);
+  if (S.sub==="goals") await renderGoalsPane(b);
+  if (S.sub==="graph") await renderGraphPane(b);
+  if (S.sub==="mastery") await renderMasteryPane(b);
   if (S.sub==="mind")  await renderMind(b);
   if (S.sub==="perf")  await renderPerf(b);
   if (S.sub==="ask")   await renderAccess(b, d);
@@ -2177,6 +2190,10 @@ function renderTeach(b, d){
     <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:11.5px">
     UI spec §10 — sources, coverage, gaps, exercises, exams, competence</span></h3>
     <div class="body" id="trainBody"><span class="muted">loading…</span></div></div>
+  <div class="card"><h3>Freshness — what it knows that may no longer be true
+    <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:11.5px">
+    expiry · supersession · retractions — flagged, never deleted</span></h3>
+    <div class="body" id="freshBody"><span class="muted">loading…</span></div></div>
   <div class="grid2">
   <div class="card"><h3>Teach by link</h3><div class="body">
     <label class="lb">URL — video, playlist, article, docs page…</label>
@@ -2209,6 +2226,7 @@ function renderTeach(b, d){
     frontend, analyst…). Applying one rewrites this agent's identity &amp; mission.</p>
   </div></div>`;
   loadTraining();
+  loadFreshness();
   api('/api/templates').then(t=>{
     const sel=document.getElementById("tTpl");
     if (sel && Array.isArray(t)) sel.innerHTML =
@@ -3481,7 +3499,8 @@ async function renderWork(m){
         <td class="mono">${esc(g.expert||"")}</td>
         <td>${esc((g.goal||"").slice(0,80))}${g.verdict?`<br><span class="muted" style="font-size:11.5px">judge: ${esc(String(g.verdict).slice(0,90))}</span>`:""}</td>
         <td class="num">${ms.length?`${done}/${ms.length} <span class="muted">(cycle ${last.n})</span>
-          <button class="btn sm ghost" onclick="planDlg('${esc(g.id||"")}')">plan</button>`:"—"}</td>
+          <button class="btn sm ghost" onclick="planDlg('${esc(g.id||"")}')">plan</button>`:"—"}
+          <button class="btn sm" onclick="openCockpit('${esc(g.expert||"")}','${esc(g.id||"")}')">cockpit</button></td>
         <td class="mono" style="font-size:11.5px">${esc(g.id||"")}</td></tr>`;}).join("")}
       </tbody></table>`:`<div class="empty">no goals yet — launch the first above</div>`}
   </div></div>
@@ -4723,6 +4742,352 @@ function paintLive(row){
     render();
   }, 6000);
 })();
+
+/* =================================================================
+   GOAL COCKPIT — one pursuit, whole: the contract and its frozen
+   graders, the live ledger, the budget, and the owner's steering.
+   Everything read from files; nothing asked of a model.
+================================================================= */
+function openCockpit(expert, gid){
+  S.goalSel = gid; openAgent(expert, "goals");
+}
+async function renderGoalsPane(b){
+  if (S.goalSel) return renderCockpit(b, S.goalSel);
+  const goals = (await api('/api/goals')) || [];
+  const mine = (Array.isArray(goals)?goals:[]).filter(g=>g.expert===S.sel);
+  b.innerHTML = `
+  <div class="card"><h3>Pursuits — every goal this agent has run
+    <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:12px">
+    click one to open its cockpit</span></h3>
+  <div class="body tablewrap">${mine.length?`<table><thead><tr>
+    <th>status</th><th>goal</th><th>verified</th><th>id</th></tr></thead><tbody>
+    ${mine.map(g=>{
+      const st=String(g.status||"?");
+      const cls=st==='achieved'?'ok':((st==='failed'||st==='exhausted')?'bad':'running');
+      return `<tr class="click" onclick="S.goalSel='${esc(g.id)}';render()">
+      <td><span class="pill ${cls}">${esc(st)}</span></td>
+      <td>${esc((g.goal||"").slice(0,90))}</td>
+      <td>${g.verified?`<span class="pill ok">VERIFIED</span>`:`<span class="pill dim">—</span>`}</td>
+      <td class="mono" style="font-size:11.5px">${esc(g.id||"")}</td></tr>`;}).join("")}
+    </tbody></table>`:`<div class="empty">no pursuits yet — start one from Work</div>`}
+  </div></div>`;
+}
+async function renderCockpit(b, gid){
+  const d = await api(`/api/goal?expert=${encodeURIComponent(S.sel)}&gid=${encodeURIComponent(gid)}`);
+  if (d.error){ b.innerHTML=`
+    <button class="btn ghost sm" onclick="S.goalSel=null;render()">← all pursuits</button>
+    <div class="empty">${esc(d.error)}</div>`; return; }
+  const c = d.contract||{}, rec = d.record||{}, lv = d.last_verify||null;
+  const passed = new Set((lv&&lv.passed)||[]), failed = new Set((lv&&lv.failed)||[]);
+  const bud = d.budget||{}, lim = (c.budget)||{};
+  const st = String(c.state||rec.status||"?");
+  const cls = (st==='verified'||st==='achieved')?'ok':((st==='failed'||st==='exhausted')?'bad':(st==='blocked'?'warn':'running'));
+  const cyc = (rec.cycles||[]).slice(-1)[0]||{};
+  const budRow = (label, spent, max)=> max? `
+    <div class="row" style="align-items:center;gap:8px">
+      <span class="muted" style="width:70px">${label}</span>
+      <div style="flex:1;height:7px;background:var(--line);border-radius:4px;overflow:hidden">
+        <div style="height:100%;width:${Math.min(100,Math.round(100*(spent||0)/max))}%;
+          background:${(spent||0)>=max?'var(--bad)':'var(--acc)'}"></div></div>
+      <span class="num mono" style="font-size:12px">${(+spent||0).toFixed(2)} / ${max}</span></div>`:"";
+  b.innerHTML = `
+  <div class="row" style="margin-bottom:8px">
+    <button class="btn ghost sm" onclick="S.goalSel=null;render()">← all pursuits</button>
+    <span class="pill ${cls}">${esc(st)}</span>
+    ${c.state_why?`<span class="muted" style="font-size:12px">${esc(String(c.state_why).slice(0,120))}</span>`:""}
+    <span class="spacer"></span>
+    <button class="btn sm pri" onclick="reverify('${esc(gid)}', this)">▶ re-run the graders</button></div>
+  <div class="card"><h3 class="mono" style="font-size:13px">${esc(gid)}</h3><div class="body">
+    <div style="font-size:14px;margin-bottom:4px">${esc(c.goal||rec.goal||"")}</div>
+    <div class="muted" style="font-size:12.5px">${esc(c.criteria||"")}</div>
+    ${budRow("spend $", bud.spent_usd, lim.max_usd)}
+    ${budRow("minutes", bud.spent_minutes, lim.max_minutes)}
+    ${budRow("cycles", bud.spent_cycles, lim.max_cycles)}
+  </div></div>
+  <div class="grid2">
+  <div class="card"><h3>Acceptance — the graders the worker cannot write
+    <span class="spacer"></span>${lv?`<span class="muted" style="font-weight:400;font-size:11.5px">last run ${esc(lv.at||"")}</span>`:""}</h3>
+  <div class="body tablewrap">${(c.acceptance&&c.acceptance.length)?`<table><thead>
+    <tr><th></th><th>id</th><th>what</th><th>check</th></tr></thead><tbody>
+    ${c.acceptance.map(a=>`<tr>
+      <td>${passed.has(a.id)?'<span class="pill ok">PASS</span>':failed.has(a.id)?'<span class="pill bad">FAIL</span>':'<span class="pill dim">?</span>'}</td>
+      <td class="mono">${esc(a.id)}</td><td>${esc(a.what||"")}</td>
+      <td class="mono" style="font-size:11px">${esc((a.check||"").slice(0,90))}</td></tr>`).join("")}
+    </tbody></table>`:`<div class="empty">no acceptance tests — this pursuit can end
+    "achieved" (the judge's checked opinion) but never VERIFIED</div>`}
+    ${lv&&lv.tamper?`<div class="pill bad" style="margin-top:8px">TAMPER: ${esc(lv.why||"")}</div>`:""}
+  </div></div>
+  <div class="card"><h3>🧭 Steer it — advice into the next cycle, never a grader</h3>
+  <div class="body">
+    <textarea class="field" id="steerText" rows="2"
+      placeholder="e.g. prefer the CSV export; the client cares about mobile first"></textarea>
+    <div class="row" style="margin-top:6px">
+      <button class="btn pri sm" onclick="doSteer('${esc(gid)}')">send to next cycle</button>
+      <span class="muted" style="font-size:11.5px">lands in the planner's context at the
+      top of its next cycle · on the ledger as a steered event · cannot pass or waive
+      the acceptance tests</span></div>
+    ${(d.steering||[]).length?`<div style="margin-top:8px">${d.steering.slice(-5).map(n=>`
+      <div style="border-left:3px solid var(--acc);padding:3px 8px;margin:4px 0;font-size:12.5px">
+        <span class="muted">${esc(n.at||"")} · ${esc(n.by||"owner")}</span><br>${esc(n.text||"")}</div>`).join("")}</div>`:""}
+  </div></div>
+  </div>
+  ${(cyc.milestones||[]).length?`<div class="card"><h3>Cycle ${cyc.n||"?"} milestones</h3>
+  <div class="body tablewrap"><table><thead><tr><th>#</th><th>status</th><th>what</th><th>check</th></tr></thead><tbody>
+    ${cyc.milestones.map(m=>`<tr>
+      <td class="num">${m.n}</td>
+      <td><span class="pill ${m.status==='done'?'ok':(m.status==='failed'?'bad':'dim')}">${esc(m.status||"…")}</span></td>
+      <td>${esc((m.what||"").slice(0,90))}</td>
+      <td class="mono" style="font-size:11px">${esc((m.check||"").slice(0,70))}</td></tr>`).join("")}
+  </tbody></table></div></div>`:""}
+  <div class="card"><h3>Ledger — ${d.n_events||0} events, append-only, replayable</h3>
+  <div class="body" style="max-height:420px;overflow:auto">
+    ${(d.events||[]).slice().reverse().map(e=>{
+      const k = String(e.kind||"");
+      const tone = k==='verify' ? (e.all?'ok':'bad')
+        : (k==='verify_tamper'||k==='acceptance_overruled') ? 'bad'
+        : (k==='steered') ? 'warn' : (k==='state') ? 'running' : 'dim';
+      const detail = Object.entries(e).filter(([key])=>!["kind","at"].includes(key))
+        .map(([key,v])=>`${key}: ${typeof v==='object'?JSON.stringify(v):v}`).join(" · ");
+      return `<div style="display:flex;gap:8px;padding:3px 0;border-bottom:1px solid var(--line);font-size:12px">
+        <span class="muted mono" style="white-space:nowrap">${esc((e.at||"").slice(5,16))}</span>
+        <span class="pill ${tone}" style="min-width:110px;text-align:center">${esc(k)}</span>
+        <span style="word-break:break-word">${esc(detail.slice(0,220))}
+          ${e.task?`<button class="btn sm ghost" onclick="traceDlg('${esc(e.task)}')">trace</button>`:""}</span>
+      </div>`;}).join("")||`<div class="empty">no events</div>`}
+  </div></div>`;
+}
+async function reverify(gid, btn){
+  if (btn){ btn.disabled = true; btn.textContent = "running the graders…"; }
+  const r = await api('/api/goal/verify', {method:"POST", body:{expert:S.sel, gid}});
+  toast(r.error?r.error:(r.all?"all acceptance tests PASS":`${(r.failed||[]).length} failing: ${(r.failed||[]).join(", ")}`));
+  render();
+}
+async function doSteer(gid){
+  const t = document.getElementById("steerText");
+  if (!t || !t.value.trim()){ toast("write the guidance first"); return; }
+  const r = await api('/api/steer', {method:"POST", body:{expert:S.sel, gid, text:t.value.trim()}});
+  toast(r.error?r.error:"steered — it reaches the planner next cycle");
+  if (!r.error) render();
+}
+
+/* =================================================================
+   GRAPH — the knowledge graph, drawn. Entities sized by evidence,
+   colored by best source tier; edges weighted by shared atoms.
+   Plain canvas physics — no libraries, like everything here.
+================================================================= */
+async function renderGraphPane(b){
+  const d = await api(`/api/knowledge?expert=${encodeURIComponent(S.sel)}`);
+  if (d.error){ b.innerHTML=`<div class="empty">${esc(d.error)}</div>`; return; }
+  const ents = Object.entries(d.entities||{});
+  b.innerHTML = `
+  <div class="card"><h3>Knowledge graph — ${ents.length} entities, ${(d.edges||[]).length} edges
+    <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:11.5px">
+    size = evidence · color = best source tier (green 1 → red 4) · drag to untangle · click for its atoms</span></h3>
+  <div class="body">
+    ${ents.length?`<canvas id="kgCanvas" style="width:100%;height:440px;border-radius:8px;
+      background:var(--bg2,rgba(0,0,0,.12));cursor:grab"></canvas>`:
+    `<div class="empty">no graph yet — the graph is built from cited atoms in notes;
+      teach this agent something first</div>`}
+    <div id="kgSide" style="margin-top:8px"></div>
+  </div></div>
+  <div class="grid2">
+  <div class="card"><h3>Load-bearing sources — concentration risk
+    <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:11.5px">
+    one retraction here takes an area of knowledge with it</span></h3>
+    <div class="body">${(d.load_bearing||[]).map(w=>`<div class="row" style="font-size:12.5px;padding:2px 0;gap:8px">
+      <span class="pill ${w.tier<=1?'ok':(w.tier>=4?'bad':'dim')}">tier ${w.tier}</span>
+      <span class="mono" style="word-break:break-all">${esc((w.source||"").slice(0,64))}</span>
+      <span class="spacer"></span>
+      <b>${w.atoms}</b><span class="muted">atoms · ${w.share}%</span></div>`).join("")
+      ||`<div class="empty">nothing yet</div>`}</div></div>
+  <div class="card"><h3>Weak claims — resting only on sources below the learn bar</h3>
+    <div class="body">${(d.weak||[]).map(w=>`<div style="font-size:12.5px;padding:3px 0;border-left:3px solid var(--warn,#e0a63f);padding-left:8px;margin:3px 0">
+      <b class="mono">${esc(w.id)}</b> ${esc((w.claim||"").slice(0,90))}
+      <div class="muted" style="font-size:11px">tier ${w.tier} · ${esc((w.source||"").slice(0,70))}</div></div>`).join("")
+      ||`<div class="empty">every claim rests on a source at or above the learn bar</div>`}</div></div>
+  </div>`;
+  if (ents.length) kgDraw(d);
+}
+function kgDraw(d){
+  const cv = document.getElementById("kgCanvas"); if (!cv) return;
+  const dpr = window.devicePixelRatio||1;
+  const W = cv.clientWidth, H = 440;
+  cv.width = W*dpr; cv.height = H*dpr;
+  const ctx = cv.getContext("2d"); ctx.scale(dpr,dpr);
+  const tierColor = {1:"#3fb96d",2:"#4f9cf0",3:"#e0a63f",4:"#e05a5a"};
+  // cap for physics sanity: keep the most-evidenced entities
+  const ents = Object.entries(d.entities||{})
+    .sort((a,z)=>z[1].atoms.length-a[1].atoms.length).slice(0,140);
+  const keep = new Set(ents.map(([k])=>k));
+  const nodes = ents.map(([name,v],i)=>({
+    name, n:v.atoms.length, tier:v.best_tier||4,
+    x: W/2 + (W/3)*Math.cos(2*Math.PI*i/ents.length),
+    y: H/2 + (H/3)*Math.sin(2*Math.PI*i/ents.length), vx:0, vy:0}));
+  const idx = Object.fromEntries(nodes.map((n,i)=>[n.name,i]));
+  const edges = (d.edges||[]).filter(([a,b])=>keep.has(a)&&keep.has(b))
+    .map(([a,b,w])=>({a:idx[a], b:idx[b], w}));
+  let dragging=null, hover=null, raf=null, ticks=0;
+  function step(){
+    ticks++;
+    for (const e of edges){                       // springs
+      const A=nodes[e.a], B=nodes[e.b];
+      const dx=B.x-A.x, dy=B.y-A.y, dist=Math.hypot(dx,dy)||1;
+      const want = 90 - Math.min(30, e.w*6);
+      const f = (dist-want)*0.004*Math.min(3,e.w);
+      A.vx+=f*dx/dist; A.vy+=f*dy/dist; B.vx-=f*dx/dist; B.vy-=f*dy/dist;
+    }
+    for (let i=0;i<nodes.length;i++){             // repulsion
+      for (let j=i+1;j<nodes.length;j++){
+        const A=nodes[i],B=nodes[j];
+        const dx=B.x-A.x, dy=B.y-A.y; let d2=dx*dx+dy*dy;
+        if (d2<1) d2=1; if (d2>36000) continue;
+        const f=260/d2, dist=Math.sqrt(d2);
+        A.vx-=f*dx/dist; A.vy-=f*dy/dist; B.vx+=f*dx/dist; B.vy+=f*dy/dist;
+      }}
+    for (const n of nodes){                       // integrate + walls
+      if (n===dragging) continue;
+      n.vx=(n.vx+ (W/2-n.x)*0.0004)*0.86; n.vy=(n.vy+(H/2-n.y)*0.0004)*0.86;
+      n.x=Math.max(14,Math.min(W-14,n.x+n.vx));
+      n.y=Math.max(14,Math.min(H-14,n.y+n.vy));
+    }
+    draw();
+    if (ticks<600 && document.getElementById("kgCanvas")) raf=requestAnimationFrame(step);
+  }
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    ctx.lineWidth=1;
+    for (const e of edges){
+      const A=nodes[e.a],B=nodes[e.b];
+      ctx.strokeStyle=`rgba(128,140,160,${Math.min(.55,.12+e.w*.1)})`;
+      ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
+    }
+    for (const n of nodes){
+      const r = 4+Math.min(14,Math.sqrt(n.n)*2.4);
+      ctx.beginPath(); ctx.arc(n.x,n.y,r,0,7);
+      ctx.fillStyle=tierColor[n.tier]||tierColor[4];
+      ctx.globalAlpha = n===hover?1:.82; ctx.fill(); ctx.globalAlpha=1;
+      if (n.n>2 || n===hover){
+        ctx.fillStyle="var(--ink)"; ctx.fillStyle="#c9d4e3";
+        ctx.font="11px system-ui"; ctx.textAlign="center";
+        ctx.fillText(n.name.length>18?n.name.slice(0,17)+"…":n.name, n.x, n.y-r-3);
+      }}
+  }
+  const at=(ev)=>{const r=cv.getBoundingClientRect();
+    return {x:(ev.clientX-r.left), y:(ev.clientY-r.top)};};
+  const pick=(p)=>nodes.find(n=>Math.hypot(n.x-p.x,n.y-p.y) < 6+Math.sqrt(n.n)*2.4+4);
+  cv.onmousedown=(ev)=>{ dragging=pick(at(ev)); if(dragging) cv.style.cursor="grabbing"; };
+  cv.onmousemove=(ev)=>{ const p=at(ev);
+    if (dragging){ dragging.x=p.x; dragging.y=p.y; ticks=Math.min(ticks,560); if(!raf||ticks>=600){ticks=0;step();} }
+    else { const h=pick(p); if (h!==hover){ hover=h; draw(); } cv.style.cursor=h?"pointer":"grab"; } };
+  cv.onmouseup=async (ev)=>{ const was=dragging; dragging=null; cv.style.cursor="grab";
+    const p=at(ev); const n=!was||Math.hypot(was.x-p.x,was.y-p.y)<4 ? pick(p) : null;
+    if (n) kgAbout(n.name); };
+  step();
+}
+async function kgAbout(term){
+  const el = document.getElementById("kgSide"); if (!el) return;
+  el.innerHTML = `<span class="muted">reading atoms about ${esc(term)}…</span>`;
+  const d = await api(`/api/knowledge?expert=${encodeURIComponent(S.sel)}&term=${encodeURIComponent(term)}`);
+  const a = (d.about||{});
+  el.innerHTML = `<div class="card"><h3 class="mono">${esc(term)}
+    <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:11.5px">
+    ${(a.atoms||[]).length} atom(s) · every one carries its citation</span></h3>
+  <div class="body">${(a.atoms||[]).map(x=>`
+    <div style="border-left:3px solid var(--line);padding:3px 8px;margin:4px 0;font-size:12.5px">
+      <b class="mono">${esc(x.id)}</b> ${esc(x.claim)}
+      <div class="muted" style="font-size:11px">tier ${x.tier} · ${esc(x.course)} · ${esc((x.source||"").slice(0,90))}</div>
+    </div>`).join("")||`<div class="empty">no atoms name it directly</div>`}
+  </div></div>`;
+}
+
+/* =================================================================
+   MASTERY — capability packs: sealed exams, honest scores, verdicts.
+================================================================= */
+async function renderMasteryPane(b){
+  const d = await api(`/api/mastery?expert=${encodeURIComponent(S.sel)}`);
+  if (d.error){ b.innerHTML=`<div class="empty">${esc(d.error)}</div>`; return; }
+  const packs = d.packs||[];
+  const fmt = s => (s==null?"—":Math.round(s*100)+"%");
+  b.innerHTML = (packs.length?packs.map(p=>{
+    const sc=p.scores||{}, v=p.verdict;
+    const sealed = p.seal&&p.seal.ok;
+    const lift = (sc.exam!=null&&sc.pretest!=null)?Math.round((sc.exam-sc.pretest)*100):null;
+    return `<div class="card"><h3 class="mono">${esc(p.pack)}
+      <span class="spacer"></span>
+      ${sealed?`<span class="pill ok">SEALED</span>`
+        : p.seal&&p.seal.tamper?`<span class="pill bad">TAMPER</span>`
+        : (p.problems&&p.problems.length)?`<span class="pill warn">DRAFT — ${p.problems.length} TODO(s)</span>`
+        :`<span class="pill dim">unfrozen</span>`}
+      ${v?(v.mastered?`<span class="pill ok">MASTERED</span>`:`<span class="pill bad">NOT MASTERED</span>`):""}</h3>
+    <div class="body">
+      <div class="muted" style="font-size:12.5px">${esc(p.domain||"")} · author
+        <b>${esc(p.author||"owner")}</b> — the author never sits this exam</div>
+      <div class="row" style="gap:6px;flex-wrap:wrap;margin:7px 0">
+        ${(p.competencies||[]).map(c=>`<span class="kchip">${esc(c)}</span>`).join("")}</div>
+      <div class="row" style="gap:16px;flex-wrap:wrap;font-size:13px">
+        <span>pretest <b>${fmt(sc.pretest)}</b></span><span>→</span>
+        <span>exam <b>${fmt(sc.exam)}</b></span>
+        ${lift!=null?`<span class="pill ${lift>0?'ok':'dim'}">${lift>0?'+':''}${lift} lift</span>`:""}
+        <span class="muted">·</span>
+        <span>retention <b>${fmt(sc.retest)}</b></span>
+        ${p.mastery_bar?`<span class="muted" style="font-size:11.5px">bars: practice ${Math.round((p.mastery_bar.practice_pass||0)*100)}% · transfer ${Math.round((p.mastery_bar.transfer_pass||0)*100)}%</span>`:""}</div>
+      ${v?`<div class="muted" style="font-size:11.5px;margin-top:6px">${esc(v.ceiling||"")}</div>`:""}
+      ${(p.problems&&p.problems.length)?`<details style="margin-top:6px"><summary class="muted" style="font-size:12px">what the draft still needs</summary>
+        ${p.problems.slice(0,8).map(x=>`<div class="muted" style="font-size:11.5px">· ${esc(x)}</div>`).join("")}</details>`:""}
+      <div class="muted mono" style="font-size:11px;margin-top:8px">python mastery.py run &lt;home&gt; ${esc(S.sel)} ${esc(p.pack)} --drive</div>
+    </div></div>`;}).join("")
+  : `<div class="card"><h3>Capability packs</h3><div class="body"><div class="empty">
+      no packs in this fleet yet — draft one:
+      <div class="mono" style="font-size:11.5px;margin-top:6px">python capability.py draft &lt;home&gt; my-domain --domain "what it is" --competency reading="study query"</div>
+    </div></div></div>`);
+}
+
+/* =================================================================
+   FRESHNESS — learned claims age; the panel shows the decay.
+================================================================= */
+async function loadFreshness(){
+  const el = document.getElementById("freshBody"); if (!el) return;
+  const d = await api(`/api/freshness?expert=${encodeURIComponent(S.sel)}`);
+  if (d.error){ el.innerHTML = `<span class="muted">${esc(d.error)}</span>`; return; }
+  const rows = [["retracted", d.retracted, "bad"], ["expired", d.expired, "warn"],
+                ["superseded", d.superseded, "dim"]];
+  const flagged = rows.reduce((n,[,l])=>n+(l||[]).length, 0);
+  el.innerHTML = `
+    <div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:6px">
+      <span class="kchip">${d.checked||0} atoms checked</span>
+      <span class="kchip" style="color:var(--ok)">${d.fresh||0} fresh</span>
+      ${flagged?`<span class="kchip" style="color:var(--warn)">${flagged} flagged</span>`
+               :`<span class="kchip">nothing suspect</span>`}
+      <span class="spacer"></span>
+      <button class="btn sm ghost" onclick="dlgRetract()">record a retraction</button></div>
+    ${rows.map(([label,list,tone])=>(list||[]).map(x=>`
+      <div class="row" style="font-size:12.5px;padding:2px 0">
+        <span class="pill ${tone}">${label}</span>
+        <b class="mono">${esc(x.atom)}</b>
+        <span class="muted">${esc(x.course)} · ${esc(x.why)}</span></div>`).join("")).join("")}
+    <p class="muted" style="font-size:11.5px;margin-top:6px">Flags, never deletions: mark
+    claims with [expires: date] or [supersedes: id] in notes; retractions match [src:]
+    by substring. The atoms stay on disk — the owner decides what happens next.</p>`;
+}
+function dlgRetract(){
+  showDlg("Record a retraction", `
+    <label class="lb">Source ref (a DOI or URL substring, 8+ chars)</label>
+    <input class="field" id="rtRef" placeholder="10.1234/withdrawn.2025.001">
+    <label class="lb">Why</label>
+    <input class="field" id="rtWhy" placeholder="publisher withdrew the study">
+    <p class="muted" style="font-size:12px">Every atom whose [src:] contains this ref is
+    flagged RETRACTED. The ledger is control-zoned — agents cannot retract the sources
+    of claims they would rather not defend.</p>`,
+    [["Cancel","closeDlg()","ghost"],["Retract","doRetract()","warn"]]);
+}
+async function doRetract(){
+  const ref = document.getElementById("rtRef").value.trim();
+  const why = document.getElementById("rtWhy").value.trim();
+  const r = await api('/api/freshness/retract', {method:"POST",
+    body:{expert:S.sel, ref, why}});
+  closeDlg(); toast(r.error||"retraction recorded");
+  loadFreshness();
+}
 </script>
 </body>
 </html>

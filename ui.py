@@ -594,6 +594,12 @@ POST_PERMISSION = {
     "/api/backup":             "manage_secrets",
     "/api/federation":         "connect_tool",
     "/api/shutdown":           "run",
+    # steering guides a pursuit and lands on its ledger — that is "run"
+    "/api/steer":              "run",
+    # re-running the frozen graders is harness work a runner may ask for
+    "/api/goal/verify":        "run",
+    # retracting a source rewrites what the fleet believes — a build power
+    "/api/freshness/retract":  "create_agent",
 }
 # per-expert actions: POST /api/experts/<slug>/<action>
 ACTION_PERMISSION = {
@@ -1585,6 +1591,146 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/goals":
                 import goal
                 self._json(goal.list_goals(self.home))
+            elif path == "/api/goal":
+                # THE COCKPIT: one pursuit, whole. The contract and its
+                # frozen graders, the event ledger, the budget, the owner's
+                # steering — everything the files know, none of it asked of
+                # a model.
+                import contract as contractmod
+                import steer as steermod
+                expert = q.get("expert", [""])[0]
+                gid = q.get("gid", [""])[0]
+                root = os.path.join(self.home, "experts", expert)
+                if not (expert and gid and os.path.isdir(
+                        os.path.join(root, "goals", gid))):
+                    self._fail({"error": "expert and gid must name a real "
+                                         "pursuit"}, 404)
+                else:
+                    try:
+                        c = contractmod.load(root, gid)
+                    except Exception as e:
+                        c = {"unloadable": str(e)[:200]}
+                    rec = {}
+                    try:
+                        with open(os.path.join(root, "goals", gid,
+                                               "goal.json"),
+                                  encoding="utf-8") as f:
+                            rec = json.load(f)
+                    except (OSError, ValueError):
+                        pass
+                    evs = contractmod.events(root, gid)
+                    last_verify = next(
+                        (e for e in reversed(evs)
+                         if e.get("kind") == "verify"), None)
+                    try:
+                        bud = contractmod.budget_state(root, gid)
+                    except Exception:
+                        bud = None
+                    self._json({"contract": c, "record": rec,
+                                "events": evs[-250:], "n_events": len(evs),
+                                "last_verify": last_verify, "budget": bud,
+                                "steering": steermod.notes(root, gid)})
+            elif path == "/api/knowledge":
+                # the GRAPH MEMORY, whole: entities, edges, tiers, the weak
+                # spots and the load-bearing claims — from the same notes
+                # files the citation checker validates
+                import knowledge
+                expert = q.get("expert", [""])[0]
+                root = os.path.join(self.home, "experts", expert)
+                if not os.path.isdir(root):
+                    self._fail({"error": f"no expert {expert!r}"}, 404)
+                else:
+                    g = knowledge.build(root)
+                    term = q.get("term", [""])[0]
+                    self._json({
+                        "summary": knowledge.summary(root, g),
+                        "entities": g["entities"],
+                        "edges": [[a, b, w] for (a, b), w in
+                                  g["edges"].items()],
+                        "atoms": g["atoms"] if q.get(
+                            "atoms", ["0"])[0] in ("1", "true") else [],
+                        "weak": knowledge.weak(root, g),
+                        "load_bearing": knowledge.load_bearing(root, g),
+                        "about": knowledge.about(root, term, g)
+                        if term else None})
+            elif path == "/api/mastery":
+                import capability
+                import mastery as masterymod
+                expert = q.get("expert", [""])[0]
+                packs = []
+                pdir = os.path.join(self.home, capability.PACKS_DIR)
+                try:
+                    names = sorted(os.listdir(pdir))
+                except OSError:
+                    names = []
+                for name in names:
+                    if not os.path.isdir(os.path.join(pdir, name)):
+                        continue
+                    row = {"pack": name,
+                           "seal": capability.verify_pack(self.home, name),
+                           "problems": capability.validate(self.home, name)}
+                    try:
+                        pk = capability._read_json(os.path.join(
+                            pdir, name, "pack.json"))
+                        row["domain"] = pk.get("domain")
+                        row["author"] = pk.get("author") or "owner"
+                        row["competencies"] = sorted(
+                            (pk.get("competencies") or {}).keys())
+                        row["mastery_bar"] = pk.get("mastery")
+                    except (OSError, ValueError):
+                        pass
+                    if expert:
+                        root = os.path.join(self.home, "experts", expert)
+                        evs = masterymod.events(root, name)
+                        row["scores"] = {
+                            k: next((e.get("score")
+                                     for e in reversed(evs)
+                                     if e.get("kind") == k), None)
+                            for k in ("pretest", "exam", "retest")}
+                        row["verdict"] = next(
+                            (e for e in reversed(evs)
+                             if e.get("kind") == "verdict"), None)
+                        row["events"] = evs[-120:] if q.get(
+                            "events", ["0"])[0] in ("1", "true") else []
+                    packs.append(row)
+                self._json({"packs": packs})
+            elif path == "/api/runbooks":
+                import runbook as runbookmod
+                expert = q.get("expert", [""])[0]
+                root = os.path.join(self.home, "experts", expert)
+                if not os.path.isdir(root):
+                    self._fail({"error": f"no expert {expert!r}"}, 404)
+                else:
+                    out = []
+                    trust = runbookmod._trust(root)
+                    for name in runbookmod.names(root):
+                        row = {"name": name,
+                               "status": runbookmod.status(root, name),
+                               "trust": trust.get(name) or {}}
+                        try:
+                            with open(runbookmod.path(root, name),
+                                      encoding="utf-8") as f:
+                                rb = json.load(f)
+                            row["triggers"] = rb.get("triggers") or []
+                            row["when"] = rb.get("when") or {}
+                            row["steps"] = rb.get("steps") or []
+                            row["provenance"] = rb.get("provenance")
+                            row["problems"] = runbookmod.validate(rb)
+                            row["draft"] = bool(row["problems"])
+                        except (OSError, ValueError) as e:
+                            row["problems"] = [f"unreadable: {e}"[:120]]
+                        out.append(row)
+                    self._json({"runbooks": out})
+            elif path == "/api/freshness":
+                import freshness as freshmod
+                expert = q.get("expert", [""])[0]
+                root = os.path.join(self.home, "experts", expert)
+                if not os.path.isdir(root):
+                    self._fail({"error": f"no expert {expert!r}"}, 404)
+                else:
+                    r = freshmod.scan(root)
+                    r["retractions"] = freshmod.retractions(root)
+                    self._json(r)
             elif path == "/api/universal":
                 # "Can this expert do this yet, and if not, what is in the
                 # way?" — answered from mechanical probes, never from a
@@ -1852,6 +1998,55 @@ class Handler(BaseHTTPRequestHandler):
                                    endpoint=d.get("endpoint", ""))
                 self._json({"published": [sk["expert"] for sk in card["skills"]],
                             "fingerprint": card.get("key_fingerprint")})
+            elif path == "/api/steer":
+                # the owner's voice into a RUNNING pursuit. steer.py's laws
+                # hold here too: advice never grades, every note lands on
+                # the ledger, and the identity behind the token is who is
+                # recorded as steering — not a generic "panel".
+                import steer as steermod
+                d = self._data
+                slug = (d.get("expert") or "").strip()
+                gid = (d.get("gid") or "").strip()
+                root = expert_root(self.home, slug)
+                if not (slug and gid and os.path.isdir(root)):
+                    self._fail({"error": "expert and gid are required"}, 400)
+                    return
+                try:
+                    row = steermod.add(root, gid, d.get("text") or "",
+                                       by=getattr(self, "actor", "owner"))
+                    self._json({"steered": True, "note": row})
+                except steermod.SteerError as e:
+                    self._fail({"error": str(e)}, 400)
+            elif path == "/api/goal/verify":
+                # re-run the frozen graders NOW, harness-side, on demand —
+                # the panel's "where does this really stand" button
+                import contract as contractmod
+                d = self._data
+                slug = (d.get("expert") or "").strip()
+                gid = (d.get("gid") or "").strip()
+                root = expert_root(self.home, slug)
+                if not (slug and gid and os.path.isdir(
+                        os.path.join(root, "goals", gid))):
+                    self._fail({"error": "expert and gid must name a real "
+                                         "pursuit"}, 404)
+                    return
+                self._json(contractmod.verify(root, gid))
+            elif path == "/api/freshness/retract":
+                import freshness as freshmod
+                d = self._data
+                slug = (d.get("expert") or "").strip()
+                root = expert_root(self.home, slug)
+                if not (slug and os.path.isdir(root)):
+                    self._fail({"error": "expert is required"}, 400)
+                    return
+                try:
+                    row = freshmod.retract(root, d.get("ref") or "",
+                                           d.get("why") or "",
+                                           by=getattr(self, "actor",
+                                                      "owner"))
+                    self._json({"retracted": True, "row": row})
+                except freshmod.FreshnessError as e:
+                    self._fail({"error": str(e)}, 400)
             elif path == "/api/achieve":
                 # THE UNIFIED ENTRY POINT: one goal in, and either real work
                 # or a precise statement of what is standing in the way.

@@ -165,6 +165,82 @@ def main():
         assert "OK" in r["out"] and r["exit"] == 0, r
         print("[tools] loop.py check probe runs through the panel")
 
+        # --- deep views: the goal cockpit, steering, graph memory,
+        #     mastery packs, runbooks, freshness — the panel surfaces the
+        #     goal system's whole depth, read from files, none of it asked
+        #     of a model
+        sys.path.insert(0, AGENT_DIR)
+        import capability
+        import contract
+        root = os.path.join(home, "experts", "deep-learner")
+        contract.create(root, "g-ui", "cockpit-visible goal",
+                        accept=[{"id": "A1", "what": "never passes",
+                                 "check": f'"{PY}" -c "import sys; sys.exit(1)"'}])
+        contract.freeze(root, "g-ui")
+        g = api("GET", "/api/goal?expert=deep-learner&gid=g-ui")
+        assert g["contract"]["state"] == "ready", g["contract"]
+        assert g["contract"]["acceptance"][0]["id"] == "A1"
+        r = api("POST", "/api/steer", {"expert": "deep-learner",
+                                       "gid": "g-ui",
+                                       "text": "prefer the CSV export"})
+        assert r.get("steered"), r
+        g2 = api("GET", "/api/goal?expert=deep-learner&gid=g-ui")
+        assert g2["steering"][-1]["text"] == "prefer the CSV export"
+        assert any(e["kind"] == "steered" for e in g2["events"]), (
+            "steering must land on the ledger — influence is never invisible")
+        vr = api("POST", "/api/goal/verify", {"expert": "deep-learner",
+                                              "gid": "g-ui"})
+        assert vr["mechanical"] and not vr["all"] and "A1" in vr["failed"], vr
+        print("[cockpit] a pursuit's contract, graders, ledger and steering "
+              "all readable; a steer lands on the ledger; the graders re-run "
+              "on demand and report the failing check by id")
+
+        notes_dir = os.path.join(root, "courses", "gcourse", "lessons", "01")
+        os.makedirs(notes_dir, exist_ok=True)
+        with open(os.path.join(notes_dir, "notes.md"), "w",
+                  encoding="utf-8") as f:
+            f.write("- C-01 `alpha_tool` compresses logs "
+                    "[expires: 2020-01-01] [src: https://example.org/a]\n"
+                    "- C-02 `alpha_tool` needs Python 3.11 "
+                    "[src: https://example.org/b]\n")
+        kg = api("GET", "/api/knowledge?expert=deep-learner")
+        assert "alpha_tool" in kg["entities"], list(kg["entities"])[:5]
+        about = api("GET", "/api/knowledge?expert=deep-learner"
+                           "&term=alpha_tool")["about"]
+        assert len(about["atoms"]) == 2, about
+        fr = api("GET", "/api/freshness?expert=deep-learner")
+        assert any(x["atom"] == "C-01" for x in fr["expired"]), fr
+        r = api("POST", "/api/freshness/retract",
+                {"expert": "deep-learner", "ref": "example.org/b",
+                 "why": "the vendor pulled the docs"})
+        assert r.get("retracted"), r
+        fr2 = api("GET", "/api/freshness?expert=deep-learner")
+        assert any(x["atom"] == "C-02" for x in fr2["retracted"]), fr2
+        print("[graph+fresh] the entity graph serves entities and per-term "
+              "atoms; freshness flags the expired atom and a panel-recorded "
+              "retraction flags the citing atom")
+
+        capability.draft(home, "ui-pack", "panel-drafted domain",
+                         {"reading": "how to read"}, author="someone-else")
+        mp = api("GET", "/api/mastery?expert=deep-learner")
+        row = next(p for p in mp["packs"] if p["pack"] == "ui-pack")
+        assert row["problems"] and row["author"] == "someone-else", row
+        assert not row["seal"]["ok"], "an unfrozen draft cannot read sealed"
+        rbdir = os.path.join(root, "runbooks")
+        os.makedirs(rbdir, exist_ok=True)
+        with open(os.path.join(rbdir, "ui-proc.json"), "w",
+                  encoding="utf-8") as f:
+            json.dump({"name": "ui-proc", "triggers": ["ui"],
+                       "when": {"requires": ["true"]},
+                       "steps": [{"do": "true", "verify": "true"}]}, f)
+        rb = api("GET", "/api/runbooks?expert=deep-learner")
+        row = next(x for x in rb["runbooks"] if x["name"] == "ui-proc")
+        assert row["status"] == "candidate" and not row.get("draft"), row
+        assert row["when"]["requires"] == ["true"], row
+        print("[mastery+runbooks] packs list with seal state, author and "
+              "draft TODOs; runbooks list with earned trust and typed "
+              "applicability")
+
         # --- mission control: deletion with the loop stopped
         api("POST", "/api/experts", {"name": "Temp Expert", "identity": "x"})
         r = api("DELETE", "/api/experts/temp-expert")
