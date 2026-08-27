@@ -19,7 +19,11 @@ python bootstrap.py
 
 One idempotent command: creates `agent.env`, tells you exactly what is
 missing (numbered, with the fix), creates your first expert, starts the
-control panel and opens it.
+control panel and opens it. **[QUICKSTART.md](QUICKSTART.md) is the
+15-minute path from zero to your first VERIFIED goal** — including the
+provider table: the platform is provider-universal (OpenRouter, official
+Anthropic/OpenAI/Gemini/xAI/DeepSeek APIs, Groq, NVIDIA, Hugging Face,
+Cloudflare Workers AI, or a local Ollama model with no key at all).
 
 ---
 

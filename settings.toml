@@ -246,6 +246,55 @@ api_key_env = "OPENROUTER_API_KEY"
 # Browse current free ids: https://openrouter.ai/models?max_price=0
 # Then: python loop.py check — every role must say OK.
 
+# Anthropic (Claude), OFFICIAL API. Verified:
+# platform.claude.com/docs/en/api/openai-sdk — Anthropic ships an
+# OpenAI-compatible layer, so the official key drops in with a base_url
+# and a model name. NOTE THE TRAILING SLASH — their docs write /v1/ and a
+# missing slash is the 404 nobody diagnoses.
+# HONEST CAVEATS from that page: the `strict` tool-schema guarantee is
+# ignored (tool-call JSON usually conforms, it is not contractually
+# guaranteed), and prompt caching is not available through this layer.
+# FREE TIER: none. Strong choice for the EXAMINER role — a different
+# family from every worker lane above, which is what the judge needs.
+# [providers.anthropic]
+# base_url = "https://api.anthropic.com/v1/"
+# api_key_env = "ANTHROPIC_API_KEY"
+# model: "claude-sonnet-5"
+
+# Google Gemini, OFFICIAL API. Verified:
+# ai.google.dev/gemini-api/docs/openai — an OpenAI-compatible endpoint;
+# note the unusual path, /v1beta/openai/, not /v1.
+# FREE TIER: Google AI Studio keys carry a standing free quota on flash
+# models (rate-limited) — one of the few real no-card free lanes.
+# [providers.gemini]
+# base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+# api_key_env = "GEMINI_API_KEY"
+# model: "gemini-3.5-flash"
+
+# xAI (Grok), OFFICIAL API. Verified: docs.x.ai/developers/quickstart —
+# OpenAI-compatible at /v1, Bearer key auth. FREE TIER: none standing.
+# [providers.xai]
+# base_url = "https://api.x.ai/v1"
+# api_key_env = "XAI_API_KEY"
+# model: "grok-4"
+
+# LOCAL MODELS — NO KEY AT ALL. Ollama and LM Studio expose the same
+# OpenAI-compatible contract on localhost, so a machine with a downloaded
+# model runs the whole platform with zero keys, zero spend, zero egress.
+# api_key_env still names a variable (the protocol wants a token string);
+# set OLLAMA_API_KEY=local in agent.env — the value is never checked.
+# Pick a model tagged for TOOLS (ollama.com/search?c=tools); a model
+# without function calling cannot drive the loop (see the Cloudflare note).
+# [providers.ollama]
+# base_url = "http://127.0.0.1:11434/v1"
+# api_key_env = "OLLAMA_API_KEY"
+# free = true
+# model: "qwen3:30b"  (or any tools-capable model you have pulled)
+# [providers.lmstudio]
+# base_url = "http://127.0.0.1:1234/v1"
+# api_key_env = "OLLAMA_API_KEY"
+# free = true
+
 # ----------------------------------------------------------------- roles
 # One block per role; switching provider/model is a one-line change.
 # Role -> model mapping per the master document Part 7: Ripper/Reflector on
