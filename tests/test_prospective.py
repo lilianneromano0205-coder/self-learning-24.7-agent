@@ -113,6 +113,8 @@ def main():
     # --- check: WHEN a probe command exits 0 (the condition no file
     #     pattern can express — "when the price gap exceeds 15%"), with the
     #     probe policy-screened and rate-limited per intention
+    pm.cancel(sb, it3["id"])       # the ~1s recurrence above would re-fire
+    # on a slow CI runner mid-section and pollute every count below
     marker = os.path.join(sb, "watch", "gap-alert.txt")
     count = os.path.join(sb, "watch", "probe-count.txt")
     py = sys.executable.replace("\\", "/")
