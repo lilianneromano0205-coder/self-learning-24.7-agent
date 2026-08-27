@@ -58,6 +58,22 @@ def holding(path, timeout=10.0, stale=8.0):
             if time.time() > deadline:
                 raise TimeoutError(f"lock busy: {lock}")
             time.sleep(0.05)
+        except PermissionError:
+            # Windows only in practice: creating the lockfile while a
+            # releasing holder's os.remove is still pending reports EACCES —
+            # the file exists AND is going away, which is CONTENTION, not a
+            # rights problem. Left unhandled, it killed a whole writer:
+            # CI's 10-thread ledger hammer lost one thread and its 25 rows
+            # to a single such window (and a local 12-thread hammer
+            # reproduced it 2 runs in 3). A genuine rights problem persists
+            # across retries, so it still surfaces — as the timeout below,
+            # with EACCES named instead of a silent thread death.
+            if time.time() > deadline:
+                raise TimeoutError(
+                    f"lock busy: {lock} (EACCES on every attempt — "
+                    f"delete-pending contention or a real permission "
+                    f"problem on the directory)")
+            time.sleep(0.05)
     try:
         yield
     finally:
