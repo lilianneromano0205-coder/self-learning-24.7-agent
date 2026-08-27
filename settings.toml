@@ -231,20 +231,30 @@ output_per_mtok = 4.00
 #   model = "deepseek/deepseek-chat"     # any id from openrouter.ai/models
 # Verify wiring with one command before running:  python loop.py check
 #
-# RECOMMENDED LANE (Aug 2026) — frontier quality, small money. One OpenRouter
-# key runs every role; swap a model id and re-run `python loop.py check`.
+# THE HOUSE LANE (Aug 2026) — DIRT-CHEAP MODELS ONLY. This platform's
+# founding thesis is that capability comes from the system around the
+# model: graders refuse false completion, the judge cross-checks, repair
+# feeds verbatim errors back, runbooks make repeat work free, and earned
+# memory supplies the expertise the model lacks. So the house lane spends
+# nothing on model prestige — one OpenRouter key runs every role; swap a
+# model id and re-run `python loop.py check`.
 #   workers  (Watcher/Librarian/Practitioner/Student):
-#     "deepseek/deepseek-v4-pro"        ~80.6% SWE-bench at a fraction of
-#                                        frontier output price — the value pick
-#   Examiner (MUST be a different family — uncorrelated blind spots):
-#     "google/gemini-3.5-flash"          fast, cheap, multimodal
-#     "anthropic/claude-opus-4.7"        if you want the strongest judge
-#   Ripper/Reflector (cheap mechanical work):
-#     "deepseek/deepseek-v4-flash"
+#     "deepseek/deepseek-v4-flash"       ~$0.22/M in off-peak; cache-hit
+#                                         input $0.007/M loves this
+#                                         platform's compact windows
+#   Examiner (MUST be a different family — uncorrelated blind spots,
+#   NOT a more expensive one; difference is the property, price is not):
+#     "google/gemini-2.5-flash-lite"     ~$0.10/$0.40 per M — the judge
+#                                         costs LESS than the workers
+#   Ripper/Reflector (mechanical): "deepseek/deepseek-v4-flash"
+#   Escalation (rare, [[ESCALATE]] only): "deepseek/deepseek-v4-pro" —
+#     still value-priced; the ladder exists, it just never needs to
+#     leave the cheap tier
 #   vision (scanned pages, slides): OPENROUTER_VISION_MODEL env var,
-#     default "google/gemini-flash-1.5"; "google/gemini-3.5-flash" is stronger.
-# Routing cheap work to cheap models and hard judging to a strong one is the
-# 2026 production norm — this file is already shaped for it.
+#     default "google/gemini-flash-1.5".
+# The $0 variant: OpenRouter ":free" ids + Cloudflare's 10k Neurons/day +
+# Gemini's free flash quota + a local Ollama rail — rate-limited, fine
+# for overnight study and testing.
 #
 # FREE LANE — open-source models at $0 via OpenRouter's :free tier.
 # A free OpenRouter account + one key runs the ENTIRE system without charge
