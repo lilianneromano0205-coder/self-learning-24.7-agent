@@ -77,6 +77,7 @@ SYSTEMS = {
                   "test_resume.py", "test_lock.py", "test_paths.py",
                   "test_shutdown.py",
                   "test_reliability.py", "test_e2e_crash.py", "test_layers.py",
+                  "test_subquery.py",
                   "test_json_toolcall.py", "test_guardrails.py",
                   "test_effects.py", "test_sandbox.py",
                   "test_secrets.py", "test_chaos.py", "test_blocked.py",

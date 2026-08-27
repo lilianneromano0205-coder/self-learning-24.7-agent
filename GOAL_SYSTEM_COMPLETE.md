@@ -13,7 +13,7 @@ needs it; [ARCHITECTURE.md](ARCHITECTURE.md) and
 the test that proves it, and every protection has been *broken on purpose*
 (mutation testing) to prove the test would notice. 42 mutations across
 the goal layers (contract, runbook, repair, swarm, mastery, steering,
-freshness, the declared state machine), 42 killed. Full suite: 116
+freshness, the declared state machine), 42 killed. Full suite: 117
 tests, green on six CI platforms (Ubuntu + Windows × Python
 3.11/3.12/3.13).
 

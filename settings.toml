@@ -327,6 +327,15 @@ output_per_mtok = 4.00
 #   provider = "ollama"
 #   model = "qwen3:30b"        # any tools-capable local model you pulled
 
+# The SUBQUERY rail (Recursive Language Models, MIT CSAIL 2025): the
+# `subquery` tool sends file slices to disposable sub-calls so material
+# never enters the orchestrating window. Define this role to pin those
+# sub-calls to their own — typically the cheapest — rail; without it they
+# ride the calling task's role.
+#   [roles.subquery]
+#   provider = "openrouter"
+#   model = "deepseek/deepseek-v4-flash"
+
 # ----------------------------------------------------------------- roles
 # One block per role; switching provider/model is a one-line change.
 # Role -> model mapping per the master document Part 7: Ripper/Reflector on
@@ -345,7 +354,7 @@ model = "deepseek-chat"
 provider = "deepseek"
 model = "deepseek-chat"
 # Rule of Two: roles that read untrusted source material don't hold run_command
-tools = ["read_file", "write_file", "finish_task", "ask_human"]
+tools = ["read_file", "write_file", "finish_task", "ask_human", "subquery"]
 
 [roles.librarian]
 provider = "deepseek"
