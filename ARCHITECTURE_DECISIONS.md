@@ -559,3 +559,62 @@ create a boundary that does not exist.
 32 bytes of entropy is the whole defence. On a loopback HTTP server that is
 proportionate; behind anything public it is not, and `REFERENCE.md` §20 says so
 in those words.
+
+---
+
+## AD-27 — No PIANO-style concurrent cognitive architecture (considered 2026-08, rejected)
+
+**The alternative considered.** PIANO — *Parallel Information Aggregation
+via Neural Orchestration*, from Altera's Project Sid
+([arXiv:2411.00114](https://arxiv.org/abs/2411.00114)) — runs many
+stateless modules (planning, speech, motor, social awareness, goal
+generation) **concurrently** over a shared mutable Agent State, with a
+Cognitive Controller as the single bottleneck that selects a coherent
+subset of information for decisions. In its own domain the results are
+genuinely impressive: real-time Minecraft societies of 50–1,000 agents,
+item-collection on par with experienced human players, and emergent
+social structure (professions, rules, cultural transmission).
+
+**Decision.** Not adopted — not because it is weak, but because it
+answers a different question. PIANO optimizes *real-time behavioral
+coherence of a social character in a continuous world*, where success is
+plausible ongoing behavior and latency is the enemy. This platform
+optimizes *verifiable completion of work*, where success is a frozen
+grader passing and false completion is the enemy. Three of PIANO's
+load-bearing choices collide head-on with laws this platform is built
+around, each mutation-tested here:
+
+1. **The Cognitive Controller is a reasoning module deciding what is
+   true enough to act on.** Here nothing model-adjacent holds that
+   power: coherence comes from one compiled context window over
+   canonical files, and completion comes from the harness running sealed
+   graders. A controller-in-the-middle is exactly the self-report this
+   platform exists to refuse.
+2. **A shared Agent State written concurrently by many modules** is the
+   memory-poisoning and stale-write surface the 2026 state-governance
+   literature warns about. Here every ledger has one writer, CONTROL
+   zones gate mutation, and replay detects divergence — the opposite
+   bet, deliberately.
+3. **Autonomous goal generation** collides with the authority law: goals
+   and missions come from the owner; the machine may propose and must
+   never self-authorize.
+
+**What PIANO gets right that this platform keeps, in its own form.** Its
+"action awareness" module — comparing expected against observed outcomes
+to arrest hallucination drift — is this platform's gate/verify/grader
+discipline in embryonic form; here it is the completion mechanism itself
+rather than one mitigating module. And PIANO's multiple concurrent time
+scales exist here as deterministic schedulers instead of module threads:
+the task loop, routines, prospective probes, the freshness feed, and
+wake-on-event each tick at their own cadence, serialized where they
+touch shared state.
+
+**Price paid.** A single agent here cannot think and act at the same
+instant — each task is one serialized tool call per step, so intra-agent
+parallelism is off the table, and true real-time embodied settings
+(games, robotics, live conversation) are outside this platform's lane.
+Parallelism lives at the grain that stays auditable: across tasks,
+experts, and declared-independent swarm workers. For a platform whose
+product is *proven* work rather than lifelike behavior, that trade is
+the design — but it is a real trade, and PIANO is the right tool for
+the lane this one gave up.
