@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you use Expert Fleet in your work, please cite it as below."
+title: "Expert Fleet: a stdlib-only platform for verifiable, continuously-working expert AI agents"
+type: software
+authors:
+  - name: "Expert Fleet contributors"
+repository-code: "https://github.com/lilianneromano0205-coder/self-learning-24.7-agent"
+license: AGPL-3.0
+keywords:
+  - AI agents
+  - autonomous agents
+  - verification
+  - goal contracts
+  - mutation testing
+  - capability packs
+abstract: >-
+  A file-backed, Python-stdlib-only platform for building expert AI agents
+  that work continuously, prove what they did, and remember what they
+  learned. Its goal system freezes acceptance tests before any planning
+  (graders the worker cannot write), runs proven procedures with zero model
+  calls, multiplies into parallel workers only where independence was
+  declared, repairs itself only from recorded mechanical failures, and
+  proves procedural competence on sealed unseen tasks. Every protection is
+  mutation-tested: the feature is broken on purpose and the suite must
+  notice.
