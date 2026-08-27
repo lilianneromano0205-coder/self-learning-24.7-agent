@@ -549,8 +549,16 @@ the panel teaches the terminal instead of hiding it.
 
 ## Documentation
 
+**New here?** [QUICKSTART.md](QUICKSTART.md) → the systems table above →
+[ARCHITECTURE.md](ARCHITECTURE.md) → [GOAL_SYSTEM_COMPLETE.md](GOAL_SYSTEM_COMPLETE.md).
+**Auditing the claims?** [EVIDENCE.md](EVIDENCE.md) →
+[GAPS_RISKS_AND_UNFINISHED.md](GAPS_RISKS_AND_UNFINISHED.md) →
+[TRACEABILITY_MATRIX.md](TRACEABILITY_MATRIX.md) — the platform documents
+its own holes as carefully as its features.
+
 | Document | What it is |
 |---|---|
+| **[QUICKSTART.md](QUICKSTART.md)** | **zero to your first VERIFIED goal in ~15 minutes** |
 | **[ARCHITECTURE.md](ARCHITECTURE.md)** | **the complete technical account — start here** |
 | [MANUAL.md](MANUAL.md) | the operator's guide: every command, every setting |
 | **[GOAL_SYSTEM_COMPLETE.md](GOAL_SYSTEM_COMPLETE.md)** | **the goal system end to end** — every module, loop, file format, the reasoning, and what is missing |

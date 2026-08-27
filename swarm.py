@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """SWARM — a goal multiplies its workers, only where the evidence says to.
 
-THE REQUIREMENT. The owner asked for an agent "capable of multiplying
+THE REQUIREMENT. The project calls for an agent "capable of multiplying
 itself until achieving the goal". The research record says precisely when
 that helps and when it destroys the work, and this module is gated on it:
 

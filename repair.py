@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """REPAIR — a blocked goal fixes what blocked it, grounded in evidence.
 
-THE REQUIREMENT THIS SERVES. The owner asked for a goal agent that, when
+THE REQUIREMENT THIS SERVES. The project calls for a goal agent that, when
 the job is not done, modifies itself and its approach UNTIL it is done —
 "not in a dumb way, like an AI hallucinating and thinking it really did the
 job". That last clause is the entire design problem, and the research

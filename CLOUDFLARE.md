@@ -14,10 +14,11 @@ are structural rather than fixable.
 
 ## 0. How this research was done, and why you should trust it
 
-You asked for real research and for the method to be stated. Here it is.
+This document states its method up front so every claim can be re-checked.
 
 **Primary sources only, fetched live.** Every number and quote below comes
-from `developers.cloudflare.com` fetched during this session, not from
+from `developers.cloudflare.com` fetched live on the dates stamped below,
+not from
 memory. Cloudflare publishes an `llms.txt` index and a `/index.md` markdown
 form of every documentation page; those are what was read, so the text quoted
 is the text Cloudflare publishes rather than a summary of it. The raw files
@@ -128,7 +129,7 @@ is *"no backups"*, which is correct for a fresh fleet.
 ## 2. Cloudflare's complete product surface
 
 From their own index: **106 products, 9 categories**. The full developer
-platform (38 products) is listed here because you asked for every product;
+platform (38 products) is listed here in full for completeness;
 the rest of the catalog (application performance, application security,
 Cloudflare One, network security, consumer) is real but has no bearing on
 whether an agent platform runs, so it is summarised rather than enumerated.
@@ -517,7 +518,7 @@ rewrite the platform in TypeScript and give up the gate.
   no Neuron spent. Every "works" above means "matches the documented contract,
   verified locally" — except §4.1, which was additionally tested against a
   loopback server speaking that contract.
-- **Prices and free tiers change.** Every figure is dated to this session and
+- **Prices and free tiers change.** Every figure carries its fetch date and is
   cited to a `/index.md` you can re-fetch in one command.
 - **The container cost model assumes a 5% CPU duty cycle.** That is a
   reasoned estimate from a loop that waits on network, not a measurement. A

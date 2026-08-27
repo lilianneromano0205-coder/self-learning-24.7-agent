@@ -46,8 +46,8 @@ harness itself.
 
 An LLM with a shell forgets, drifts, and — most expensively — *says the job
 is finished when it is not*. That last failure is not fixable inside the
-model, because the model is the thing being asked. Your own words for the
-requirement: achieve the goal "not in a dumb way, like an AI hallucinating
+model, because the model is the thing being asked. The project's founding
+requirement, verbatim: achieve the goal "not in a dumb way, like an AI hallucinating
 and thinking it really did the job." The research record agrees and is
 cited throughout: models asked to self-correct without an external signal
 get **worse** ([Huang et al., ICLR 2024](https://arxiv.org/abs/2310.01798)).
@@ -203,7 +203,7 @@ purely from events and flags snapshot forgery as divergence.
 "acceptance authority unwired", "seal moved inside the root".
 
 ### `runbook.py` — the power that needs no model at all
-Your directive, and the correct one: pre-AI agents (crawlers, spacecraft
+The design directive, and the correct one: pre-AI agents (crawlers, spacecraft
 autonomy, workflow engines, cluster controllers) did regulated work
 reliably because **the work was written down as executable procedure and
 the machine replayed it, verifying as it went**. A runbook is typed steps,
@@ -224,7 +224,7 @@ task**, so the model path could not explain the outcome even by accident.
 *Mutations killed:* 7/7.
 
 ### `swarm.py` — multiplication only where the evidence says it pays
-You asked for an agent that multiplies itself until the goal is achieved.
+The requirement: an agent that multiplies itself until the goal is achieved.
 The controlled evidence
 ([Nature MI 2026](https://www.nature.com/articles/s42256-026-01268-y), 260
 experiments) says centralized coordination gains up to **+81% on
@@ -245,7 +245,8 @@ swarm still failed because the graders refused."
 ("100 events emitted, ledger holds 97").
 
 ### `repair.py` — self-modification without the hallucination
-When a pursuit blocks, the agent must fix *what blocked it* — your words:
+When a pursuit blocks, the agent must fix *what blocked it* — in the
+requirement's words:
 not "thinking it did a good job" while hallucinating. Four laws, each a
 cited result: **LAW 1** no repair without a signal — every action carries
 the failing check and its recorded stderr verbatim from the ledger

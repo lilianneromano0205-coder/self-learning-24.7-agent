@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """RUNBOOKS — the goal agent working with NO MODEL AT ALL.
 
-The owner's directive, almost verbatim: the pre-AI agents — crawlers,
+The design directive, almost verbatim: the pre-AI agents — crawlers,
 spacecraft autonomy, workflow engines, cluster controllers — did regulated,
 hard work reliably without any intelligence, because the work was WRITTEN
 DOWN as executable procedure and the machine replayed it, verifying as it

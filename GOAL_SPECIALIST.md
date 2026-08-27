@@ -4,7 +4,7 @@
 `contract.py`, `universal.py`) hardened against the external audit's
 findings, plus an honest status for every one of the audit's 115 gaps.
 
-This document exists because the owner asked for two things: focus 100% on
+This document answers two demands the project set: focus 100% on
 the system that takes a goal and achieves it, and explain the findings
 deeply enough to act on. Both are here. Every "closed" below names the test
 that proves it; every "open" says what closing it requires. Nothing in this
@@ -113,7 +113,7 @@ many cycles ran) instead of starting a fresh id with amnesia.
 
 ### Runbooks — the goal agent's power that needs no model at all
 
-The owner's directive, and it is the right one: the pre-AI agents that did
+The guiding directive, and it is the right one: the pre-AI agents that did
 regulated, hard work reliably — crawlers with persistent frontiers,
 spacecraft autonomy, workflow engines, cluster controllers — were not
 intelligent. They were reliable because **the work was written down as
@@ -210,7 +210,7 @@ ignored.
 
 ### Swarm — multiplication only where the evidence says it pays
 
-The owner asked for an agent "capable of multiplying itself until achieving
+The project calls for an agent "capable of multiplying itself until achieving
 the goal". The controlled evidence says exactly when that helps and when it
 destroys the work, and `swarm.py` is gated on it rather than inspired by it:
 

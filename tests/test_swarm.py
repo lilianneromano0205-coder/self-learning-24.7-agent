@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """SWARM — multiplication only where the evidence says it pays.
 
-The owner asked for an agent "capable of multiplying itself until achieving
+The project calls for an agent "capable of multiplying itself until achieving
 the goal". The controlled evidence says exactly when that helps and when it
 destroys work: centralized coordination on genuinely decomposable tasks
 gained up to ~81%, while on sequential tasks EVERY multi-agent variant
