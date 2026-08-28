@@ -201,13 +201,18 @@ SYSTEMS = {
                 "capability is acquired without gaining authority; who may do "
                 "what, and the trail that records it",
         "tests": ["test_workers.py", "test_acquire.py", "test_org.py",
-                  "test_rbac.py"],
+                  "test_rbac.py", "test_frontier.py"],
         "blind": "every worker is a RECORD. Nothing here has started a "
                  "container, installed a package, or measured a real start-up "
                  "time — the acquisition ladder is proven to refuse correctly, "
                  "not to install correctly. And `test_rbac.py` proves "
                  "AUTHORISATION given an identity; the identity itself is a "
-                 "bearer token over plain HTTP with no TLS, session or expiry.",
+                 "bearer token over plain HTTP with no TLS, session or expiry. "
+                 "The capability frontier is proved WITHOUT a real install: "
+                 "no registry was queried, no package fetched and no hosted "
+                 "rail called, so what is proven here is that it refuses, "
+                 "seals and reports correctly — not that an acquisition "
+                 "completes.",
     },
     "10. Training lab": {
         "what": "sanitised trajectory export, a deterministic non-overlapping "

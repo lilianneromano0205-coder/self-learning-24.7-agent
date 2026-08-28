@@ -6,11 +6,11 @@ continuously, prove what they did, and remember what they learned.**
 [![tests](https://github.com/reda-baqechame/self-learning-24.7-agent/actions/workflows/tests.yml/badge.svg)](https://github.com/reda-baqechame/self-learning-24.7-agent/actions/workflows/tests.yml)
 ![python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![dependencies](https://img.shields.io/badge/dependencies-stdlib%20only-brightgreen)
-![tests](https://img.shields.io/badge/tests-117%20passing%20%C2%B7%206%20platforms-brightgreen)
-![mutations](https://img.shields.io/badge/mutation%20tests-50%2F50%20killed-brightgreen)
+![tests](https://img.shields.io/badge/tests-118%20passing%20%C2%B7%206%20platforms-brightgreen)
+![mutations](https://img.shields.io/badge/mutation%20tests-53%2F53%20killed-brightgreen)
 ![license](https://img.shields.io/badge/license-AGPL--3.0-orange)
 
-85 Python modules · 117 acceptance tests · one HTML control panel · no
+86 Python modules · 118 acceptance tests · one HTML control panel · no
 database, no framework, no build step. Python 3.11+ and your own API keys.
 
 ```bash
@@ -128,14 +128,15 @@ are laws with tests that would fail, not features with descriptions.**
 
 | Property | The well-known harnesses | Expert Fleet |
 |---|---|---|
-| Who says "done"? | the model or its framework judges its own run | frozen, caller-authored graders sealed before planning, run only by the harness; even the judge is overruled when they disagree — **50/50 mutation-tested laws** |
+| Who says "done"? | the model or its framework judges its own run | frozen, caller-authored graders sealed before planning, run only by the harness; even the judge is overruled when they disagree — **53/53 mutation-tested laws** |
 | Self-improvement | trust the loop to compound | validation-gated: a procedure is PROVEN only after 3 all-verified wins; oscillation stops the lane; drafts refuse to run — matching what the 2026 fragility literature demands |
 | Learn by demonstration | recorded, then trusted | `runbook.py record`: recorded → **CANDIDATE**; a rehearsal replayed through the full authority stack is win #1; a demo you watched is a claim, a demo the graders re-ran is evidence |
 | Security | wrapper products exist *because* the frameworks need wrapping (see the published security analyses of the popular ones) | five mandatory authorities inside the platform — Execution, File, Credential, Model Gateway, Effect — `--audit` at 0 bypasses **in CI**, plus directive-shaped memory flagged at the source |
 | Competence claims | self-reported benchmarks | sealed capability packs the student can neither read nor edit; pretest → exam lift measured by harness-run validators; the author never sits its own exam |
 | Memory over years | vectors and summaries | file-backed cited atoms with expiry, supersession, and a **retraction feed** — plus the compaction-cliff law: safety rules are never summarized, ever |
 | Long context | a bigger window | **recursive sub-calls** (the RLM result, MIT 2025): the material never enters the window — slices go to disposable sub-calls on the cheapest rail, only distilled answers return, metered and contained like every call |
-| Dependencies | large stacks | Python stdlib. Zero. 117 tests on 6 CI platforms |
+| New tools | a fixed integration catalogue, or an agent that installs what it likes | **the capability frontier**: an agent may PROPOSE a tool it lacks, never author the test — it declares an import or a binary, the *platform* generates the probe, and the probe must FAIL before anything is installed. Readiness is decided by a seal outside the agent's reach, and a human adopts it from a terminal |
+| Dependencies | large stacks | Python stdlib. Zero. 118 tests on 6 CI platforms |
 | Your state | often hosted, often theirs | files you own, provider-universal (any key, or a zero-key local model) — the model is a swappable part; the memory, graders, runbooks and ledgers are the asset |
 
 Four shipped archetypes cover the famous products' ground on this

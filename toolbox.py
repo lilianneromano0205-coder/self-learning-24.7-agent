@@ -98,15 +98,27 @@ ACQUIRE = {
 }
 
 
-def recipe(capability, cfg=None):
+def recipe(capability, cfg=None, root=None):
     """How to obtain `capability`, or None if this platform has no route.
 
     -> {"source", "package", "version"}  installable
        {"owner": why[, "command"]}       only the owner can do it
        None                              unknown capability
+
+    `root` is a THIRD parameter, never a second positional, so the published
+    two-argument shape is unchanged. With it, a capability this hand-written
+    table has never heard of can still have a route — the one the frontier
+    derived and sealed for it. Without it, the answer is exactly what it has
+    always been.
     """
     r = ACQUIRE.get(capability)
     if not r:
+        if root:
+            try:
+                import frontier
+                return frontier.recipe(capability, root=root, cfg=cfg)
+            except (OSError, ValueError, ImportError):
+                return None
         return None
     r = dict(r)
     if "package" in r:
@@ -270,6 +282,21 @@ def scan(root=None):
     for c in custom:
         caps[c["name"]] = (c["ready"],
                            f"{c['cmd']}" + (f" — {c['desc']}" if c["desc"] else ""))
+    # Capabilities this fleet OBTAINED for itself. Merged LAST and SKIPPING
+    # every name already present — the opposite of the custom_tools loop
+    # above, which silently replaces a built-in. A skipped name is surfaced by
+    # frontier.summary()['shadowed'] rather than lost, because a collision
+    # nobody can see is a capability report that quietly disagrees with the
+    # runtime. Readiness here is decided by a seal OUTSIDE the expert root,
+    # so this merge cannot be spoofed by editing files under it.
+    if root:
+        try:
+            import frontier
+            for name, cap in (frontier.capabilities(root) or {}).items():
+                if name not in caps:
+                    caps[name] = (cap.get("ready", False), cap.get("how", ""))
+        except (OSError, ValueError, ImportError, json.JSONDecodeError):
+            pass
     return {"binaries": binaries, "modules": modules, "keys": keys,
             "custom": custom,
             "capabilities": {k: {"ready": ok, "how": how}

@@ -219,6 +219,8 @@ dialogs, 40 px targets.
 | `python workers.py add\|list\|choose` | the computers work can run on, and which one a task would use, with the reason |
 | `python org.py create\|invite\|who\|can\|audit\|token\|revoke\|roles` | several people sharing one fleet: roles, personal panel tokens, and an attributable trail |
 | `python acquire.py search\|inspect\|install\|test\|promote` | gaining a capability without gaining uncontrolled authority |
+| `python frontier.py propose\|falsify\|route\|acquire\|prove\|adopt` | obtaining a tool nobody anticipated: the agent declares a capability and a two-field probe spec, the **platform** writes the probe, and the probe must FAIL before anything is installed |
+| `python frontier.py status\|explain\|retire\|reseal\|accept-terms\|run-probe` | what this fleet can do and what it tried and could not; withdrawing a capability, re-sealing its probe (owner-gated), and recording that a human accepted a service's terms |
 | `python training.py status\|export\|register\|promote\|rollback` | training data and promotion governance (it does **not** update weights; trajectories are captured by the loop, not by hand) |
 | `python execution.py --audit` | every process-execution site in the tree, and whether it goes through the authority |
 | `python modelrouter.py policy <name>` | Cheapest · Balanced · Highest quality · Custom |

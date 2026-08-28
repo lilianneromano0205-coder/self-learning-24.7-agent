@@ -177,7 +177,7 @@ def plan(root, gid):
             for cap, meta in scan["capabilities"].items():
                 if meta.get("ready"):
                     continue
-                rx = toolbox.recipe(cap)
+                rx = toolbox.recipe(cap, root=root)
                 if not rx:
                     continue
                 sig = next((s for s in d["signals"]

@@ -229,6 +229,33 @@ MUTATIONS = [
         # Files created in a bind mount belong to the user INSIDE the''',
      "test_docker_live.py",
      "a workspace the agent can no longer write to", True),
+
+    # All three are paired with test_frontier.py, which needs no Docker and
+    # never prints the token these results are scored on — so they are CAUGHT
+    # or MISSED on every machine, never silently skipped.
+    ("frontier: a probe need not fail before acquiring", "frontier.py",
+     '''    if row["stage"] != "red":''',
+     '''    if False:''',
+     "test_frontier.py",
+     "installing on the strength of a probe that never distinguished having "
+     "the capability from not having it"),
+
+    ("frontier: the last seal wins", "frontier.py",
+     '''        if first is None:
+            first = h
+        elif h != first:
+            conflict = True''',
+     '''        first = h''',
+     "test_frontier.py",
+     "an attacker who never needs to edit a seal, because appending one wins"),
+
+    ("frontier: readiness is decided inside the expert root", "frontier.py",
+     '''            if (ad and ad.get("probe_hash") == row.get("probe_hash")
+                    and ad.get("how_hash") == _how_hash(row.get("how_argv") or [])):''',
+     '''            if True:''',
+     "test_frontier.py",
+     "a capability made READY by writing one word into a file the worker can "
+     "reach"),
 ]
 
 

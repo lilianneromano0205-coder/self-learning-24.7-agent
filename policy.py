@@ -106,6 +106,21 @@ REVIEW = [
      "a state-changing HTTP request to the outside world"),
     (r"\b(pip|pip3)\s+install\b(?!.*--(?:target|user))", "installing into the environment"),
     (r"\bnpm\s+(i|install)\s+-g\b", "installing globally"),
+    # Adopting a capability publishes a command to every future agent in this
+    # fleet, and re-sealing replaces the test a tool had to pass. Written in
+    # the same shape as the mcp.py rule so that flag order and a quoted
+    # absolute path cannot evade it. This is not the load-bearing gate —
+    # frontier._owner_gate is — because policy.review is disabled wholesale by
+    # [agent] autonomy = "full", which is exactly why the gate does not
+    # depend on it.
+    (r"\bfrontier\.py\b[^|;&]*\b(adopt|accept-terms|reseal|retire)\b",
+     "adopting a capability into the fleet, accepting terms on your behalf, "
+     "or re-sealing a grader"),
+    # `python acquire.py promote <id>` matches nothing in BUILTIN_DENY or
+    # REVIEW today, so any agent holding run_command can grant its own
+    # acquisition the fleet's trust.
+    (r"\bacquire\.py\b[^|;&]*\bpromote\b",
+     "granting an acquired tool the fleet's trust"),
 ]
 
 

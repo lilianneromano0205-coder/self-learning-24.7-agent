@@ -44,7 +44,12 @@ CONTROL_FILES = {
     "settings.toml", "mcp.json", "state.json", "prospective.json",
     "routines.json", "org.json",
 }
-CONTROL_DIRS = {"prompts", "approvals", "variants", "effects", "org"}
+# `frontier` holds the sealed probe SPECS and the capability ledger. If the
+# worker could write there through the ordinary write_file tool it could edit
+# the test that says its own new tool works, which is the one thing the
+# frontier exists to prevent.
+CONTROL_DIRS = {"prompts", "approvals", "variants", "effects", "org",
+                "frontier"}
 # Root-relative paths that are CONTROL wherever they sit, because the
 # DIRECTORY around them is legitimately the agent's own workspace.
 #

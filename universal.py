@@ -328,8 +328,18 @@ def route(goal, criteria=""):
 
 # --------------------------------------------------------------- assessment
 
-def required_capabilities(goal, criteria=""):
-    """-> [(capability, why)] the goal's own words imply."""
+def required_capabilities(goal, criteria="", root=None):
+    """-> [(capability, why)] the goal's own words imply.
+
+    The hint table below is the FLOOR: free, deterministic, and finite. Being
+    finite is the whole reason `root` exists. A goal needing something the
+    table never anticipated — speech synthesis, screen recording, a CAD
+    kernel — matched nothing, so the platform reported READY and failed the
+    run several milestones deep. With `root`, this also asks the capability
+    frontier what THIS fleet has learned it needs, which is a ledger of
+    capabilities it has actually met, proved or been refused — never a model's
+    guess. `root=None` reproduces the shipped behaviour exactly.
+    """
     text = f"{goal} {criteria}".lower()
     out, seen = [], set()
     for pattern, cap in CAPABILITY_HINTS:
@@ -337,6 +347,15 @@ def required_capabilities(goal, criteria=""):
         if m and cap not in seen:
             seen.add(cap)
             out.append((cap, f"the goal mentions {m.group(0)!r}"))
+    if root:
+        try:
+            import frontier
+            for cap, why in frontier.implied(root, goal, criteria):
+                if cap not in seen:
+                    seen.add(cap)
+                    out.append((cap, why))
+        except (OSError, ValueError, ImportError):
+            pass
     return out
 
 
@@ -389,9 +408,22 @@ def assess(home, expert, goal, criteria=""):
 
     gaps = []
     granted = []                 # authority the owner has already answered
-    for cap, why in required_capabilities(goal, criteria):
+    for cap, why in required_capabilities(goal, criteria, root=root):
         row = caps.get(cap)
         if row is None:
+            # THE FALSE-READY HOLE, CLOSED. This used to `continue`, so a
+            # capability the hint table named and this machine could not
+            # report was silently DROPPED — and a goal needing it was told
+            # READY, then failed several milestones deep. A named capability
+            # nothing reports is a gap, and the fix is a command, not a shrug.
+            gaps.append({"dimension": "capability", "what": cap, "why": why,
+                         "detail": f"this capability is named by the goal but "
+                                   f"nothing on this machine reports it — "
+                                   f"`python frontier.py propose {cap} "
+                                   f"--root {root} --need \"...\" "
+                                   f"--quote \"...\" --goal \"...\"`",
+                         "routes_to": mission.GAPS["capability"]["routes_to"],
+                         "user_sees": mission.GAPS["capability"]["user_sees"]})
             continue
         if not row["ready"]:
             gaps.append({"dimension": "capability", "what": cap, "why": why,
@@ -443,7 +475,8 @@ def assess(home, expert, goal, criteria=""):
     return {"expert": expert, "goal": goal, "criteria": criteria,
             "gaps": gaps, "knowledge": known, "granted": granted,
             "capabilities_required": [c for c, _ in
-                                      required_capabilities(goal, criteria)]}
+                                      required_capabilities(goal, criteria,
+                                                            root=root)]}
 
 
 def knowledge_on_hand(root, goal, criteria=""):

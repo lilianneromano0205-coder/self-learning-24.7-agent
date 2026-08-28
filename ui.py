@@ -1429,6 +1429,14 @@ class Handler(BaseHTTPRequestHandler):
                                     path)):
                 import acquire
                 self._json(acquire.summary(expert_root(self.home, m.group(1))))
+            elif (m := re.fullmatch(r"/api/experts/([a-z0-9-]+)/frontier",
+                                    path)):
+                # READ ONLY, deliberately. Adoption is not a panel button:
+                # frontier._owner_gate requires a process that is NOT inside an
+                # agent task and an exact echo of the command being published,
+                # and neither condition can be met by an HTTP handler.
+                import frontier
+                self._json(frontier.summary(expert_root(self.home, m.group(1))))
             elif path == "/api/org":
                 import org
                 self._json(org.summary(self.home))

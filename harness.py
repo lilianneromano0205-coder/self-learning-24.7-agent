@@ -53,6 +53,7 @@ LEDGERS = [
     ("prospective.json", "prospective ledger"),
     ("variants/manifest.json", "variant manifest"),
     ("mcp.json", "MCP server config"),
+    ("frontier/frontier.json", "capability frontier ledger"),
 ]
 STALE_LOCK_SECONDS = 60
 CORE_FILES = ["loop.py", "context.py", "policy.py", "effects.py",

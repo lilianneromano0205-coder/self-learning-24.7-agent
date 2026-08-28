@@ -618,3 +618,77 @@ experts, and declared-independent swarm workers. For a platform whose
 product is *proven* work rather than lifelike behavior, that trade is
 the design — but it is a real trade, and PIANO is the right tool for
 the lane this one gave up.
+
+---
+
+## AD-28 — The capability frontier: a model may propose a tool, never its own exam
+
+**Status.** Accepted, 2026-08-28. Shipped as `frontier.py` with fifteen
+acceptance laws and three mutations.
+
+**The defect, measured before anything was written.** Everything this
+platform could ever do was trapped inside two hand-written tables:
+`universal.CAPABILITY_HINTS` (~10 regex entries) decided what a goal was
+understood to NEED, and `toolbox.ACQUIRE` (11 entries) decided what could
+be OBTAINED. Run against five ordinary goals it produced three different
+kinds of wrong answer:
+
+| Goal | Derived |
+|---|---|
+| narrated screen-recorded walkthrough of a SaaS | **nothing** → reported READY |
+| generate a **spoken** audio summary | `transcribe` — speech *recognition*, the opposite |
+| render a 3D CAD model, export STEP | **nothing** → reported READY |
+| **sign** the release binaries with a certificate | `browser_control` — "sign" matched the sign-*in* stem |
+
+A goal outside the table asked for nothing, so `ready()` said READY and
+the run failed several milestones deep. A goal just outside it was
+answered confidently wrong. That second one is hallucination at the
+ROUTING layer, before a model is called at all.
+
+**What was NOT the problem.** `acquire.py`. Its ladder installs into an
+isolated directory, runs a sandboxed probe and OBSERVES the exit code.
+The ladder is sound; its input vocabulary was finite and hand-maintained.
+
+**Decision.** Make the vocabulary open-ended and let nothing through
+unchecked. A model may PROPOSE a capability. It may never author the
+test. A proposal is two declared fields — an import name plus its
+package, or a binary name — and the PLATFORM generates the probe body
+from a closed template on every run. There is no `probe_python`
+parameter, no `argv`, no witness string.
+
+**Why the declarative form, specifically.** The first draft let the agent
+supply probe code. Three independent adversarial reviews returned
+*unsound* on exactly that: a tool that writes its own exam passes it. A
+declarative spec cannot be state-dependent, cannot read a secret, cannot
+smuggle a token into a shell string, and cannot pass by pointing at a
+file the agent can edit.
+
+**The probe must fail first.** A probe already green before installation
+cannot distinguish having the capability from not having it, so it lands
+at `unfalsifiable` — terminal, never ready, never adopted. Corroboration
+that the thing may already exist is recorded as an owner action, never as
+a stage change.
+
+**Readiness is decided outside the expert root.** `capabilities()`
+reports ready only when the seal ledger — a file outside the root —
+carries an adoption row whose hashes still match both the spec and the
+published command. Hand-writing `owned` into the expert's own ledger buys
+nothing, and the mutation that removes that comparison is CAUGHT.
+
+**One deliberate divergence from `contract.py`.** The contract seal
+ledger documents "the LAST seal wins". Under that rule an attacker never
+needs to EDIT a seal — appending one is enough, and appending is exactly
+what an append-only ledger permits. The frontier is therefore
+FIRST-seal-wins, and any later row with a different hash is a conflict
+treated as TAMPER. This is recorded here as a finding about the shipped
+contract seal, not only as a choice about this one: the same append is
+available there. Changing `contract.py` would not be additive and is not
+proposed in this decision.
+
+**Price paid.** The frontier cannot detect a capability nobody proposes,
+so a first encounter with a genuinely wild goal may still start and fail.
+What is guaranteed is that the failure becomes a sealed row with a probe
+and a route, and the SECOND encounter is honest. Installed bytes also
+remain agent-writable — `acquire.install` writes into `capabilities/`,
+which is a workspace zone — so `install_digest` is detection, not
+prevention, exactly the ceiling `contract.py` states about its own seal.
