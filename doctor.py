@@ -299,7 +299,13 @@ def readiness(home):
         if not shutil.which(tool):
             add(f"{tool} not installed", f"optional: unlocks {unlock}", False)
     try:
-        import fitz  # noqa: F401
+        # pymupdf first: the legacy `fitz` name prints a deprecation warning
+        # ON STDOUT, which corrupts every --json surface. See ingest.pdf_text
+        # for the full account — it broke the deployment's own acceptance gate.
+        try:
+            import pymupdf  # noqa: F401
+        except ImportError:
+            import fitz  # noqa: F401
     except Exception:
         add("pymupdf not installed", "optional: pip install pymupdf unlocks "
                                      "PDF page rendering", False)

@@ -208,10 +208,27 @@ def pdf_text(src, dst):
     if try_rich_convert(src, dst):
         with open(dst, "r", encoding="utf-8") as f:
             return len(f.read())
+    # `import pymupdf` FIRST, `fitz` only as the legacy fallback.
+    #
+    # Importing the old `fitz` name makes pymupdf print
+    #     warning: The `fitz` API is deprecated and will be removed in future.
+    # ON STDOUT. That line landed directly in front of `preflight.py --json`'s
+    # output, so json.loads() saw "warning: ..." at char 0 and every consumer
+    # of that API — the panel, any script, and the deployment's own acceptance
+    # gate — broke the moment pymupdf was installed. setup-vps.sh installs
+    # pymupdf, so the installer was breaking its own gate.
+    #
+    # Found only by a full end-to-end deployment rehearsal: no CI runner and
+    # no developer machine had pymupdf installed under the user running the
+    # tests. Importing `pymupdf` prints nothing, and `fitz` is slated for
+    # REMOVAL, so this is also the version that keeps working.
     try:
-        import fitz  # pymupdf
+        import pymupdf as fitz
     except ImportError:
-        sys.exit("ERROR: pymupdf not installed (pip install pymupdf).")
+        try:
+            import fitz
+        except ImportError:
+            sys.exit("ERROR: pymupdf not installed (pip install pymupdf).")
     doc = fitz.open(src)
     pages = []
     for i, page in enumerate(doc, 1):
@@ -227,9 +244,12 @@ def pdf_text(src, dst):
 
 def pdf_pages(src, outdir, dpi=150):
     try:
-        import fitz
+        import pymupdf as fitz          # see the note in pdf_text above
     except ImportError:
-        sys.exit("ERROR: pymupdf not installed (pip install pymupdf).")
+        try:
+            import fitz
+        except ImportError:
+            sys.exit("ERROR: pymupdf not installed (pip install pymupdf).")
     os.makedirs(outdir, exist_ok=True)
     doc = fitz.open(src)
     for i, page in enumerate(doc, 1):

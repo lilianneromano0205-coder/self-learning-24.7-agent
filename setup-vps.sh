@@ -8,6 +8,28 @@
 
 set -euo pipefail
 
+# DROPPING PRIVILEGES WITHOUT DEPENDING ON `sudo`.
+#
+# This script runs as root and used `sudo -u agent ...` to step down. A
+# deployment rehearsal on a fresh Ubuntu 26.04 machine aborted at that exact
+# line with "sudo: command not found": minimal images do not ship sudo, and
+# `set -e` then killed the run BEFORE the files were copied, the units were
+# installed, or the acceptance suite was executed — leaving a half-built
+# machine that looked provisioned and had nothing in /home/agent/agent.
+#
+# Hetzner's stock image does include sudo, so this would probably have
+# worked. "Probably" is not the standard for the one script that stands
+# between an owner and a working fleet. `runuser` ships with util-linux on
+# every Linux that exists and is the correct root-side tool for this; su is
+# the fallback, and sudo is never required.
+as_agent() {
+    if command -v runuser >/dev/null 2>&1; then
+        runuser -u agent -- "$@"
+    else
+        su agent -c "$(printf '%q ' "$@")"
+    fi
+}
+
 echo "== packages =="
 apt-get update -qq
 # `python-is-python3` IS NOT OPTIONAL, and its absence was invisible to
@@ -31,7 +53,7 @@ apt-get install -y -qq python3 python3-pip python-is-python3 \
 
 echo "== user =="
 id -u agent >/dev/null 2>&1 || adduser --disabled-password --gecos "" agent
-sudo -u agent pip install --break-system-packages --quiet pymupdf
+as_agent pip install --break-system-packages --quiet pymupdf
 
 echo "== files =="
 mkdir -p /home/agent/agent
@@ -59,7 +81,7 @@ cp /home/agent/agent/agent-ui.service /etc/systemd/system/
 systemctl daemon-reload
 
 echo "== offline acceptance tests (as agent) =="
-cd /home/agent/agent && sudo -u agent python3 tests/run_all.py
+cd /home/agent/agent && as_agent python3 tests/run_all.py
 
 cat <<'EOF'
 
