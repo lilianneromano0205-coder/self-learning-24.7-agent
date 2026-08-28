@@ -450,6 +450,21 @@ def check_the_command_that_would_reach_the_shell_is_safe(root):
             raise AssertionError(f"{bad} was accepted as a published command")
         except frontier.Refused:
             pass
+
+    # A TILDE MID-PATH IS NOT A METACHARACTER, and treating it as one broke
+    # three CI runners while passing on every machine with long paths: every
+    # Windows 8.3 short name has one, and GitHub's runners put their temp
+    # under C:\Users\RUNNER~1. A tilde expands only at the START of a word.
+    frontier._no_meta(r"C:\Users\RUNNER~1\AppData\Local\Temp\x",
+                      "/home/runner/work/repo~1/x")
+    for lead in ("~/somewhere", "~"):
+        try:
+            frontier._no_meta(lead)
+            raise AssertionError(
+                f"{lead!r} was accepted, and a LEADING tilde really does "
+                f"expand: the path that runs would not be the path checked")
+        except frontier.Refused:
+            pass
     assert any("frontier" in p and "adopt" in p for p, _w in policy.REVIEW), (
         "adopting a capability is not in policy.REVIEW")
     assert any("acquire" in p and "promote" in p for p, _w in policy.REVIEW), (

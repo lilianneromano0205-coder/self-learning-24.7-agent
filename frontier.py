@@ -145,7 +145,15 @@ HOW_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.,:@+=/\\-]{1,120}$")
 # quotes an element ONLY when it contains a space (acquire.py:614-618). An
 # element carrying '&' or '|' and no space is therefore interpolated raw.
 # Every path and token this module lets reach that string is checked here.
-SHELL_META = set("&|;<>^()\"'`$\n\r\t*?[]{}!~")
+SHELL_META = set("&|;<>^()\"'`$\n\r\t*?[]{}!")
+# `~` is NOT in that set, and the omission is deliberate. A tilde expands
+# only at the START of a word in a POSIX shell; mid-word it is an ordinary
+# character. Windows 8.3 short paths contain one by construction — every
+# GitHub Actions Windows runner has its temp under C:\Users\RUNNER~1 — so
+# banning it outright refused a legitimate expert root and failed the suite
+# on three runners while passing on every machine whose paths are long.
+# A LEADING tilde is still refused, below, because that one really does
+# expand.
 
 MAX_OPEN = 8
 MAX_PROPOSALS_PER_DAY = 12
@@ -339,7 +347,14 @@ def _how_hash(how_argv):
 
 def _no_meta(*strings):
     for s in strings:
-        for ch in str(s or ""):
+        text = str(s or "")
+        if text.startswith("~"):
+            raise Refused(
+                f"{text!r} begins with '~', which a POSIX shell expands to a "
+                f"home directory; the acquisition ladder composes a shell "
+                f"command string, so the path it runs would not be the path "
+                f"that was checked.")
+        for ch in text:
             if ch in SHELL_META:
                 raise Refused(
                     f"{s!r} contains {ch!r}; the acquisition ladder composes a "
