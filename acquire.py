@@ -261,11 +261,27 @@ def request(root, name, source, need, version="", manifest_text="",
             f"Known: {', '.join(sorted(SOURCES))}. Guessing would mean "
             f"resolving the name somewhere it does not live.")
     source = src
-    known = search_known(root, need)
-    if known:
+    # REFUSING an install takes TWO shared words; listing a hit takes one.
+    # _need_words already fixed the substring version of this failure ("a
+    # thing" matching "everything"); the token version was one level up: the
+    # need "an always-sorted container" was refused because the single word
+    # "always" appears in web_fetch's help text. One common English token in
+    # common is a coincidence; two distinct meaningful words is a claim.
+    # search_known itself is unchanged — its single-word hits still surface
+    # as notes for humans, where a false positive costs a glance, not a
+    # blocked acquisition.
+    nw = _need_words(need)
+    strong = []
+    for k in search_known(root, need):
+        hay = set(re.findall(r"[a-z0-9_]+",
+                             f"{k.get('name', '')} {k.get('provides', '')} "
+                             f"{k.get('why', '')}".lower()))
+        if len(nw & hay) >= 2:
+            strong.append(k)
+    if strong:
         raise Refused(
             f"we already have this capability: "
-            + ", ".join(k["name"] for k in known[:3])
+            + ", ".join(k["name"] for k in strong[:3])
             + ". Use it rather than installing something new — an unnecessary "
               "dependency is permanent and a search is free.")
     report = inspect(name, source, version, manifest_text, requires_secrets)

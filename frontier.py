@@ -479,16 +479,21 @@ def propose(root, capability, need, quote, goal, criteria="", kind="import",
             raise Refused(f"{capability!r} contains the built-in capability "
                           f"name {b!r}; that substring changes how the "
                           f"capability report is parsed")
-    # The published command is held to the same rule but only for names long
-    # enough to be a real collision. Short generic names — `git`, `vision`,
-    # `node_js` — occur inside perfectly ordinary commands, and refusing
-    # `git status` because `git` is also a capability name would make the
-    # frontier unusable for the tools people actually have.
+    # The published command is held to a WORD-BOUNDARY rule, not a substring
+    # one. The first version refused any how token merely CONTAINING a
+    # built-in name of 8+ chars — which outlawed acquiring
+    # `sortedcontainers`, a major real library, because "containers" sits
+    # inside it. A fragment inside a longer alphanumeric word cannot be
+    # picked out by the note's line classifier as a standalone name; a token
+    # that IS the built-in name (or carries it delimiter-bounded, like
+    # `run-containers`) still can, and is still refused.
     for b in builtins:
-        if b and len(b) >= 8 and any(b in t for t in how_argv):
+        if b and len(b) >= 8 and any(
+                re.search(rf"(?<![a-z0-9]){re.escape(b)}(?![a-z0-9])",
+                          t.lower()) for t in how_argv):
             raise Refused(f"the published command contains the built-in "
-                          f"capability name {b!r}; that substring changes how "
-                          f"the capability report is parsed")
+                          f"capability name {b!r} as a standalone word; "
+                          f"that changes how the capability report is parsed")
     if kind not in ("import", "binary"):
         raise Refused(f"probe kind {kind!r} is not one this platform can "
                       f"generate; it is 'import' or 'binary'")

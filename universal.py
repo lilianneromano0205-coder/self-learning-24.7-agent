@@ -395,7 +395,9 @@ AUTHORITY_HINTS = [
     # costs a question, and a false "go ahead" costs a fire.
     (_stems("cut power", "turn off", "turn on", "switch off", "switch on",
             "power down", "power off", "shut down", "shutdown", "actuate",
-            "open the valve", "close the valve", "feed rate", "set point",
+            "open the valve", "close the valve", "open the vent",
+            "close the vent", "open the damper", "close the damper",
+            "open the gate", "close the gate", "feed rate", "set point",
             "setpoint", "start the motor", "stop the line", "stop the motor",
             "unlock", "lock the", "arm the", "disarm", "throttle",
             "energise", "energize", "de-energise", "de-energize",
@@ -501,7 +503,22 @@ def route(goal, criteria=""):
                 "how_panel": how_panel, "alternatives": alts or [],
                 "note": note}
 
-    if t.rstrip().endswith("?") or first in (
+    # A CONDITION OUTRANKS A QUESTION-WORD. "when the FDA docket gets a new
+    # entry then brief me" starts with "when", and the interrogative check
+    # below read it as a question — routing a standing intention to a
+    # one-shot answer. A sentence that pairs a trigger word with a
+    # consequence verb is a conditional whatever its first word is, so the
+    # conditional is decided first; a real question ("when does the docket
+    # update?") carries no consequence clause and still lands at consult.
+    _COND = (r"\b(when(ever)?|if|each time)\b[^.]{3,120}\b(then|alert|"
+             r"notify|re-?run|redo|update|do|start|tell|brief|open|send|"
+             r"flag|surface|add)\b")
+    # ...and a question mark outranks them both: "when does the docket
+    # update?" matches when...update, but a sentence that ENDS in a question
+    # mark is a question whatever shapes it contains inside.
+    if re.search(_COND, low) and not t.rstrip().endswith("?"):
+        pass                     # falls through to the conditional branch
+    elif t.rstrip().endswith("?") or first in (
             "what", "why", "how", "when", "who", "which", "where",
             "should", "is", "are", "can", "does", "do", "did"):
         return R("consult",
@@ -509,8 +526,7 @@ def route(goal, criteria=""):
                  "must cite the expert's own notes or say NOT IN MY TRAINING",
                  'python consult.py ask <root> "the question"',
                  "agent → Access → Ask")
-    if re.search(r"\b(when(ever)?|if|each time)\b[^.]{3,120}\b(then|alert|"
-                 r"notify|re-?run|redo|update|do|start|tell)\b", low):
+    if re.search(_COND, low):
         return R("prospective intention",
                  "a future action tied to a condition — held in the "
                  "intention ledger and fired by the scheduler, never left "
@@ -518,8 +534,12 @@ def route(goal, criteria=""):
                  'python prospective.py add --root <root> --goal "..." '
                  '--when-check "<probe that exits 0 when it is time>"',
                  "agent → Work (intentions)")
+    # ALL SEVEN WEEKDAYS. This listed monday and friday and nothing between,
+    # so "every sunday reconcile the payouts" was not a routine — a schedule
+    # cue that depends on which day you pick is not a schedule cue.
     if re.search(r"\b(every|each)\s+(day|week|month|morning|evening|night|"
-                 r"hour|monday|friday|\d)", low) or re.search(
+                 r"hour|weekday|weekend|monday|tuesday|wednesday|thursday|"
+                 r"friday|saturday|sunday|\d)", low) or re.search(
                  r"\b(daily|weekly|monthly|nightly|hourly)\b", low):
         return R("routine",
                  "recurring work on a schedule — the loop wakes it; nobody "

@@ -427,6 +427,26 @@ def check_a_frontier_capability_cannot_shadow_or_break_a_built_in(root):
     note = toolbox.capability_note(root)
     assert note.count("READY") >= 1, "the capability note lost its sections"
 
+    # A BUILT-IN NAME INSIDE A LONGER WORD IS NOT A COLLISION. The first
+    # rule refused any how token merely CONTAINING a built-in name, which
+    # outlawed acquiring `sortedcontainers` because "containers" sits inside
+    # it. Boundary-bounded occurrences are still refused.
+    r_ok = frontier.propose(root, "longword_ok", "need", QUOTE, GOAL,
+                            kind="import", module="m_lw", package="p_lw",
+                            how_argv=["python", "-c", "import",
+                                      "sortedcontainers"])
+    assert r_ok["stage"] == "proposed", (
+        "a package name carrying a built-in name as a FRAGMENT of a longer "
+        "word was refused; that bans real libraries like sortedcontainers")
+    try:
+        frontier.propose(root, "standalone_bad", "need", QUOTE, GOAL,
+                         kind="import", module="m_sb", package="p_sb",
+                         how_argv=["run-containers", "up"])
+        raise AssertionError("a standalone built-in token in the published "
+                             "command was accepted")
+    except frontier.Refused:
+        pass
+
     # AND A CAPABILITY OF OUR OWN IS NOT ITS OWN SHADOW. toolbox.scan now
     # MERGES this ledger, so a shadow check written as "does the name appear
     # in scan()" answers yes for every frontier capability and reports them

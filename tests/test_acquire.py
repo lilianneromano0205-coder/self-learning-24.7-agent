@@ -161,6 +161,16 @@ def check_search_first(sb):
     print("[search-first] a second request for a capability we already trust "
           "was refused and pointed at the existing tool — an unnecessary "
           "dependency is permanent")
+    # ...but ONE common word in common is a coincidence, not possession.
+    # Found live: the need "an always-sorted container" was refused because
+    # the single word "always" appears in web_fetch's help text, blocking a
+    # legitimate install of sortedcontainers with a message naming a tool
+    # that has nothing to do with the need. Refusal takes TWO shared words.
+    rec2 = acquire.request(sb, "sortedcontainers", "pypi",
+                           "an always-sorted container", version="2.4.0")
+    assert rec2["stage"] == "inspected", (
+        f"a single shared common word ('always') refused an unrelated "
+        f"install again: {rec2}")
 
 
 def check_malicious_fixture(sb):

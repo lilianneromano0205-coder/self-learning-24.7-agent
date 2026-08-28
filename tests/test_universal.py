@@ -316,6 +316,26 @@ def check_the_router_reads_shape_not_vibes(home):
         for k in ("why", "how_cli", "how_panel", "note"):
             assert got.get(k), f"{goal!r} routed with no {k} — a verdict "\
                                f"with no path is a dead end wearing a label"
+    # THREE DEFECTS FOUND BY A LIVE CLAIMS AUDIT, pinned so they stay dead:
+    # weekday names were not schedule cues (only monday and friday were
+    # listed, so "every sunday" was not a routine); a leading "when" with a
+    # consequence clause was read as a question; and a question mark must
+    # outrank the conditional shape it contains.
+    for goal, want in (
+            ("every sunday reconcile the payouts against the ledger",
+             "routine"),
+            ("every wednesday rotate the backups", "routine"),
+            ("when the fda docket gets a new entry then brief me",
+             "prospective intention"),
+            ("when does the docket update?", "consult")):
+        got = universal.route(goal)["system"]
+        assert got == want, (
+            f"{goal!r} routed to {got!r}, expected {want!r} — a precedence "
+            f"or vocabulary fix from the claims audit has regressed")
+    assert universal.authority_gaps(
+        "open the vent if the co2 passes 1500ppm"), (
+        "venting is physical actuation and lost its owner stop")
+
     # the route must be honest about being mechanical
     assert "mechanical" in universal.route("anything")["note"], (
         "the router stopped disclosing that it reads shape, not meaning")
