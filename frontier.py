@@ -1279,19 +1279,22 @@ def summary(root):
     by = {}
     for r in rows:
         by.setdefault(r.get("stage", "?"), []).append(r.get("capability"))
+    # SHADOWED means "something else already owns this name, so the merge
+    # skipped mine" — NOT "the name appears in scan()", which it always does
+    # now that scan() merges this ledger. Comparing a name against a report
+    # that already contains it reported every open capability as shadowed,
+    # and a false alarm in the one place that exists to surface real
+    # collisions is worse than no alarm.
     shadowed = []
     try:
         import toolbox
-        built = set(toolbox.scan(root).get("capabilities") or {})
-        mine = {r["capability"] for r in rows}
-        # A name reported by scan() that this ledger also owns was skipped by
-        # the merge: visible rather than silent.
-        for r in rows:
-            if r["capability"] in built and r["capability"] not in (mine - built):
-                pass
-        shadowed = sorted(n for n in mine if n in built
-                          and not any(x["capability"] == n
-                                      and x["stage"] == "owned" for x in rows))
+        reported = toolbox.scan(root).get("capabilities") or {}
+        ours = capabilities(root)
+        for name, ours_row in ours.items():
+            got = reported.get(name)
+            if got and got.get("how") != ours_row.get("how"):
+                shadowed.append(name)
+        shadowed.sort()
     except Exception:
         shadowed = []
     actions = []

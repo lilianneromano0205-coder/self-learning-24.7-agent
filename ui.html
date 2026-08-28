@@ -596,7 +596,8 @@ function syncHash(){
   const h = S.sel
     ? "#agent/" + encodeURIComponent(S.sel) + "/" + (S.sub || "ov")
       + (S.sub === "goals" && S.goalSel ? "/" + encodeURIComponent(S.goalSel) : "")
-    : "#" + (S.view || "home");
+    : "#" + (S.view || "home")
+      + (S.view === "resources" && S.resTab ? "/" + S.resTab : "");
   if (location.hash !== h){
     try{ history.replaceState(null, "", h); }catch(e){}
   }
@@ -610,6 +611,10 @@ function applyHash(){
     S.goalSel = (S.sub === "goals" && p[3]) ? decodeURIComponent(p[3]) : null;
   } else if (/^[a-z]+$/.test(p[0])){
     S.view = p[0]; S.sel = null;
+    // #resources/frontier lands on a TAB, not just the section. The tabs
+    // were reachable only by clicking, so a link to "the capabilities this
+    // fleet obtained" could not be sent to anybody.
+    if (p[0] === "resources" && p[1] && /^[a-z]+$/.test(p[1])) S.resTab = p[1];
   }
 }
 window.addEventListener("hashchange", ()=>{ applyHash(); render(); });
@@ -4369,6 +4374,7 @@ async function renderWorkProof(b){
 async function renderResources(m){
   const tab = S.resTab || "computers";
   const TABS = [["computers","Computers"],["tools","Tools"],
+                ["frontier","Frontier"],
                 ["knowledge","Knowledge"],["skills","Skills"]];
   m.innerHTML = `
     <div class="pagehead"><h1>Resources</h1>
@@ -4380,8 +4386,78 @@ async function renderResources(m){
   const b = document.getElementById("resBody");
   if (tab==="computers") return renderComputers(b);
   if (tab==="tools")     return renderToolsTab(b);
+  if (tab==="frontier")  return renderFrontier(b);
   if (tab==="knowledge") return renderMemory(b, true);
   return renderSkillsTab(b);
+}
+
+/* THE CAPABILITY FRONTIER — what this fleet obtained for itself, what it
+   tried and could not, and what is waiting on you. Read-only ON PURPOSE:
+   adopting a capability publishes a command to every future agent, and the
+   gate for that requires a terminal outside any agent task plus an exact
+   echo of the command — neither of which a button can satisfy. */
+const FRONTIER_STAGE = {
+  owned:        ["ok",   "owned — adopted by you, published to every agent"],
+  proven:       ["warn", "proven — the sealed probe passes; waiting for you to adopt it"],
+  red:          ["muted","the probe failed as it must; ready to acquire"],
+  acquiring:    ["muted","walking the acquisition ladder"],
+  routing:      ["muted","choosing a rung"],
+  proposed:     ["muted","declared; nothing observed yet"],
+  unfalsifiable:["warn", "the probe passed BEFORE anything was installed, so it proves nothing"],
+  refused:      ["bad",  "an attempt failed; not retried until its backoff expires"],
+  impossible:   ["bad",  "no rung can reach it without you"],
+  retired:      ["muted","withdrawn by you"],
+};
+async function renderFrontier(b){
+  // Load the fleet if nothing has yet. Arriving straight here by deep link
+  // (#resources/frontier) reaches this before any other renderer has filled
+  // S.sys, and reading an empty cache told a fleet with agents in it to
+  // "create an expert first".
+  const sys = (S.sys && S.sys.experts) ? S.sys : await refreshSys();
+  const who = ((sys||{}).experts||[])[0];
+  if (!who){ b.innerHTML = `<div class="empty">create an expert first</div>`; return; }
+  let d;
+  try { d = await api(`/api/experts/${encodeURIComponent(who.name)}/frontier`); }
+  catch(e){ b.innerHTML = `<p class="bad">${esc(String(e))}</p>`; return; }
+  const stages = (d && d.by_stage) || {};
+  const rows = [];
+  for (const [stage, names] of Object.entries(stages)){
+    const [tone, why] = FRONTIER_STAGE[stage] || ["muted", stage];
+    for (const n of (names||[])) if (n) rows.push({n, stage, tone, why});
+  }
+  const refused = (d && d.refused) || [];
+  const why = Object.fromEntries(refused.map(r => [r.name, r]));
+  b.innerHTML = `
+    <p class="muted" style="font-size:12.5px;max-width:78ch">A goal can need a
+    tool this fleet has never had. An agent may <b>propose</b> one — it may
+    never write the test that says the tool works. It declares an import or a
+    binary; the <b>platform</b> generates the probe, and the probe must
+    <b>fail before anything is installed</b>, or it cannot tell having the
+    capability from not having it. Readiness is decided by a seal kept outside
+    the agent's reach, and you adopt it from a terminal.</p>
+    ${rows.length ? `<div class="tablewrap"><table><thead><tr>
+        <th>capability</th><th>stage</th><th>what that means</th></tr></thead>
+      <tbody>${rows.map(r=>`<tr>
+        <td class="mono"><b>${esc(r.n)}</b></td>
+        <td class="${r.tone}">${esc(r.stage)}</td>
+        <td style="max-width:46ch">${esc(why[r.n] ? why[r.n].why : r.why)}
+          ${why[r.n] && why[r.n].retry_after
+            ? `<br><span class="muted" style="font-size:11.5px">not retried before ${esc(why[r.n].retry_after)}</span>` : ""}
+        </td></tr>`).join("")}</tbody></table></div>`
+      : `<div class="empty">Nothing proposed yet. When a goal names a
+         capability this machine cannot report, its readiness check hands you
+         the exact <span class="mono">frontier.py propose</span> command.</div>`}
+    ${(d && d.shadowed || []).length ? `<p class="warn" style="font-size:12.5px">
+      shadowed by a built-in and therefore skipped: ${esc((d.shadowed||[]).join(", "))}</p>` : ""}
+    ${(d && d.owner_actions || []).length ? `
+      <p class="muted" style="font-size:12px;margin:12px 0 4px">Waiting on you:</p>
+      <ul style="font-size:12.5px;margin:0;padding-left:18px">
+        ${(d.owner_actions||[]).map(a=>`<li>${esc(a)}</li>`).join("")}</ul>` : ""}
+    <p class="muted" style="font-size:11.5px;margin-top:14px">Adoption is
+    deliberately not a button here: it publishes a command to every future
+    agent, so it runs from a terminal, outside any agent task, with a granted
+    approval and an exact echo of the command —
+    <span class="mono">python frontier.py adopt &lt;cap&gt; --root ... --as you --confirm-how "..."</span></p>`;
 }
 
 async function renderComputers(b){

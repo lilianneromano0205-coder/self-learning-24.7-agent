@@ -201,7 +201,7 @@ SYSTEMS = {
                 "capability is acquired without gaining authority; who may do "
                 "what, and the trail that records it",
         "tests": ["test_workers.py", "test_acquire.py", "test_org.py",
-                  "test_rbac.py", "test_frontier.py"],
+                  "test_rbac.py", "test_frontier.py", "test_frontier_live.py"],
         "blind": "every worker is a RECORD. Nothing here has started a "
                  "container, installed a package, or measured a real start-up "
                  "time — the acquisition ladder is proven to refuse correctly, "

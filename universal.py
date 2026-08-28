@@ -118,6 +118,26 @@ def _stems(*words):
     return r"\b(?:" + "|".join(parts) + r")"
 
 
+def _words(*words):
+    r"""Whole words only — the same table WITHOUT the inflection tail.
+
+    `_stems` appends `\w*`, which is exactly right for reaching
+    "authenticate" from "auth" and exactly wrong for anything short enough to
+    be a PREFIX of an unrelated common word. Two shipped entries were, and
+    both were found by measurement rather than by reading:
+
+        \brepo\w*            matched "report"     -> every report needs git
+        sign[\s\-]*in\w*     matched "signing"    -> code-signing needs a browser
+
+    So an entry that inflects keeps `_stems`, and an entry whose danger is
+    being a prefix uses this. Multi-word entries still tolerate a space or a
+    hyphen, but no longer a ZERO-width separator, which is what let "sign in"
+    swallow "signing".
+    """
+    parts = [r"[\s\-]?".join(re.escape(t) for t in w.split()) for w in words]
+    return r"\b(?:" + "|".join(parts) + r")\b"
+
+
 # Every entry is a STEM, for the reason written at length on _stems below.
 # This table had the identical plural blindness the authority table had, and
 # it produced the same class of failure in the opposite direction — silent
@@ -138,12 +158,19 @@ def _stems(*words):
 # make honest.
 CAPABILITY_HINTS = [
     (_stems("pdf", "paper", "whitepaper", "datasheet", "spec sheet"), "pdf_text"),
+    # A PAGE COUNT is a document, whatever the document is called. "read the
+    # 400-PAGE FDA guidance" named no format this table knew and so asked for
+    # nothing at all — while being exactly the kind of goal that fails
+    # without a reader.
+    (r"\b\d{2,4}[\s\-]?page\b", "pdf_text"),
     (_stems("docx", "word doc", "powerpoint", "pptx", "xlsx", "spreadsheet",
             "epub", "ebook"), "docs_convert"),
     (_stems("video", "youtube", "lecture", "webinar", "screencast"),
      "video_download"),
     (_stems("podcast", "audio", "transcribe", "transcript", "recording",
-            "interview"), "transcribe"),
+            "interview", "customer call", "sales call", "live call",
+            "phone call", "on the call", "standup", "stand-up", "voicemail",
+            "dictation"), "transcribe"),
     (_stems("image", "screenshot", "diagram", "chart", "photo", "figure",
             "scan"), "vision"),
     (_stems("website", "web page", "webpage", "scrape", "crawl", "online",
@@ -155,18 +182,169 @@ CAPABILITY_HINTS = [
     # have been reported READY for work that cannot begin. Anything naming an
     # INTERACTION or an authenticated surface needs the browser capability,
     # which mcp.py's catalog has always been able to provide via playwright.
-    (_stems("log in", "log into", "login", "sign in", "signed in", "logged in",
-            "click", "fill in", "fill out", "submit", "portal", "dashboard",
+    # The sign-in family is matched as WORDS. `_stems("sign in")` compiles to
+    # `sign[\s\-]*in\w*`, where the separator class can match ZERO characters
+    # — so "code-signing" is "sign" + "" + "in" + "g" and matched. Measured:
+    # "sign the release binaries with our code-signing certificate" was told
+    # it needed a BROWSER. Requiring a word boundary after "in" keeps every
+    # real phrasing and drops the signing family entirely.
+    (_words("log in", "log into", "logs in", "logged in", "logging in",
+            "login", "logins", "sign in", "sign into", "signed in", "signin"),
+     "browser_control"),
+    (_stems("click", "fill in", "fill out", "submit", "portal", "dashboard",
             "web app", "webapp", "spa", "add to cart", "checkout",
             "browse to", "navigate to", "session", "captcha", "dropdown",
-            "on the page", "in the browser"),
+            "on the page", "in the browser",
+            # A product you EXPLORE is a product something must drive. Without
+            # these, "explore my SaaS and record a walkthrough" asked for the
+            # recorder and the voice and nothing that could operate the app.
+            "user flow", "user journey", "onboarding flow", "sign-up flow",
+            "signup flow", "web ui", "walk through the app"),
      "browser_control"),
-    (_stems("repo", "repository", "git", "github", "clone", "commit",
-            "pull request"), "git"),
+    (_words("saas", "the ui", "the app", "our app", "my app", "the product",
+            "front end", "frontend", "ehr", "emr", "web portal"),
+     "browser_control"),
+    # "DRIVE the hospital EHR sandbox end to end" needs something that can
+    # operate a UI, and nothing here saw it. Kept narrow on purpose — "drive
+    # the roadmap" must not demand a browser, so the object is spelled out
+    # rather than matching "drive the" alone.
+    (_stems("drive the app", "drive the ui", "drive the sandbox",
+            "drive the site", "drive the portal", "drive the product",
+            "exercise every screen", "step through the app"),
+     "browser_control"),
+    (r"\bdrive\s+(?:the|our|their|this)\s+\w+\s+sandbox\b", "browser_control"),
+    # WORDS, not stems, and the reason is measured. `_stems("repo")` compiles
+    # to `\brepo\w*`, which matches "report" — and "report" appears in a large
+    # share of every goal anybody writes. Across a 25-goal corpus, "train a
+    # classifier and report held-out accuracy" and "generate a spoken audio
+    # summary of the weekly report" were BOTH told they needed `git`. That is
+    # the same token-versus-substring mistake this file documents twice
+    # already, in its third form: a stem short enough to be a prefix of an
+    # unrelated common word.
+    # `clone` and `commit` are NOT here, and their absence is measured. Both
+    # are ordinary English words before they are git words: "CLONE the
+    # founder's voice from the old webinars" and "when someone COMMITS to a
+    # date" were both told they needed a version control system. A homonym
+    # that is common in plain speech earns its git reading only from the
+    # company it keeps, so the git phrasings are spelled out instead.
+    (_words("repo", "repos", "repository", "repositories", "git", "github",
+            "gitlab", "git clone", "clone the repo", "clone the repository",
+            "git commit", "commit the code", "commit history", "commit hash",
+            "pull request", "pull requests", "branch", "branches",
+            "rebase", "cherry-pick", "monorepo"), "git"),
     (_stems("npm", "node", "javascript", "typescript", "react", "frontend"),
      "node_js"),
     (_stems("container", "docker", "isolate", "sandbox", "untrusted"),
      "containers"),
+
+    # ---------------------------------------------------------------- 2026-08
+    # EVERY ENTRY BELOW NAMES A CAPABILITY THIS PLATFORM DOES NOT SHIP, AND
+    # THAT IS THE POINT.
+    #
+    # Until the capability frontier existed, a hint naming something
+    # `toolbox.scan` could not report was silently DROPPED by assess(), so
+    # the goal was told READY and failed several milestones deep. Now an
+    # unreported name becomes an honest blocking row carrying the exact
+    # `python frontier.py propose ...` command. So the floor is free to name
+    # what a goal actually needs instead of only what we happen to have —
+    # naming it is now the useful act, and obtaining it is a separate,
+    # sealed, owner-gated ladder.
+    #
+    # Measured on a 25-goal corpus spanning media, manufacturing, data,
+    # security, devops, mobile, IoT and documents: 14 of 25 goals derived
+    # NOTHING before these existed.
+    (_words("ocr", "scanned", "scanned copy", "handwritten", "receipt",
+            "receipts", "invoice", "invoices"), "ocr"),
+    (_stems("translate", "translation", "localise", "localize",
+            "localisation", "localization", "multilingual"), "translate"),
+    # Naming a language IS asking for translation, and nothing here saw it:
+    # "our JAPANESE supplier faxes handwritten purchase orders" and "the app
+    # is entirely in FARSI and nobody here reads Farsi" both derived no
+    # translation capability at all.
+    (_words("japanese", "chinese", "mandarin", "cantonese", "spanish",
+            "french", "german", "arabic", "farsi", "persian", "korean",
+            "portuguese", "russian", "hindi", "italian", "dutch", "turkish",
+            "polish", "vietnamese", "thai", "hebrew", "swedish", "greek",
+            "ukrainian", "indonesian"), "translate"),
+    (_words("cad", "step file", "stl", "iges", "g-code", "gcode", "cnc",
+            "3d model", "3d models", "solid model", "mesh", "assembly",
+            "toolpath"), "cad_model"),
+    (_stems("camera feed", "cctv", "rtsp", "webcam", "live feed",
+            "video stream", "surveillance"), "video_stream"),
+    (_words("camera", "cameras", "dashcam", "bodycam", "ip camera"),
+     "video_stream"),
+    (_words("code-sign", "code signing", "codesign", "notarize", "notarise",
+            "authenticode", "gpg sign", "sigstore", "signing certificate",
+            "signing key"), "code_signing"),
+    # "warehouse" is deliberately absent and "data warehouse" is spelled out:
+    # "watch the WAREHOUSE camera and flag when a pallet is stacked above the
+    # safe line" was answered with a SQL engine.
+    (_stems("postgres", "postgresql", "mysql", "sqlite", "bigquery",
+            "snowflake", "data warehouse", "sql query", "sql", "redshift",
+            "clickhouse", "the database"), "sql_query"),
+    (_stems("classifier", "fine-tune", "finetune", "training set",
+            "held-out", "hyperparameter", "embedding model"), "ml_train"),
+    (_stems("redact", "anonymise", "anonymize", "pseudonymise",
+            "de-identify", "deidentify"), "pii_detect"),
+    (_words("pii", "phi", "ehr", "emr", "personal data", "customer name",
+            "customer names", "personally identifiable", "medical record",
+            "medical records", "licence plate", "license plate",
+            "leaks a name", "data leak"), "pii_detect"),
+    (_stems("e-signature", "esignature", "esign", "docusign", "countersign",
+            "signature request"), "esign"),
+    (_stems("cross-compile", "crosscompile", "toolchain", "cargo", "rustc",
+            "linker", "wheel build"), "native_build"),
+    (_words("rust crate", "arm64", "aarch64", "x86_64", "rust binary",
+            "a driver", "device driver", "allocator", "profiler",
+            "flamegraph", "p99", "binary protocol"), "native_build"),
+    (_stems("modbus", "serial port", "gpio", "i2c", "plc", "smart meter",
+            "firmware", "rs485", "rs-485", "thermocouple", "sensor",
+            "actuator", "spindle", "feed rate", "setpoint", "set point",
+            "heater", "valve", "inverter", "servo", "encoder", "relay",
+            "canbus", "can bus", "opc ua", "scada", "telemetry"),
+     "device_io"),
+    (_words("ios app", "testflight", "xcode", "android app", "apk", "aab",
+            "play store", "app store"), "mobile_build"),
+    # "cluster" is deliberately ABSENT: "cluster the overnight stories" is a
+    # verb meaning "group", and it was matching Kubernetes. An ambiguous word
+    # that is also a common verb costs a wrong answer, and a wrong answer is
+    # worse than a missing one.
+    (_stems("kubernetes", "kubectl", "helm", "rollback", "rolling deploy",
+            "kube"), "k8s_ops"),
+    (_words("rss", "atom feed", "feeds", "feed reader", "8-k", "10-k", "10-q",
+            "sec filing", "sec files", "ticker", "tickers", "press release",
+            "newswire"), "feed_read"),
+    (_stems("accessibility", "wcag", "screen reader", "aria"), "a11y_audit"),
+    (_words("a11y"), "a11y_audit"),
+]
+
+# THE DIRECTION OF A MEDIA VERB, WHICH THE FLAT TABLE ABOVE CANNOT SEE.
+#
+# `_stems("audio")` cannot tell "transcribe the customer calls" from "produce
+# a spoken audio summary". They need OPPOSITE capabilities — recognition and
+# synthesis — and the flat table answered `transcribe` for both. Measured,
+# that was three of five wrong derivations in the corpus, and it is the worst
+# kind of wrong: not a gap, an answer, pointing the run at a tool that does
+# the reverse of what was asked.
+#
+# So a media noun is resolved by whether a PRODUCTION verb governs the goal.
+# Mechanical and deliberately crude — it reads word presence, not grammar —
+# but it moves three goals from a confident wrong answer to a correct one,
+# and a wrong answer is more expensive than a coarse one.
+PRODUCE_RE = _stems("produce", "generate", "create", "make", "render",
+                    "synthesise", "synthesize", "narrate", "narrated",
+                    "compose", "dub", "voice over", "voiceover", "author",
+                    "export", "draw", "plot", "record", "publish")
+DIRECTIONAL = [
+    (_stems("podcast", "voice", "voice-over", "narration", "spoken",
+            "speech", "read aloud", "audio summary", "audiobook"),
+     "speech_synthesis", "transcribe"),
+    (_stems("artwork", "illustration", "thumbnail", "logo", "picture",
+            "cover art"), "image_generate", "vision"),
+    (_words("chart", "charts", "graph", "graphs", "plot", "plots"),
+     "chart_render", "vision"),
+    (_stems("screen recording", "screencast", "walkthrough", "demo video",
+            "product video"), "screen_record", "video_download"),
 ]
 
 # Words that mean the goal needs something only the owner can give. These are
@@ -195,6 +373,52 @@ AUTHORITY_HINTS = [
     (r"\b(?:delete|remove|drop|wipe|purge|destroy|terminate)\w*\b.*"
      r"\b(?:production|database|account|bucket|repo|repository|volume|cluster)\w*",
      "destroying something that cannot be restored"),
+
+    # ------------------------------------------------------------- 2026-08
+    # THE CLASS THAT WAS MISSING ENTIRELY, and the one where being wrong is
+    # not an inconvenience. Measured on 25 deliberately hard goals, FIVE
+    # carried an irreversible physical or financial effect and NONE of them
+    # stopped:
+    #
+    #   "if it drifts 2 degrees, CUT POWER TO THE HEATER"
+    #   "work out why from the spindle audio and ADJUST THE FEED RATE"
+    #   "OPEN A WARRANTY CLAIM when output drops fifteen percent"
+    #   "keep the Terraform state and the REAL AWS ACCOUNT reconciled"
+    #   "OPEN A PULL REQUEST per service"
+    #
+    # Every existing entry in this table is about a digital permission. None
+    # of them is about a machine that moves, a claim that binds, or
+    # infrastructure that costs money the moment it changes. A fleet that
+    # will happily de-energise a heater because a rule matched is not
+    # autonomous, it is unowned. Matching is deliberately generous here for
+    # the reason stated at the top of this table: a false "ask the owner"
+    # costs a question, and a false "go ahead" costs a fire.
+    (_stems("cut power", "turn off", "turn on", "switch off", "switch on",
+            "power down", "power off", "shut down", "shutdown", "actuate",
+            "open the valve", "close the valve", "feed rate", "set point",
+            "setpoint", "start the motor", "stop the line", "stop the motor",
+            "unlock", "lock the", "arm the", "disarm", "throttle",
+            "energise", "energize", "de-energise", "de-energize",
+            "override the interlock", "move the axis", "jog the"),
+     "acting on physical equipment, which cannot be undone by a retry"),
+    (_stems("terraform", "pulumi", "cloudformation", "aws account",
+            "cloud account", "reconcile the aws", "scale the cluster",
+            "rotate the key", "change the dns", "update the firewall",
+            "modify the security group", "resize the", "provision a",
+            "spin up", "tear down"),
+     "changing live infrastructure, which bills and breaks in the real world"),
+    (_stems("open a claim", "file a claim", "warranty claim", "submit a claim",
+            "file a complaint", "file a dispute", "raise a ticket with",
+            "open a case with", "file with the"),
+     "making a claim in your name to someone outside"),
+    (_stems("open a pull request", "open a pr", "raise a pull request",
+            "raise a pr", "merge the", "merge to", "push to main",
+            "push to master", "force push", "tag a release"),
+     "changing a shared repository other people depend on"),
+    (_stems("clone the voice", "voice clone", "voice cloning", "impersonate",
+            "their likeness", "his likeness", "her likeness", "deepfake",
+            "synthetic voice of"),
+     "using a real person's voice or likeness, which is theirs to consent to"),
 ]
 
 MIN_LEARN_TIER = 2          # tier 1 normative, 2 professional. 3-4 is context.
@@ -342,6 +566,32 @@ def required_capabilities(goal, criteria="", root=None):
     """
     text = f"{goal} {criteria}".lower()
     out, seen = [], set()
+    # Direction first: a media noun under a production verb needs the OPPOSITE
+    # capability from the same noun under a reading verb, and the flat table
+    # below cannot tell them apart.
+    producing = re.search(PRODUCE_RE, text) is not None
+    for pattern, make_cap, read_cap in DIRECTIONAL:
+        m = re.search(pattern, text)
+        if not m:
+            continue
+        # "chart the distribution" is a VERB; "describe the chart" is a noun.
+        # A determiner immediately after the word is the cheapest mechanical
+        # signal that separates them, and without it "chart the distribution"
+        # asked for image UNDERSTANDING to draw a graph.
+        verb = re.match(r"\s+(the|a|an|it|them|these|those|all|our|my)\b",
+                        text[m.end():m.end() + 7]) is not None
+        makes = producing or verb
+        cap = make_cap if makes else read_cap
+        if cap not in seen:
+            out.append((cap, f"the goal mentions {m.group(0)!r} and "
+                             f"{'produces' if makes else 'reads'} it"))
+        # BOTH sides are marked seen, not just the winner. Once the direction
+        # is decided, the flat table below must not quietly add the opposite
+        # capability on the strength of the same noun — which it did:
+        # "produce a spoken audio summary" came back asking for synthesis AND
+        # recognition, and a run handed both picks whichever it likes.
+        seen.add(make_cap)
+        seen.add(read_cap)
     for pattern, cap in CAPABILITY_HINTS:
         m = re.search(pattern, text)
         if m and cap not in seen:

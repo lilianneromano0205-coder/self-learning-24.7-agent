@@ -249,6 +249,30 @@ MUTATIONS = [
      "test_frontier.py",
      "an attacker who never needs to edit a seal, because appending one wins"),
 
+    ("universal: physical actuation is not an authority gap", "universal.py",
+     '''     "acting on physical equipment, which cannot be undone by a retry"),''',
+     '''     "acting on physical equipment (unreachable)") if False else
+     (r"(?!x)x", "unreachable"),''',
+     "test_universal.py",
+     "a fleet that cuts power to a heater or changes a CNC feed rate without "
+     "ever stopping to ask — the one failure here that burns something"),
+
+    ("universal: a media noun has no direction", "universal.py",
+     '''        makes = producing or verb''',
+     '''        makes = False''',
+     "test_universal.py",
+     "synthesis answered with recognition — a run sent at the tool that does "
+     "the reverse of the task"),
+
+    ("universal: the losing side of a direction is not suppressed",
+     "universal.py",
+     '''        seen.add(make_cap)
+        seen.add(read_cap)''',
+     '''        seen.add(cap)''',
+     "test_universal.py",
+     "a goal asking for BOTH synthesis and recognition of the same noun, so "
+     "the run picks whichever it likes"),
+
     ("frontier: readiness is decided inside the expert root", "frontier.py",
      '''            if (ad and ad.get("probe_hash") == row.get("probe_hash")
                     and ad.get("how_hash") == _how_hash(row.get("how_argv") or [])):''',

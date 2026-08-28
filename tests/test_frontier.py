@@ -426,6 +426,19 @@ def check_a_frontier_capability_cannot_shadow_or_break_a_built_in(root):
             pass
     note = toolbox.capability_note(root)
     assert note.count("READY") >= 1, "the capability note lost its sections"
+
+    # AND A CAPABILITY OF OUR OWN IS NOT ITS OWN SHADOW. toolbox.scan now
+    # MERGES this ledger, so a shadow check written as "does the name appear
+    # in scan()" answers yes for every frontier capability and reports them
+    # all as colliding with a built-in. Found by looking at the rendered
+    # panel, which announced two ordinary capabilities as shadowed.
+    _absent(root, "lonely_cap")
+    frontier.falsify(root, "lonely_cap")
+    s = frontier.summary(root)
+    assert "lonely_cap" not in s["shadowed"], (
+        "a frontier capability was reported as shadowed by a built-in when "
+        "the only thing reporting that name IS the frontier — a false alarm "
+        "in the one place that exists to surface real collisions")
     print(f"[shadow] a frontier capability may not take a built-in's name "
           f"({victim!r}) nor carry it as a substring, and the capability "
           f"note still parses into its sections")

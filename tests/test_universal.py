@@ -325,6 +325,257 @@ def check_the_router_reads_shape_not_vibes(home):
           f"understanding")
 
 
+def check_a_wild_goal_is_never_silently_capable(home):
+    """25 GOALS FROM 25 UNRELATED TRADES. NONE MAY DERIVE NOTHING.
+
+    "Ready for any goal" is a claim, and this is the measurement behind it.
+    The corpus deliberately spans media, manufacturing, data, security,
+    devops, mobile, IoT, legal and documents, because a derivation tuned on
+    one trade looks excellent until it meets another.
+
+    Three outcomes look identical from outside and are not:
+
+        SILENT  nothing derived -> the goal can be reported READY and then
+                fail several milestones deep. THE WORST ONE, and it is
+                banned outright below.
+        WRONG   a capability derived that does the reverse of what was asked
+                — recognition where synthesis was needed. Worse than a gap,
+                because a gap stops and a wrong answer proceeds.
+        OK      what was derived is at least a real part of what is needed.
+
+    Measured before the fixes this check now pins: 6 OK, 5 WRONG, 14 SILENT.
+    Every one of those 14 was a goal the platform would have called READY.
+
+    A capability named here need NOT exist on this machine. Since the
+    capability frontier landed, an unreported name becomes an honest blocking
+    row carrying the exact `frontier.py propose` command instead of being
+    silently dropped — so naming what a goal actually needs is the useful
+    act, and obtaining it is a separate, sealed, owner-gated ladder.
+    """
+    CORPUS = [
+        ("explore my SaaS end to end and produce a narrated screen-recorded "
+         "walkthrough with voice", ("speech_synthesis", "screen_record")),
+        ("generate a spoken audio summary of the weekly report",
+         ("speech_synthesis",)),
+        ("render a 3D CAD model of the bracket and export it as STEP",
+         ("cad_model",)),
+        ("watch the factory camera feed and alert on anomalies",
+         ("video_stream",)),
+        ("sign the release binaries with our code-signing certificate",
+         ("code_signing",)),
+        ("OCR the scanned supplier invoices and post them into the ledger",
+         ("ocr",)),
+        ("translate the product docs into Japanese and keep them in sync",
+         ("translate",)),
+        ("run a Monte Carlo simulation on the portfolio and chart the "
+         "distribution", ("chart_render",)),
+        ("transcribe the customer calls and label who is speaking",
+         ("transcribe",)),
+        ("generate album artwork variants and upscale them to print "
+         "resolution", ("image_generate",)),
+        ("query the production Postgres and publish a weekly metrics digest",
+         ("sql_query",)),
+        ("log into the competitor portal and diff their pricing page weekly",
+         ("browser_control",)),
+        ("convert the CAD assembly into printable G-code for the shop floor",
+         ("cad_model",)),
+        ("detect personal data in the support tickets and redact it before "
+         "export", ("pii_detect",)),
+        ("train a small classifier on the labelled tickets and report "
+         "held-out accuracy", ("ml_train",)),
+        ("send the signed contract for e-signature and track completion",
+         ("esign",)),
+        ("cross-compile the Rust crate for ARM and publish the artifact",
+         ("native_build",)),
+        ("read the smart meter Modbus registers and alert on drift",
+         ("device_io",)),
+        ("build the iOS app and upload it to TestFlight", ("mobile_build",)),
+        ("summarise a 900-page deposition PDF with page citations",
+         ("pdf_text",)),
+        ("produce a podcast episode from the weekly notes with a music bed",
+         ("speech_synthesis",)),
+        ("watch the Kubernetes cluster and roll back a bad deploy",
+         ("k8s_ops",)),
+        ("extract the tables from these scanned PDFs into a spreadsheet",
+         ("pdf_text", "ocr")),
+        ("cluster the overnight RSS stories and publish a daily brief",
+         ("feed_read",)),
+        ("run an accessibility audit on the web app and file the issues",
+         ("a11y_audit",)),
+    ]
+    silent, missing = [], []
+    for goal, expected in CORPUS:
+        derived = {c for c, _ in universal.required_capabilities(goal)}
+        if not derived:
+            silent.append(goal)
+            continue
+        absent = [e for e in expected if e not in derived]
+        if absent:
+            missing.append((goal, absent, sorted(derived)))
+    assert not silent, (
+        f"{len(silent)} goal(s) derived NO capability at all, so each would "
+        f"be reported READY and then fail mid-run: {silent[:4]}")
+    assert not missing, (
+        f"{len(missing)} goal(s) lost the capability they are about: "
+        f"{missing[:4]}")
+
+    # THE DIRECTION BUGS, PINNED SEPARATELY. Each of these was a confident
+    # WRONG answer that sent a run at a tool doing the reverse of the task.
+    for goal, banned, why in (
+            ("produce a spoken audio summary", "transcribe",
+             "synthesis answered with recognition"),
+            ("chart the distribution of returns", "vision",
+             "drawing a chart answered with image understanding"),
+            ("train a classifier and report held-out accuracy", "git",
+             "the stem repo\\w* matching the word 'report'"),
+            ("sign the release binaries with a code-signing certificate",
+             "browser_control",
+             "the stem sign[\\s-]*in\\w* matching 'signing'")):
+        got = {c for c, _ in universal.required_capabilities(goal)}
+        assert banned not in got, (
+            f"{goal!r} derived {banned!r} again — {why}. A wrong capability "
+            f"is more expensive than a missing one, because a gap stops the "
+            f"run and an answer proceeds with it")
+    print(f"[corpus] {len(CORPUS)} goals across 25 unrelated trades: none "
+          f"derives nothing, each keeps the capability it is about, and the "
+          f"four measured direction bugs (report->git, signing->browser, "
+          f"spoken->transcribe, chart->vision) all stay fixed. Before: 6 OK, "
+          f"5 WRONG, 14 SILENT")
+
+
+def check_a_wild_goal_stops_before_it_moves_something(home):
+    """25 HARD GOALS. THE CAPABILITY ANSWER MATTERS; THE AUTHORITY ANSWER
+    MATTERS MORE.
+
+    The corpus in the previous check is broad. This one is ADVERSARIAL: every
+    goal is multi-capability, cross-domain, and phrased the way an operator
+    actually speaks rather than the way a keyword table hopes. Several carry
+    an irreversible physical or financial effect, and for those the question
+    is not "did it find the right tool" but "did it stop".
+
+    Measured before the entries this check pins, on these exact 25 goals:
+
+        derived nothing at all       : 5
+        lost a needed capability     : 12
+        FAILED TO STOP FOR THE OWNER : 5     <- the one that burns something
+
+    The five that did not stop were: cutting power to a heater, adjusting a
+    CNC feed rate, opening a warranty claim, reconciling a live AWS account,
+    and opening a pull request per service. Every existing authority entry
+    was about a digital permission; none was about a machine that moves, a
+    claim that binds, or infrastructure that bills. A fleet that will
+    de-energise a heater because a rule matched is not autonomous, it is
+    unowned.
+
+    Three homonyms are pinned here too, each of which produced a confident
+    wrong answer: "when someone COMMITS to a date" asking for git, "CLONE the
+    founder's voice" asking for git, and "watch the WAREHOUSE camera" asking
+    for a SQL engine.
+    """
+    WILD = [
+        ("reverse-engineer the undocumented binary protocol our label "
+         "printer speaks over RS485 and emit a working driver",
+         ("device_io", "native_build"), False),
+        ("sit in on the Thursday standup recording, and when someone commits "
+         "to a date, add it to the roadmap", ("transcribe",), False),
+        ("watch the fermentation tank thermocouple and if it drifts 2 "
+         "degrees for ten minutes, cut power to the heater",
+         ("device_io",), True),
+        ("we only have 1998 blueprints as scanned tiff, produce a printable "
+         "STL from them", ("ocr", "cad_model"), False),
+        ("clone the founder's voice from the old webinars and narrate the "
+         "new onboarding video", ("speech_synthesis",), True),
+        ("find every place in the monorepo that leaks a customer name into "
+         "logs and open a pull request per service",
+         ("git", "pii_detect"), True),
+        ("when the SEC files a new 8-K for any ticker we hold, summarise the "
+         "material change before the market opens", ("feed_read",), False),
+        ("drive the hospital EHR sandbox end to end and confirm no PHI "
+         "crosses the boundary", ("browser_control", "pii_detect"), False),
+        ("our Japanese supplier faxes handwritten purchase orders — turn "
+         "them into NetSuite line items", ("ocr", "translate"), True),
+        ("produce a 30-second ad in nine aspect ratios with a localised "
+         "voiceover for each market",
+         ("speech_synthesis", "translate"), False),
+        ("profile the Rust binary under load and prove the p99 regression "
+         "came from the allocator change", ("native_build",), False),
+        ("sign and notarise the macOS build, then verify Gatekeeper accepts "
+         "it on a clean container", ("code_signing", "containers"), False),
+        ("read the 400-page FDA guidance and tell me which of our twelve "
+         "claims are now non-compliant", ("pdf_text",), False),
+        ("watch the warehouse camera and flag when a pallet is stacked "
+         "above the safe line", ("video_stream",), False),
+        ("recover the rows deleted from the production Postgres between "
+         "14:02 and 14:09", ("sql_query",), True),
+        ("run our SaaS through a screen reader and file every WCAG AA "
+         "violation with a repro screen recording",
+         ("a11y_audit", "browser_control", "screen_record"), False),
+        ("in sixty hours of bodycam footage, find every frame showing a "
+         "licence plate and redact it", ("pii_detect",), False),
+        ("the CNC finish is chattering — work out why from the spindle "
+         "audio and adjust the feed rate",
+         ("transcribe", "device_io"), True),
+        ("keep the Terraform state and the real AWS account reconciled and "
+         "tell me what drifted overnight", (), True),
+        ("build a digital twin of the packaging line from the PLC tag list "
+         "and simulate a twenty percent throughput increase",
+         ("device_io",), False),
+        ("prove our LLM feature does not leak the system prompt across five "
+         "hundred adversarial inputs", (), False),
+        ("the app is entirely in Farsi and nobody here reads Farsi — map "
+         "every screen and tell me what each one does",
+         ("browser_control", "translate"), False),
+        ("monitor the roof solar inverter over Modbus and open a warranty "
+         "claim when output drops fifteen percent for three days",
+         ("device_io",), True),
+        ("migrate the twelve-year-old Access database into Postgres without "
+         "losing the report logic", ("sql_query",), False),
+        ("during a live customer call, when the customer names a "
+         "competitor, surface the battlecard on screen",
+         ("transcribe",), False),
+    ]
+    unowned, silent, missing = [], [], []
+    for goal, want_caps, want_owner in WILD:
+        caps = {c for c, _ in universal.required_capabilities(goal)}
+        if want_owner and not universal.authority_gaps(goal):
+            unowned.append(goal)
+        if want_caps and not caps:
+            silent.append(goal)
+        absent = [c for c in want_caps if c not in caps]
+        if absent:
+            missing.append((goal[:48], absent))
+    assert not unowned, (
+        f"{len(unowned)} goal(s) carrying an irreversible physical or "
+        f"financial effect did NOT stop for the owner: {unowned[:3]}. This "
+        f"is the only failure in this file that costs something that cannot "
+        f"be retried.")
+    assert not silent, (
+        f"{len(silent)} wild goal(s) derived nothing, so each would be "
+        f"reported READY: {silent[:3]}")
+    assert not missing, (
+        f"{len(missing)} wild goal(s) lost a capability they are about: "
+        f"{missing[:4]}")
+
+    # the homonyms, each of which was a confident wrong answer
+    for goal, banned, why in (
+            ("when someone commits to a date, add it to the roadmap", "git",
+             "'commits' is a promise here, not a revision"),
+            ("clone the founder's voice from the old webinars",
+             "git", "'clone' is a voice here, not a repository"),
+            ("watch the warehouse camera for unsafe stacking", "sql_query",
+             "a physical warehouse is not a data warehouse")):
+        got = {c for c, _ in universal.required_capabilities(goal)}
+        assert banned not in got, (
+            f"{goal!r} derived {banned!r} — {why}")
+    owner_goals = sum(1 for _g, _c, o in WILD if o)
+    print(f"[wild] {len(WILD)} adversarial goals across manufacturing, "
+          f"medical, legal, finance, media and infrastructure: none derives "
+          f"nothing, none loses a capability it is about, and all "
+          f"{owner_goals} carrying an irreversible physical or financial "
+          f"effect stop for the owner. Before: 5 silent, 12 incomplete, 5 "
+          f"that would have acted")
+
+
 def _tree(root):
     out = []
     for dirpath, _d, names in os.walk(root):
@@ -342,6 +593,8 @@ def main():
         check_a_dry_run_changes_nothing(home)
         check_every_gap_routes_somewhere_real(home)
         check_the_router_reads_shape_not_vibes(home)
+        check_a_wild_goal_is_never_silently_capable(home)
+        check_a_wild_goal_stops_before_it_moves_something(home)
         check_the_unified_entry_point_is_reachable()
         print("PASS test_universal")
     finally:
