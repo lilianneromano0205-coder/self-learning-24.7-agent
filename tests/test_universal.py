@@ -274,6 +274,57 @@ def check_every_gap_routes_somewhere_real(home):
           f"already declared for it")
 
 
+def check_the_router_reads_shape_not_vibes(home):
+    """route() is the one answer to "which system?" — the same classifier
+    behind `universal.py route` and the panel's readiness card. It is
+    deterministic on purpose: a model asked "which system fits?" answers
+    plausibly and unfalsifiably, and a routing rule that cannot be pinned in
+    a test cannot be trusted to stay put. So every shape cue is enumerated
+    here; if the classifier quietly narrows, this goes red, not silent."""
+    cases = [
+        # a question is answered from cited notes, never pursued
+        ("what is the cheapest rail for a summarizer?", "consult"),
+        ("how does the exam sealing work", "consult"),
+        # condition + consequence = an intention the scheduler holds
+        ("whenever the error rate rises then alert me", "prospective intention"),
+        ("if the feed goes quiet for a day then open a goal", "prospective intention"),
+        # a schedule word = the loop wakes it
+        ("every day at 9 summarize new arxiv papers", "routine"),
+        ("weekly digest of retractions", "routine"),
+        # staged hand-offs = a pipeline with gates
+        ("ingest the papers then extract claims then draft the survey", "workflow"),
+        # proof on sealed unseen work = mastery
+        ("prove competence on a sealed unseen exam pack for log parsing", "mastery"),
+        # durable expertise = the learning-shaped goal
+        ("learn distributed consensus deeply with citations", "goal (learning-shaped)"),
+        # a responsibility that never ends = mission
+        ("keep the docs site consistent with the code", "mission"),
+        ("monitor the mirrors for drift", "mission"),
+        # explicit team ask
+        ("assemble a team to ship the quarterly review", "team"),
+        # one small artifact = a single gated task
+        ("fetch the readme", "task"),
+        ("fix the typo in ARCHITECTURE.md", "task"),
+        # the default: an outcome that can carry graders
+        ("build a citation-checked survey of memory architectures", "goal"),
+    ]
+    for goal, want in cases:
+        got = universal.route(goal)
+        assert got["system"] == want, (
+            f"{goal!r} routed to {got['system']!r}, expected {want!r} — "
+            f"the shape cue for {want} has quietly narrowed")
+        for k in ("why", "how_cli", "how_panel", "note"):
+            assert got.get(k), f"{goal!r} routed with no {k} — a verdict "\
+                               f"with no path is a dead end wearing a label"
+    # the route must be honest about being mechanical
+    assert "mechanical" in universal.route("anything")["note"], (
+        "the router stopped disclosing that it reads shape, not meaning")
+    print(f"[route] {len(cases)} goal shapes each landed on the declared "
+          f"system, every verdict carrying a why, a CLI path and a panel "
+          f"path — and the note still says it is a mechanical floor, not "
+          f"understanding")
+
+
 def _tree(root):
     out = []
     for dirpath, _d, names in os.walk(root):
@@ -290,6 +341,7 @@ def main():
         check_authority_stops_the_run(home)
         check_a_dry_run_changes_nothing(home)
         check_every_gap_routes_somewhere_real(home)
+        check_the_router_reads_shape_not_vibes(home)
         check_the_unified_entry_point_is_reachable()
         print("PASS test_universal")
     finally:

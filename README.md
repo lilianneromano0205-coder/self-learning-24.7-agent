@@ -7,7 +7,7 @@ continuously, prove what they did, and remember what they learned.**
 ![python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![dependencies](https://img.shields.io/badge/dependencies-stdlib%20only-brightgreen)
 ![tests](https://img.shields.io/badge/tests-117%20passing%20%C2%B7%206%20platforms-brightgreen)
-![mutations](https://img.shields.io/badge/mutation%20tests-48%2F48%20killed-brightgreen)
+![mutations](https://img.shields.io/badge/mutation%20tests-50%2F50%20killed-brightgreen)
 ![license](https://img.shields.io/badge/license-AGPL--3.0-orange)
 
 85 Python modules · 117 acceptance tests · one HTML control panel · no
@@ -62,6 +62,19 @@ cannot edit.**
 Start simple: one **Task** with a done-check, then one **Goal** with
 graders. Everything else is these two, scaled.
 
+Not sure which system a goal needs? Ask the router — it reads the goal's
+shape (a question, a schedule, a pipeline, a standing responsibility …)
+with a deterministic rule, names the system, and says why:
+
+```bash
+python universal.py route --goal "every day at 9 summarize new arxiv papers"
+```
+
+The panel runs the same rule under "Can it do this?", and it is a floor,
+not a ceiling: override it freely, steer any run mid-flight, pause it with
+one button, or promote a task to a goal by adding graders — the systems
+share one memory and one authority stack, so switching costs nothing.
+
 ---
 
 ## Why this, in a world of agent frameworks
@@ -76,7 +89,7 @@ are laws with tests that would fail, not features with descriptions.**
 
 | Property | The well-known harnesses | Expert Fleet |
 |---|---|---|
-| Who says "done"? | the model or its framework judges its own run | frozen, caller-authored graders sealed before planning, run only by the harness; even the judge is overruled when they disagree — **46/46 mutation-tested laws** |
+| Who says "done"? | the model or its framework judges its own run | frozen, caller-authored graders sealed before planning, run only by the harness; even the judge is overruled when they disagree — **50/50 mutation-tested laws** |
 | Self-improvement | trust the loop to compound | validation-gated: a procedure is PROVEN only after 3 all-verified wins; oscillation stops the lane; drafts refuse to run — matching what the 2026 fragility literature demands |
 | Learn by demonstration | recorded, then trusted | `runbook.py record`: recorded → **CANDIDATE**; a rehearsal replayed through the full authority stack is win #1; a demo you watched is a claim, a demo the graders re-ran is evidence |
 | Security | wrapper products exist *because* the frameworks need wrapping (see the published security analyses of the popular ones) | five mandatory authorities inside the platform — Execution, File, Credential, Model Gateway, Effect — `--audit` at 0 bypasses **in CI**, plus directive-shaped memory flagged at the source |

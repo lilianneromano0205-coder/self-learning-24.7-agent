@@ -1752,10 +1752,14 @@ class Handler(BaseHTTPRequestHandler):
                 elif not os.path.isdir(os.path.join(self.home, "experts", expert)):
                     self._fail({"error": f"no expert '{expert}'"}, 404)
                 else:
-                    self._json(universal.resolve(
-                        self.home, expert, want,
-                        (q.get("criteria", [""])[0] or "").strip(),
-                        apply=False))
+                    criteria = (q.get("criteria", [""])[0] or "").strip()
+                    r = universal.resolve(self.home, expert, want, criteria,
+                                          apply=False)
+                    # Which system the goal's SHAPE asks for — computed by
+                    # the same mechanical classifier `universal.py route`
+                    # prints, so the panel and the CLI can never disagree.
+                    r["route"] = universal.route(want, criteria)
+                    self._json(r)
             elif path == "/api/commons":
                 import commons
                 commons.refresh_directory(self.home)

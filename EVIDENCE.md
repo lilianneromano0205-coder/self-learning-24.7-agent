@@ -1,6 +1,6 @@
 # Evidence — why we believe this works
 
-Generated 2026-08-27T19:41:28 from an actual suite run: **115/117 tests passed**, **579 observations** recorded.
+Generated 2026-08-27T20:27:17 from an actual suite run: **115/117 tests passed**, **580 observations** recorded.
 
 Each test below prints its own sentence describing what it proved; those sentences are quoted verbatim, not summarised. Every system also carries a **blind spot** — what these tests do not cover.
 
@@ -22,7 +22,7 @@ Each test below prints its own sentence describing what it proved; those sentenc
 | 10. Training lab | **proven** | 1/1 | 6 |
 | 12. The paths that touch something real | **proven** | 5/5 | 33 |
 | 11. The interface itself | **proven** | 1/1 | 10 |
-| 13. The universal agent | **proven** | 3/3 | 17 |
+| 13. The universal agent | **proven** | 3/3 | 18 |
 
 ## 1. Harness & loop
 
@@ -90,7 +90,7 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_chaos.py` **[provider]** the primary provider refused every connection; the fallback finished the task and the record names which one ran
 - `test_chaos.py` **[race]** two loops drained one expert at the same time: four tasks, four completions, no task claimed twice
 - `test_chaos.py` **[disk]** a write that failed with ENOSPC left the previous state byte-identical and the loop recovered
-- `test_chaos.py` **[size]** an 11 MB file, 1,000 atoms and 200 skills compiled to a 13292 token window in 1.4s, cut marked
+- `test_chaos.py` **[size]** an 11 MB file, 1,000 atoms and 200 skills compiled to a 13292 token window in 1.6s, cut marked
 - `test_chaos.py` **[clock]** a far-future deadline ran to completion and a long-past one refused to start, both naming the reason
 - `test_blocked.py` **[blocked]** question recorded in blocked.md, task blocked, loop moved on
 - `test_hardening.py` **[locks]** release verifies ownership: a stalled holder cannot free the lock that replaced it, and tokens are per-acquisition
@@ -359,7 +359,7 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_discover.py` **[read-only]** discovery emitted 2 quoted `ingest.py add-url` lines and opened no connection of its own: finding is free and auditable, fetching stays an explicit, separate act
 - `test_discover.py` **[typo]** a misspelled rail is reported by name rather than silently producing a smaller result set that looks like a real answer
 - `test_discover.py` **[relevance]** the goal was reduced to its subject before being sent ('b-tree index concurrency control'), and 2 confidently-irrelevant tier-1 result(s) were dropped and counted — an off-topic source reached by a trusted route becomes a cited atom, which is a wrong belief carrying a real citation
-- `test_discover.py` **[live]** a real query to 2 catalogue(s) returned 4 learnable source(s), top result tier 2: 'B-Tree Concurrency Control' — found by catalogue lookup, with no search engine and no API key anywhere
+- `test_discover.py` **[live]** a real query to 2 catalogue(s) returned 5 learnable source(s), top result tier 2: 'ARIES/KVL: A Key-Value Locking Method for Concurrency Contro' — found by catalogue lookup, with no search engine and no API key anywhere
 - `test_sources.py` **[reviewed]** DOAJ, PubMed and Europe PMC keep tier 1, with reasons that name the review/selection process actually behind them
 - `test_sources.py` **[provenance]** DOI resolvers, Crossref, DataCite and arXiv rate tier 2 — real scholarly provenance, still learnable, and the reason states outright that an identifier is not a review mark
 - `test_sources.py` **[honest]** none of the 12 unreviewed scholarly hosts carries a why-text claiming review — the words a human reads now match what the host actually promises
@@ -448,7 +448,7 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_csrf.py` **[catalogue]** GET /api/gates lists what a caller may ask for
 - `test_frontend.py` **[syntax]** the page's JavaScript parses under node --check
 - `test_frontend.py` **[page]** the six job-shaped sections each state their purpose and route to a renderer; guide/memory/models/system were MOVED, not deleted, and each is still reachable from a clickable control; every endpoint the page names exists; both themes defined
-- `test_frontend.py` **[serve]** page served from ui.html (316072 bytes)
+- `test_frontend.py` **[serve]** page served from ui.html (317053 bytes)
 - `test_frontend.py` **[fresh]** a newly created expert answers on all six read endpoints, no 500s
 - `test_frontend.py` **[live]** frontend edits appear on reload with no server restart
 - `test_package.py` **[secrets]** 308 archive members checked four ways — by basename, by containing directory, by extension, and by READING every text member for assigned credential values. The content scan was calling a path-taking function on a line of text, so it had never evaluated true; now live, it finds exactly the 7 synthetic fixtures the tests are built from and nothing else, and an unlisted hit or a stale exemption both fail
@@ -487,7 +487,7 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_mcp.py` **[toolbox]** the capability note advertises the server with the exact commands
 - `test_mcp.py` **[a2a]** A2A v1.0 card served at the standard well-known path: exposed experts as skills, signed transport declared, zero secret material
 - `test_mcp.py` **[url-args]** 6 tool arguments pointing at file://, loopback, private and link-local addresses are refused BEFORE the server is called — including nested ones, which is how a browser server passes its options — and 4 ordinary argument shapes still pass
-- `test_mcp.py` **[sees]** an image block is written to tmp/ (mcp-1787873706-1.png) and the result names the exact `ingest.py vision` command that reads it, so a screenshot becomes something the agent can answer questions about; an undecodable blob is reported as gone, not hidden
+- `test_mcp.py` **[sees]** an image block is written to tmp/ (mcp-1787876449-1.png) and the result names the exact `ingest.py vision` command that reads it, so a screenshot becomes something the agent can answer questions about; an undecodable blob is reported as gone, not hidden
 - `test_federation.py` **[card]** each fleet has its own identity; the card exposes only what the owner chose, signed, with a fingerprint (never the secret)
 - `test_federation.py` **[trust]** unknown fleet, forged signature, and unexposed expert all refused before a single model call
 - `test_federation.py` **[ask]** a signed request became a citation-gated consultation, framed as coming from outside the fleet
@@ -522,7 +522,7 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_backup.py` **[freshness]** the age helpers the preflight depends on report a real number, and None when there is nothing to report
 - `test_backup.py` **[sigv4]** 2 of AWS's own published example signatures reproduced byte for byte, and the secret appears in no header -- the request is signed with a derivation of it, never the key
 - `test_backup.py` **[fail-closed]** a push with no credentials refuses by name and sends nothing -- it does not reach the network to find out
-- `test_backup.py` **[compounding]** four snapshots into the DEFAULT output directory stayed flat at 76,272 bytes with zero nested archives — a backup no longer archives its own backups, which on a 24/7 fleet filled the disk the fleet needs in order to save itself
+- `test_backup.py` **[compounding]** four snapshots into the DEFAULT output directory stayed flat at 76,268 bytes with zero nested archives — a backup no longer archives its own backups, which on a 24/7 fleet filled the disk the fleet needs in order to save itself
 - `test_backup.py` **[pull]** a good archive downloads and verifies; one flipped byte deep inside is caught and REFUSED with the reason — the check the feature advertised now actually runs, having previously crashed on every archive and, once unpacked, trusted a damaged one
 - `test_backup.py` **[never-raises]** verify() reports zlib.error, BadZipFile, OSError and MemoryError as a NAMED corrupt member instead of raising — the layer that notices damage differs by platform, and the narrow except list was green on 4 of 6 runners
 - `test_preflight.py` **[blocker]** a fleet with no backup is NOT READY, and the finding carries the exact command that fixes it
@@ -685,9 +685,9 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_live_provider.py` **[wire]** one real HTTP call carried the model, the messages, the configured 4096-token ceiling, exactly the 6 tools this role is allowed, the bearer key and the configured extra header — and with the ceiling left at its default, max_tokens is omitted rather than sent as 0
 - `test_live_provider.py` **[cost]** the provider reported 1M+1M tokens and the ledger charged $18.00 at the configured rates — spend is read from the response, never estimated by the client
 - `test_live_provider.py` **[retry]** 429 then 503 then success in 3 calls with growing backoff; a 400 stopped after exactly 1 call instead of burning five
-- `test_live_provider.py` **[retry-after]** a 429 asking for 45s slept 45.7s (the blind backoff would have been 2s and retried into a closed window), a 503 asking for 1s slept 1.0s instead of 2s or more, and both carry jitter so simultaneous experts do not return in lockstep
+- `test_live_provider.py` **[retry-after]** a 429 asking for 45s slept 45.2s (the blind backoff would have been 2s and retried into a closed window), a 503 asking for 1s slept 1.2s instead of 2s or more, and both carry jitter so simultaneous experts do not return in lockstep
 - `test_live_provider.py` **[retry-after]** the header parser pinned across 15 shapes: both legal formats, the 120s cap, negatives and past dates clamped to 0, and every unreadable value falling back to blind backoff rather than to 0
-- `test_live_provider.py` **[unreachable]** a refused connection failed over to the fallback in 2.05s and was logged as unreachable, instead of costing five backoffs per step forever
+- `test_live_provider.py` **[unreachable]** a refused connection failed over to the fallback in 2.02s and was logged as unreachable, instead of costing five backoffs per step forever
 - `test_live_provider.py` **[keys]** all 3 configured key sources (env, inline, file) reached the Authorization header and were accepted by a server that checks them
 - `test_live_provider.py` **[malformed]** a non-JSON body and a body with no choices are each retried through the full ladder, then failed over to the configured fallback, and logged against the provider that sent them — they used to raise straight out of the loop, killing the task and never trying the fallback
 - `test_live_provider.py` **[timeout]** a provider that hung for 20s was cut off by the 2s ceiling and retried, finishing in 2.0s — the timeout is a real bound, not a suggestion
@@ -708,8 +708,8 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_first_day.py` **[first-task]** with the probe green, a gated task ran to completion over the same provider — the artefact exists, the gate passed, and the key appears nowhere in 2435 characters of log
 - `test_first_day.py` **[activate]** one key repoints every role at the provider that key belongs to, writes its verified endpoint and leaves the file's comments intact; 11 providers are catalogued, ranked by what they actually give away; incomplete credentials are refused rather than half-applied; and running it twice changes nothing
 - `test_endurance.py` **[soak]** driving 120 real tasks through a real loop (AGENT_SOAK_TASKS to change)
-- `test_endurance.py` **[queue]** 120 tasks completed; the hot queue held 20 then 42 against a retention of 20, 78 moved to the append-only archive with none lost, and state.json went 32419 -> 68045 bytes (2.1x)
-- `test_endurance.py` **[latency]** per-task wall time across 6 batches: 0.11s, 0.12s, 0.12s, 0.12s, 0.12s, 0.12s — median 0.12s, and the last batch is not an outlier: the loop does not get slower as its own history grows
+- `test_endurance.py` **[queue]** 120 tasks completed; the hot queue held 20 then 42 against a retention of 20, 78 moved to the append-only archive with none lost, and state.json went 32417 -> 68043 bytes (2.1x)
+- `test_endurance.py` **[latency]** per-task wall time across 6 batches: 0.12s, 0.13s, 0.13s, 0.12s, 0.12s, 0.12s — median 0.12s, and the last batch is not an outlier: the loop does not get slower as its own history grows
 - `test_endurance.py` **[logs]** agent.log is 116 KB and rotates at 5 MB x 5 backups — a hard ceiling of 29 MB per expert, whatever happens
 - `test_endurance.py` **[locks]** no lock file survived 120+ tasks and 6 loop restarts — every one was released by its holder or reclaimed as stale
 - `test_endurance.py` **[ledgers]** the whole expert directory is 1.3 MB after 120+ tasks (11.3 KB per task): the model gateway 48 KB, routing outcomes 24 KB, compiled context windows 1000 KB
@@ -747,9 +747,9 @@ Each test below prints its own sentence describing what it proved; those sentenc
 
 *the layer that decides which of these systems a goal needs before any work starts: that the readiness verdict is EARNED from mechanical probes rather than asserted, that knowledge from a weak source does not count as knowledge, that an AUTHORITY gap stops the run before goal.pursue is ever reached, that a dry run writes nothing, and that every gap is classified by the platform's own gap router rather than by a second opinion*
 
-**Verdict: proven** — 3 of 3 declared tests ran and passed, producing 17 observations.
+**Verdict: proven** — 3 of 3 declared tests ran and passed, producing 18 observations.
 
-<details><summary>What the tests observed (17)</summary>
+<details><summary>What the tests observed (18)</summary>
 
 - `test_universal.py` **[earned]** the verdict moved only when the facts did: a new expert reported a knowledge gap, and 2 cited atom(s) from tier-1 sources closed it
 - `test_universal.py` **[sources]** the same claim was accepted at tier 1 from an RFC and refused at tier 3 from a content farm — what is believed depends on where it came from, decided by rule and never by a model
@@ -758,6 +758,7 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_universal.py` **[authority-corpus]** 28 phrasings that must reach the owner all do — including 'log into', 'sign in to', 'authenticate' and 'credentials', which the hand-written whole-word table missed — and 10 ordinary goals are still not escalated
 - `test_universal.py` **[dry-run]** describing a goal produced 1 routed action(s), each with a reason and a command you can run yourself, and wrote nothing to the expert
 - `test_universal.py` **[routing]** 3 gap(s) across 2 dimension(s), every one classified by mission.GAPS itself rather than by a second opinion, and every one carrying the route the platform already declared for it
+- `test_universal.py` **[route]** 15 goal shapes each landed on the declared system, every verdict carrying a why, a CLI path and a panel path — and the note still says it is a mechanical floor, not understanding
 - `test_universal.py` **[unified]** POST /api/achieve is reachable, permissioned 'run' by declaration, validates its inputs, and REFUSED to start a goal needing the owner — naming 2 blocker(s) instead of beginning. The layer that orchestrates everything is no longer reachable only from a terminal.
 - `test_grants.py` **[scope]** a grant covers its own scope and nothing beside it: another vendor is refused, another KIND of authority is refused, and a scopeless grant must be spelled '*' rather than left blank
 - `test_grants.py` **[lifetime]** a grant stops working the day it expires and the moment it is revoked — a permission that outlives its reason is how a temporary exception becomes standing access nobody approved

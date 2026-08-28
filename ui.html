@@ -820,6 +820,12 @@ function systemsMapHtml(open){
     with a done-check, then one <b>Goal</b> with graders. Everything else is these two,
     scaled. The <button class="btn sm ghost" onclick="go('guide')">📖 full guide</button>
     walks each system end to end.</p>
+    <p class="muted" style="font-size:12px;margin:6px 0 2px">Not sure which one a goal
+    needs? "Can it do this?" on the Home bar answers with the system its shape asks
+    for — the same mechanical rule as <span class="mono" style="font-size:11px">python
+    universal.py route --goal "..."</span> — and you can override it freely. Mid-flight
+    you are never locked in either: steer it, press ⏸, or promote a task to a goal by
+    adding graders.</p>
   </div></details>`;
 }
 async function renderHome(m){
@@ -1076,6 +1082,14 @@ async function checkReady(){
         <br><span class="muted" style="font-size:12px">routes to: ${esc(g.routes_to)}</span></li>`).join("");
   const acts = (r.actions||[]).filter(a=>a.command).map(a => `
     <li>${esc(a.action)}: <code style="font-size:11.5px">${esc(a.command)}</code></li>`).join("");
+  const rt = r.route || null;
+  const alts = rt && (rt.alternatives||[]).length
+    ? ` <span class="muted">— or ${rt.alternatives.map(a=>esc(a.system)).join(", ")}</span>` : "";
+  const routeHtml = rt ? `
+      <p style="font-size:12.5px;margin:6px 0 0">shape says:
+        <b>${esc((rt.system||"").toUpperCase())}</b>${alts}
+        <br><span class="muted" style="font-size:12px">${esc(rt.why||"")}</span>
+        <br><span class="muted" style="font-size:12px">${esc(rt.how_panel||"")}</span></p>` : "";
   out.innerHTML = `
     <div class="card" style="margin-top:10px"><div class="body">
       <div class="row" style="justify-content:space-between;align-items:baseline">
@@ -1083,6 +1097,7 @@ async function checkReady(){
         <span class="muted" style="font-size:12px">${esc(who)}</span>
       </div>
       <p style="font-size:13px;margin:6px 0">${esc(r.why||"")}</p>
+      ${routeHtml}
       ${rows ? `<ul style="font-size:13px;margin:6px 0 0;padding-left:18px">${rows}</ul>` : ""}
       ${acts ? `<p class="muted" style="font-size:12px;margin:10px 0 4px">To close these yourself:</p>
                 <ul style="font-size:12px;margin:0;padding-left:18px">${acts}</ul>` : ""}

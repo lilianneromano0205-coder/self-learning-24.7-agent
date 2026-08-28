@@ -65,6 +65,13 @@ import time
 HOME = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HOME)
 
+# A Windows console defaults to cp1252, which cannot encode the arrows in the
+# panel paths route() prints. Same guard acquire.py, chief.py and ui.py use.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except (AttributeError, OSError):        # pragma: no cover
+    pass
+
 # What a goal's words imply it will need. Deterministic and inspectable on
 # purpose: a model asked "what tools do you need?" answers plausibly and
 # unfalsifiably, and this platform does not accept plausible.
@@ -195,6 +202,128 @@ MIN_LEARN_TIER = 2          # tier 1 normative, 2 professional. 3-4 is context.
 
 def _root(home, expert):
     return os.path.join(home, "experts", expert)
+
+
+# ------------------------------------------------------------------ routing
+
+def route(goal, criteria=""):
+    """WHICH SYSTEM FITS THIS ASK — the systems map's picking rule as code.
+
+    The platform has nine work systems and one law under them all; what a
+    newcomer (or an orchestrator) lacks is the reflex for which one a given
+    sentence wants. This is that reflex, MECHANICAL like everything that
+    routes here: shape cues, not model opinions. It returns the best-fit
+    system with the exact command and panel path, plus honest alternatives
+    — and it says plainly that it is a keyword floor the owner can
+    override. Changing systems mid-flight stays a first-class move: steer
+    a goal, interrupt it to blocked and resume, lift a task into a goal by
+    giving it graders — the router picks a starting door, never a cage."""
+    t = f"{goal or ''} {criteria or ''}".strip()
+    low = " " + t.lower() + " "
+    first = (t.split() or [""])[0].lower().rstrip(",:;")
+    note = ("routed by shape cues (a mechanical floor, not understanding) "
+            "— override freely; every system ends the same way: a check "
+            "the worker cannot edit")
+
+    def R(system, why, how_cli, how_panel, alts=None):
+        return {"system": system, "why": why, "how_cli": how_cli,
+                "how_panel": how_panel, "alternatives": alts or [],
+                "note": note}
+
+    if t.rstrip().endswith("?") or first in (
+            "what", "why", "how", "when", "who", "which", "where",
+            "should", "is", "are", "can", "does", "do", "did"):
+        return R("consult",
+                 "a question, not an action — every claim in the answer "
+                 "must cite the expert's own notes or say NOT IN MY TRAINING",
+                 'python consult.py ask <root> "the question"',
+                 "agent → Access → Ask")
+    if re.search(r"\b(when(ever)?|if|each time)\b[^.]{3,120}\b(then|alert|"
+                 r"notify|re-?run|redo|update|do|start|tell)\b", low):
+        return R("prospective intention",
+                 "a future action tied to a condition — held in the "
+                 "intention ledger and fired by the scheduler, never left "
+                 "to a model's memory",
+                 'python prospective.py add --root <root> --goal "..." '
+                 '--when-check "<probe that exits 0 when it is time>"',
+                 "agent → Work (intentions)")
+    if re.search(r"\b(every|each)\s+(day|week|month|morning|evening|night|"
+                 r"hour|monday|friday|\d)", low) or re.search(
+                 r"\b(daily|weekly|monthly|nightly|hourly)\b", low):
+        return R("routine",
+                 "recurring work on a schedule — the loop wakes it; nobody "
+                 "has to remember",
+                 'python routines.py add --root <root> ...',
+                 "agent → Work (routines)")
+    if re.search(r"\bthen\b[^.]{3,160}\bthen\b", low) or "->" in t \
+            or "→" in t or re.search(r"\bstages?\b|\bpipeline\b", low):
+        return R("workflow",
+                 "fixed stages with a gate between each — a pipeline where "
+                 "predictability beats autonomy, and a failed gate stops "
+                 "the line",
+                 'python workflows.py run <root> ...',
+                 "Work → Workflows")
+    if re.search(r"\b(prove|certif\w*|examin\w*|competence)\b", low) and \
+            re.search(r"\b(unseen|sealed|pack|exam\w*|prove|certif\w*)\b",
+                      low):
+        return R("mastery",
+                 "competence proven on SEALED unseen tasks — the exam the "
+                 "student can neither read nor edit, with the pretest → "
+                 "exam lift measured",
+                 'python mastery.py run <home> <expert> <pack> --drive',
+                 "agent → Mastery")
+    learn_words = ("learn", "study", "master", "understand",
+                   "become expert", "training on", "get good at")
+    if any(w in low for w in learn_words):
+        return R("goal (learning-shaped)",
+                 "building durable expertise — the goal engine seeds the "
+                 "study plan: sources → cited notes → spec → closed-book "
+                 "exam → re-study what was missed",
+                 'python goal.py pursue "learn ..." --expert <slug> --drive',
+                 "Work → New goal",
+                 alts=[{"system": "mastery",
+                        "why": "add a capability pack when the competence "
+                               "must be PROVEN on unseen work"}])
+    if first in ("keep", "maintain", "monitor", "watch", "ensure", "stay",
+                 "track") or re.search(r"\b(ongoing|standing|at all times|"
+                                       r"continuously)\b", low):
+        return R("mission",
+                 "a standing responsibility, not a single deliverable — an "
+                 "objective with criteria held on disk, served by many "
+                 "tasks and goals over time",
+                 'python mission.py new "objective" --criterion "..."',
+                 "Home bar → New mission",
+                 alts=[{"system": "routine",
+                        "why": "if the work repeats on a fixed schedule "
+                               "rather than needing judgment"}])
+    if re.search(r"\bteam\b", low):
+        return R("team",
+                 "work too broad for one agent — 2–4 specialists and a "
+                 "lead, handoffs as files, constraints hashed",
+                 "Work → New team (panel)", "Work → New team")
+    if len(t) < 90 and re.search(r"\b(fix|write|create|produce|add|update|"
+                                 r"rename|convert|delete|fetch|download)\b",
+                                 low) \
+            and " and " not in low:
+        return R("task",
+                 "one small deliverable — a single gated job is cheaper "
+                 "and faster than a pursuit",
+                 'python loop.py add --role practitioner --goal "..." '
+                 '--done-check "<command>"',
+                 "agent → Work → ＋ task",
+                 alts=[{"system": "goal",
+                        "why": "promote it by adding graders (--accept) if "
+                               "\"done\" needs more than one check"}])
+    return R("goal",
+             "an outcome that can carry frozen graders — the default for "
+             "anything testable, pursued until the graders pass",
+             'python goal.py pursue "..." --expert <slug> --drive '
+             '--accept "what::command"',
+             "Work → New goal",
+             alts=[{"system": "task",
+                    "why": "if it is really one small artifact"},
+                   {"system": "mission",
+                    "why": "if it is a responsibility that never ends"}])
 
 
 # --------------------------------------------------------------- assessment
@@ -630,6 +759,10 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
+    pr = sub.add_parser("route", help="which system fits this goal, and why")
+    pr.add_argument("--goal", required=True)
+    pr.add_argument("--criteria", default="")
+    pr.add_argument("--json", action="store_true")
     for name in ("ready", "explain", "achieve"):
         p = sub.add_parser(name)
         p.add_argument("--expert", required=True)
@@ -643,6 +776,20 @@ def main():
             p.add_argument("--no-learn", action="store_true",
                            help="assess only; do not open acquisitions")
     a = ap.parse_args()
+
+    if a.cmd == "route":
+        r = route(a.goal, a.criteria)
+        if a.json:
+            print(json.dumps(r, indent=2))
+            return
+        print(f"SYSTEM: {r['system'].upper()}")
+        print(f"  why:   {r['why']}")
+        print(f"  cli:   {r['how_cli']}")
+        print(f"  panel: {r['how_panel']}")
+        for alt in r["alternatives"]:
+            print(f"  or {alt['system']}: {alt['why']}")
+        print(f"  ({r['note']})")
+        return
 
     if a.cmd == "ready":
         r = ready(a.home, a.expert, a.goal, a.criteria)
