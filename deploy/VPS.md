@@ -34,7 +34,7 @@ remains the reference for what the short path did and why.
 ## 1. Provision (run once, as root)
 
 ```bash
-apt update && apt install -y python3 python3-venv git docker.io
+apt update && apt install -y python3 python3-venv python-is-python3 git docker.io
 adduser --disabled-password --gecos "" agent
 usermod -aG docker agent
 ```

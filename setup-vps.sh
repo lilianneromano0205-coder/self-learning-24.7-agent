@@ -10,7 +10,24 @@ set -euo pipefail
 
 echo "== packages =="
 apt-get update -qq
-apt-get install -y -qq python3 python3-pip ffmpeg yt-dlp pandoc zip
+# `python-is-python3` IS NOT OPTIONAL, and its absence was invisible to
+# every layer of verification this project owns.
+#
+# Ubuntu ships `python3` and NO `python`. Gates, done-checks and runbook
+# steps shell out to `python ...`, which on a bare server returns exit 127
+# with "/bin/sh: 1: python: not found" — so the acceptance suite THIS SCRIPT
+# RUNS AS ITS FINAL GATE fails five tests and the install aborts on a
+# freshly bought machine.
+#
+# It survived 119 tests, 56 mutations and six-platform CI because every one
+# of those environments happens to provide `python`: a developer's Windows
+# box has it, and GitHub's setup-python action creates it. Only a bare
+# Ubuntu server does not — which is the one environment that was never
+# tested until a throwaway container was pointed at it. Measured: without
+# this package 5 tests fail on 24.04 and 26.04 alike; with it, 116 pass and
+# 0 fail on Ubuntu 26.04 / Python 3.14.4.
+apt-get install -y -qq python3 python3-pip python-is-python3 \
+                      ffmpeg yt-dlp pandoc zip
 
 echo "== user =="
 id -u agent >/dev/null 2>&1 || adduser --disabled-password --gecos "" agent
