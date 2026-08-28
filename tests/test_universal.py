@@ -319,6 +319,27 @@ def check_the_router_reads_shape_not_vibes(home):
     # the route must be honest about being mechanical
     assert "mechanical" in universal.route("anything")["note"], (
         "the router stopped disclosing that it reads shape, not meaning")
+
+    # THE THREE FAMILIES. The front door folds to three; the machinery does
+    # not. Every routed system must carry a family from exactly that set,
+    # with its one-line "what you walk away with" — and every system the
+    # router can name must be classified, because an unclassified lane is a
+    # tenth door wearing no sign.
+    assert set(universal.FAMILIES) == {"work", "competence", "answers"}, (
+        "the family set changed; the door is supposed to have THREE choices")
+    for goal, want in cases:
+        r = universal.route(goal)
+        assert r["family"] in universal.FAMILIES, (
+            f"{want!r} routed with family {r.get('family')!r}, which is not "
+            f"one of the three")
+        assert r["family_why"] == universal.FAMILIES[r["family"]], (
+            "the family's one-line meaning drifted from the single table")
+    assert universal.FAMILY["mastery"] == "competence"
+    assert universal.FAMILY["goal (learning-shaped)"] == "competence"
+    assert universal.FAMILY["consult"] == "answers"
+    fams = {universal.route(g)["family"] for g, _ in cases}
+    assert fams == {"work", "competence", "answers"}, (
+        f"the corpus no longer exercises all three families: {fams}")
     print(f"[route] {len(cases)} goal shapes each landed on the declared "
           f"system, every verdict carrying a why, a CLI path and a panel "
           f"path — and the note still says it is a mechanical floor, not "

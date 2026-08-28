@@ -745,3 +745,53 @@ for it.
 registry description now actually reaches `acquire.request` as
 `manifest_text`, so `acquire.inspect`'s RISK_SIGNALS tripwire evaluates real
 text for the first time. It had been scanning an empty string.
+
+---
+
+## AD-30 — Three families at the door; the nine lanes stay separate behind it
+
+**Status.** Accepted, 2026-08-28.
+
+**The request.** "We have a lot of systems and some resemble others — merge
+them into 3-4 max, without removing capability or conflicting with the
+build." The request was examined seriously, including the possibility that
+the honest answer was a real code merge.
+
+**What the analysis found.** The resemblances are real, and each one is a
+pair: a Task is a Goal with one grader; a Runbook is a Workflow that earned
+zero-model trust; Mastery is Learning with a sealed proof. But in every
+pair, the DIFFERENCE is a tested law rather than a naming accident:
+
+* **Workflow vs Runbook is WHO EXECUTES.** A workflow's stages are run by a
+  model behind a gate; a runbook's steps run with zero model calls under
+  trust earned from three verified wins, recorded in a CONTROL zone.
+  Merging them erases the platform's central safety boundary.
+* **Learning vs Mastery is WHO GRADES.** Learning produces cited notes and
+  a closed-book exam; Mastery's packs are sealed where the student can
+  neither read nor edit them. One code path for both lets the student grade
+  itself.
+* **Task vs Goal is WHERE TAMPER LIVES.** One done-check vs frozen,
+  caller-authored graders with TAMPER detection. Folding them collapses the
+  distinction between "a command exited 0" and "sealed acceptance passed".
+
+**And the key structural fact:** the nine systems already share one engine.
+goal, mission, workflow, team and consult all enqueue into loop.py's single
+task queue; mastery drives the goal engine; everything sits on one authority
+stack and one memory. There is no duplicated machinery to deduplicate — a
+code merge would buy no power and would rewrite behaviour that 119 tests and
+56 mutations currently pin.
+
+**Decision.** Merge the FRONT DOOR, not the machinery. Every system is
+classified into one of three families, named by what the user walks away
+with: **WORK** (an outcome), **COMPETENCE** (a capability, provable on
+unseen work), **ANSWERS** (a cited answer). `universal.FAMILY` is the single
+classification table; `route()` now carries `family` and `family_why` on
+every verdict, the panel's systems map and README group by family, and the
+router remains the concierge that picks the lane inside a family — so a
+newcomer faces three choices and usually zero, never nine.
+
+**Price paid.** A user who reads only family labels loses the nuance the
+lanes carry; the map keeps every lane visible inside its family for exactly
+that reason. And the classification itself is now API surface: tests pin
+that every routable system carries one of the three families, so adding a
+tenth lane without classifying it fails loudly.

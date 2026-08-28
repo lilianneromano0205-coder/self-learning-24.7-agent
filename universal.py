@@ -430,6 +430,50 @@ def _root(home, expert):
 
 # ------------------------------------------------------------------ routing
 
+# THE THREE FAMILIES — the front door, folded without folding the machinery.
+#
+# Nine work systems is a lot of doors, and several genuinely resemble each
+# other: a task is a goal with one grader, a runbook is a workflow that
+# earned zero-model trust, mastery is learning with a sealed proof. The
+# request "merge them into 3-4" was examined seriously, and the honest
+# answer has two halves:
+#
+#   THE FRONT DOOR MERGES. Every system belongs to one of three families,
+#   named by what you walk away with — an OUTCOME, a COMPETENCE, or an
+#   ANSWER. Three choices cover every ask, and the router picks the lane
+#   inside the family mechanically, so a newcomer never faces nine options.
+#
+#   THE MACHINERY DOES NOT. The resemblances are real but the differences
+#   are load-bearing, and each is a tested law rather than a naming
+#   accident: a workflow's stages are executed by a MODEL behind a gate
+#   while a runbook's steps run with ZERO model calls under trust earned
+#   from three verified wins — merging them erases the platform's central
+#   safety boundary (who executes). Learning produces cited notes; mastery
+#   is an exam the student cannot read — merging them lets the student
+#   grade itself. A task's one done-check and a goal's frozen graders
+#   differ exactly where TAMPER detection lives. All nine already share
+#   one engine (every lane enqueues into loop.py's single task queue, one
+#   authority stack, one memory), so a code merge would buy no power —
+#   only the risk of rewriting 119 tests' worth of proven behaviour.
+#
+# So: three families at the door, nine proven lanes behind it, and the
+# router as the concierge in between.
+FAMILIES = {
+    "work": "you walk away with an OUTCOME — something done, verified by "
+            "checks the worker cannot edit",
+    "competence": "you walk away with a CAPABILITY — the fleet is durably "
+                  "better at something, and can prove it on unseen work",
+    "answers": "you walk away with an ANSWER — cited from what the fleet "
+               "actually knows, or an honest NOT IN MY TRAINING",
+}
+FAMILY = {
+    "task": "work", "goal": "work", "mission": "work", "workflow": "work",
+    "team": "work", "routine": "work", "prospective intention": "work",
+    "goal (learning-shaped)": "competence", "mastery": "competence",
+    "consult": "answers",
+}
+
+
 def route(goal, criteria=""):
     """WHICH SYSTEM FITS THIS ASK — the systems map's picking rule as code.
 
@@ -450,7 +494,10 @@ def route(goal, criteria=""):
             "the worker cannot edit")
 
     def R(system, why, how_cli, how_panel, alts=None):
-        return {"system": system, "why": why, "how_cli": how_cli,
+        return {"system": system,
+                "family": FAMILY.get(system, "work"),
+                "family_why": FAMILIES[FAMILY.get(system, "work")],
+                "why": why, "how_cli": how_cli,
                 "how_panel": how_panel, "alternatives": alts or [],
                 "note": note}
 
@@ -1065,6 +1112,7 @@ def main():
         if a.json:
             print(json.dumps(r, indent=2))
             return
+        print(f"FAMILY: {r['family'].upper()} — {r['family_why']}")
         print(f"SYSTEM: {r['system'].upper()}")
         print(f"  why:   {r['why']}")
         print(f"  cli:   {r['how_cli']}")

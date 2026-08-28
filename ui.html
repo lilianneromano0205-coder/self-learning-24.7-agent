@@ -808,18 +808,37 @@ function systemsMapHtml(open){
      "questions, not actions","agent → Access → Ask",
      "cites resolve, or it says NOT IN MY TRAINING"],
   ];
-  return `<details class="card" ${open?"open":""} style="padding:0">
-  <summary style="cursor:pointer;list-style:none">
-    <h3 style="margin:0">🗺 The systems — what each one is, and when to use it
-      <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:11.5px">
-      nine systems, one law: "done" is always a mechanical check the worker cannot edit</span></h3></summary>
-  <div class="body tablewrap"><table><thead>
-    <tr><th>system</th><th>what it is</th><th>use it when</th><th>where</th><th>"done" means</th></tr></thead>
-    <tbody>${rows.map(([n,w,u,wh,dn])=>`<tr>
+  /* THREE FAMILIES AT THE DOOR, NINE PROVEN LANES BEHIND IT. The lanes
+     resemble each other in pairs (a task is a goal with one grader, a
+     runbook is a workflow that earned zero-model trust, mastery is learning
+     with a sealed proof), and the resemblance confused people — but the
+     DIFFERENCES are tested laws, so the fold happens here in presentation,
+     never in the machinery. Grouped by what you walk away with. */
+  const FAM = {
+    "WORK — you walk away with an OUTCOME":
+      ["Task","Goal","Mission","Workflow","Team"],
+    "COMPETENCE — you walk away with a CAPABILITY, provable on unseen work":
+      ["Learning","Mastery","Runbooks"],
+    "ANSWERS — you walk away with a CITED ANSWER":
+      ["Consult"],
+  };
+  const byName = Object.fromEntries(rows.map(r=>[r[0],r]));
+  const section = (label, names) => `
+      <tr><td colspan="5" style="padding-top:10px"><b class="muted"
+        style="font-size:11px;letter-spacing:.06em">${label}</b></td></tr>
+      ${names.map(n=>byName[n]).filter(Boolean).map(([n,w,u,wh,dn])=>`<tr>
       <td><b>${n}</b></td><td style="max-width:300px">${w}</td>
       <td style="max-width:180px">${u}</td>
       <td class="mono" style="font-size:11.5px">${wh}</td>
-      <td style="max-width:220px">${dn}</td></tr>`).join("")}
+      <td style="max-width:220px">${dn}</td></tr>`).join("")}`;
+  return `<details class="card" ${open?"open":""} style="padding:0">
+  <summary style="cursor:pointer;list-style:none">
+    <h3 style="margin:0">🗺 The systems — three families, one law
+      <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:11.5px">
+      "done" is always a mechanical check the worker cannot edit</span></h3></summary>
+  <div class="body tablewrap"><table><thead>
+    <tr><th>system</th><th>what it is</th><th>use it when</th><th>where</th><th>"done" means</th></tr></thead>
+    <tbody>${Object.entries(FAM).map(([label,names])=>section(label,names)).join("")}
     </tbody></table>
     <p class="muted" style="font-size:12px;margin:8px 0 2px">Start simple: one <b>Task</b>
     with a done-check, then one <b>Goal</b> with graders. Everything else is these two,
@@ -1092,7 +1111,8 @@ async function checkReady(){
     ? ` <span class="muted">— or ${rt.alternatives.map(a=>esc(a.system)).join(", ")}</span>` : "";
   const routeHtml = rt ? `
       <p style="font-size:12.5px;margin:6px 0 0">shape says:
-        <b>${esc((rt.system||"").toUpperCase())}</b>${alts}
+        <b>${esc((rt.system||"").toUpperCase())}</b>
+        ${rt.family ? `<span class="muted" style="font-size:11px">· ${esc(rt.family)} family</span>` : ""}${alts}
         <br><span class="muted" style="font-size:12px">${esc(rt.why||"")}</span>
         <br><span class="muted" style="font-size:12px">${esc(rt.how_panel||"")}</span></p>` : "";
   out.innerHTML = `

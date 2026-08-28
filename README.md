@@ -83,20 +83,45 @@ number in them is computed from files on disk, none is staged.*
 
 ## The systems at a glance
 
-Nine systems, one law: **"done" is always a mechanical check the worker
-cannot edit.**
+Three families at the door — named by **what you walk away with** — and one
+law under all of them: **"done" is always a mechanical check the worker
+cannot edit.** Behind the door, each family has proven lanes; you never have
+to pick one yourself, because the router reads your goal's shape and picks
+the lane (override freely).
 
-| System | What it is | "Done" means |
+**WORK — you walk away with an outcome**
+
+| Lane | What it is | "Done" means |
 |---|---|---|
 | **Task** | one gated job for one role | its done-check command exits 0 |
 | **Goal** | pursued across cycles until frozen graders pass; machine path first, judge overruled if the graders disagree | VERIFIED: every sealed acceptance test passes, run by the harness |
 | **Mission** | a standing objective with success criteria, held on disk across weeks | every criterion met by recorded evidence |
 | **Workflow** | fixed stages with a gate between each | each stage's gate passed, in order |
 | **Team** | 2–4 specialists + a lead; file handoffs; constraint digests | the members' gates + the lead's synthesis |
+
+**COMPETENCE — you walk away with a capability, provable on unseen work**
+
+| Lane | What it is | "Done" means |
+|---|---|---|
 | **Learning** | courses → cited notes → spec → closed-book exam | spec 100% · exam ≥ threshold · zero gaps |
 | **Mastery** | sealed capability packs; pretest → study → exam → retention | harness-run validators clear the pack's frozen bars |
 | **Runbooks** | machine-executed procedures, zero model calls, earned trust | every step's verify exits 0 |
+
+**ANSWERS — you walk away with a cited answer**
+
+| Lane | What it is | "Done" means |
+|---|---|---|
 | **Consult** | answers where every claim carries a citation | cites resolve, or NOT IN MY TRAINING |
+
+Why three families and not three systems? The lanes resemble each other in
+pairs — a task is a goal with one grader, a runbook is a workflow that earned
+zero-model trust, mastery is learning with a sealed proof — but each
+difference is a **tested law, not a naming accident**: who executes (a model
+behind a gate vs a machine under earned trust), who grades (frozen graders vs
+one check), whether the student can read its own exam. All nine already share
+one engine — every lane enqueues into the same task loop, one authority
+stack, one memory — so merging code would buy no power and risk proven
+behaviour. The fold happens at the door, where the confusion was.
 
 Start simple: one **Task** with a done-check, then one **Goal** with
 graders. Everything else is these two, scaled.
