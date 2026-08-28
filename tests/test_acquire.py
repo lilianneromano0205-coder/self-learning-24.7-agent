@@ -171,6 +171,21 @@ def check_search_first(sb):
     assert rec2["stage"] == "inspected", (
         f"a single shared common word ('always') refused an unrelated "
         f"install again: {rec2}")
+    # AND THE MATCHER ITSELF IS PINNED, not only the refusal built on it.
+    # The two-word refusal floor above is defense in depth — under a
+    # substring matcher it silently ABSORBS the damage (spurious substring
+    # hits share zero whole tokens, so nothing is refused) and the mutation
+    # that reverts _matches to substring matching PASSED this file anyway,
+    # measured on ubuntu-3.12 CI. A masked layer is an untested layer, so
+    # the layer is asserted directly: "a thing" must find nothing, because
+    # 'thing' inside 'everything' is not a word match.
+    assert not acquire.search_known(sb, "a thing"), (
+        "search_known matched by SUBSTRING again: the need 'a thing' found "
+        "a hit, which can only happen if 'thing' matched inside a longer "
+        "word like 'everything'")
+    assert acquire.search_known(sb, "extract tables from pdf"), (
+        "the genuine three-word match stopped being found, so the matcher "
+        "is now too strict instead of too loose")
 
 
 def check_malicious_fixture(sb):
