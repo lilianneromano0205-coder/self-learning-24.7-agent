@@ -692,3 +692,56 @@ and a route, and the SECOND encounter is honest. Installed bytes also
 remain agent-writable — `acquire.install` writes into `capabilities/`,
 which is a workspace zone — so `install_digest` is detection, not
 prevention, exactly the ceiling `contract.py` states about its own seal.
+
+---
+
+## AD-29 — A bare `except` turned a broken rung into a policy stop
+
+**Status.** Recorded, 2026-08-28. Fixed in `frontier.py`.
+
+**What happened.** `tests/test_frontier_live.py` was written to prove the
+acquisition ladder COMPLETES, not merely that it refuses correctly. It
+cannot run without Docker, so it skipped locally and ran for the first time
+on CI — where it failed on all six platforms with:
+
+> inspection blocked this acquisition: no version pinned.
+
+That reads like a policy decision. It was a bug.
+
+`frontier.resolve_version` fetched the registry through `ingest.fetch_url`,
+which is an INGESTION function: it prepends a provenance header —
+`SOURCE-URL: <url>` and a blank line — so that material can always be traced
+to where it came from. Right for material, fatal for JSON. `json.load` on
+that file raised `JSONDecodeError`, a bare `except Exception` returned
+`("", "", "")`, and `acquire.inspect` refused the empty version with a
+message about pinning. **The pypi rung had therefore never completed once**,
+and every symptom pointed at the wrong module.
+
+**Three separate lessons, and only the first is about JSON.**
+
+1. A helper's contract is what it DOES, not what its name suggests.
+   `fetch_url` fetches *material*; treating its output as a raw body was the
+   caller's error.
+2. A bare `except Exception` that returns a neutral value converts a defect
+   into a policy outcome. A network failure, a parse failure and a squatted
+   package name all became one empty string, refused later with a sentence
+   naming none of them. The handler is now narrow and every failure carries
+   its reason.
+3. **The test that could not run locally is the one that found it.** Docker
+   was unavailable on the authoring machine, so the file skipped honestly and
+   said so; the defect surfaced the first time a machine could execute it. A
+   test that only runs where the capability exists is not decoration — it is
+   the only thing standing between "refuses correctly" and "works".
+
+**Second defect, same commit.** That first CI run also proved the file's
+precondition was wrong: `docker info` exiting 0 is not "a Linux container can
+run here". A Windows runner in Windows-container mode answers 0 and cannot
+pull `python:3.12-slim` at all, so the file RAN on three machines where
+nothing it needs exists. The precondition now pulls the image, runs a
+container, and reaches the registry — the thing itself, rather than a proxy
+for it.
+
+**Consequence for the supply-chain screen.** With the parse fixed, the
+registry description now actually reaches `acquire.request` as
+`manifest_text`, so `acquire.inspect`'s RISK_SIGNALS tripwire evaluates real
+text for the first time. It had been scanning an empty string.

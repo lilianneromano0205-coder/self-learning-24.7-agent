@@ -370,11 +370,26 @@ def probe_body(root, spec):
     interpolated values are an already-regex-validated name and an absolute
     path this module computed."""
     if spec["kind"] == "import":
-        target = os.path.abspath(os.path.join(root,
-                                              *spec["target_rel"].split("/")))
+        # THE TARGET IS DERIVED FROM THE PROBE'S OWN LOCATION, NOT EMBEDDED.
+        #
+        # This used to interpolate the host's absolute path. The probe runs
+        # inside the sandbox, where the expert root is mounted at /work — so
+        # the embedded path did not exist, sys.path pointed at nothing, and
+        # a package that HAD been installed correctly reported
+        # "ModuleNotFoundError". The ladder completed, the digest was taken,
+        # and the probe then said the capability was absent.
+        #
+        # The script always lives at <root>/frontier/probes/<cap>.py, so
+        # three dirnames reach the root wherever it is mounted. What is
+        # sealed is target_rel, not an absolute path, so this changes no
+        # hash — it makes the same sealed spec resolve correctly on both
+        # sides of the mount.
+        rel = spec["target_rel"]
         return (
             "import os, sys\n"
-            f"target = {target!r}\n"
+            "_here = os.path.dirname(os.path.abspath(__file__))\n"
+            "_root = os.path.dirname(os.path.dirname(_here))\n"
+            f"target = os.path.join(_root, *{rel.split('/')!r})\n"
             "sys.path = [target] + [p for p in sys.path if p and "
             "'site-packages' not in p and "
             "p != os.path.dirname(os.path.abspath(__file__))]\n"
@@ -394,9 +409,15 @@ def probe_body(root, spec):
         # sandboxed command's current directory IS the expert root. Without
         # the realpath check an agent could satisfy a binary probe with a
         # file it wrote into its own workspace.
+        # Same fix, and here it is a SECURITY one rather than a correctness
+        # one: with the host path embedded, the "is this binary inside the
+        # workspace" check compared against a directory that does not exist
+        # in the sandbox, so it could never be true and a binary the worker
+        # had written into its own root would have PASSED.
         return (
             "import os, shutil\n"
-            f"root = {os.path.abspath(root)!r}\n"
+            "_here = os.path.dirname(os.path.abspath(__file__))\n"
+            "root = os.path.dirname(os.path.dirname(_here))\n"
             f"p = shutil.which({spec['binary']!r}, "
             "path=os.environ.get('PATH', ''))\n"
             "if p is None:\n"
@@ -808,7 +829,25 @@ def resolve_version(package, root):
         ingest.fetch_url(f"https://pypi.org/pypi/{package}/json", dst,
                          root=root)
         with open(dst, "r", encoding="utf-8") as f:
-            data = json.load(f)
+            text = f.read()
+        # `ingest.fetch_url` is an INGESTION function: it prepends a
+        # provenance header — "SOURCE-URL: <url>" and a blank line — so that
+        # material can always be traced to where it came from. That is right
+        # for material and fatal for JSON, and this function used to hand the
+        # whole file to json.load inside a bare `except Exception`. The
+        # JSONDecodeError became an empty version, `acquire.inspect` refused
+        # it as "no version pinned" — a correct refusal for entirely the
+        # wrong reason — and THE PYPI RUNG HAD THEREFORE NEVER COMPLETED
+        # ONCE. It looked like a policy stop rather than a bug, which is
+        # exactly how a swallowed exception hides.
+        if not text.lstrip().startswith("{"):
+            i = text.find("{")
+            if i < 0:
+                raise Refused(
+                    f"the registry response for {package} carried no JSON "
+                    f"body (first bytes: {text[:60]!r})")
+            text = text[i:]
+        data = json.loads(text)
         info = data.get("info") or {}
         version = str(info.get("version") or "")
         sha = ""
@@ -821,9 +860,18 @@ def resolve_version(package, root):
         # supply-chain screen is dead code. It is NEVER stored and NEVER
         # rendered, so registry prose cannot become a prompt aimed at the
         # human granting the last rung.
+        if not version:
+            raise Refused(f"the registry named no version for {package}")
         return version, sha, str(info.get("description") or "")[:20000]
-    except Exception:
-        return "", "", ""
+    except Refused:
+        raise
+    except Exception as e:
+        # NARROW, AND IT SAYS WHY. Returning ('', '', '') here made a network
+        # failure, a parse failure and a squatted package name all look
+        # identical downstream — one empty string, refused later with a
+        # message about pinning that named none of them.
+        raise Refused(f"could not resolve {package} from the registry: "
+                      f"{type(e).__name__}: {str(e)[:160]}")
     finally:
         try:
             os.unlink(dst)

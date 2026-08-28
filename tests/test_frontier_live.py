@@ -59,24 +59,80 @@ PACKAGE = "ulid-py"
 MODULE = "ulid"
 
 
-def _docker_ready():
+def _can_actually_acquire():
+    """-> (ok, why). THE PRECONDITION MUST BE THE REAL ONE.
+
+    `docker info` exiting 0 is not "a Linux container can run here": a
+    Windows runner in Windows-container mode answers 0 and then cannot pull
+    python:3.12-slim at all. Asking the cheap question made this file RUN on
+    three Windows CI runners where nothing it needs exists. So the check is
+    the thing itself — pull the image the sandbox actually uses, run a
+    container, and reach the registry the ladder resolves against. Anything
+    less reports a capability this machine does not have, which is the exact
+    failure the module under test exists to prevent.
+    """
+    import sandbox
     if not shutil.which("docker"):
-        return False
+        return False, "docker is not on PATH"
     try:
-        return subprocess.run(["docker", "info"], capture_output=True,
-                              timeout=60).returncode == 0
-    except Exception:
-        return False
+        if subprocess.run(["docker", "info"], capture_output=True,
+                          timeout=60).returncode != 0:
+            return False, "the docker daemon is not running"
+    except Exception as e:
+        return False, f"docker is installed but not usable ({e})"
+    img = sandbox.DOCKER_IMAGE
+    have = subprocess.run(["docker", "image", "inspect", img],
+                          capture_output=True, timeout=90)
+    if have.returncode != 0:
+        pull = subprocess.run(["docker", "pull", img], capture_output=True,
+                              timeout=900)
+        if pull.returncode != 0:
+            return False, (f"could not pull {img} — a daemon that cannot run "
+                           f"this image cannot run an acquisition either")
+    try:
+        r = subprocess.run(["docker", "run", "--rm", img,
+                            "python", "-c", "print('ok')"],
+                           capture_output=True, timeout=300)
+        if r.returncode != 0:
+            return False, f"a container could not execute anything with {img}"
+    except Exception as e:
+        return False, f"a container could not be started ({e})"
+    # and the registry the pypi rung resolves against must be reachable, or
+    # the ladder stops at a refusal that says nothing about this machine
+    probe = tempfile.mkdtemp(prefix="frontier-reg-")
+    try:
+        frontier.resolve_version(PACKAGE, probe)
+    except Exception as e:
+        return False, (f"the package registry is unreachable from here "
+                       f"({str(e)[:90]})")
+    finally:
+        shutil.rmtree(probe, ignore_errors=True)
+    return True, f"docker runs {img} and the registry answers"
 
 
 def _sandboxed_expert(home, slug="live"):
-    """An expert whose declared backend is docker, so every probe is
-    contained and `acquire.install` will agree to run."""
+    """An expert whose declared backend is docker, and a fleet with a
+    DISPOSABLE computer registered.
+
+    `acquire.install` refuses without one — "no computer is available to
+    install into" — and that refusal is correct: third-party code is
+    installed by a worker that can be thrown away, not by the fleet itself.
+    A test that skipped this would be testing a shape the platform does not
+    permit. `workers.bootstrap` is the shipped answer and registers Local
+    Docker when docker is present.
+    """
+    import workers
     root = os.path.join(home, "experts", slug)
     os.makedirs(root, exist_ok=True)
     with io.open(os.path.join(root, "settings.toml"), "w",
                  encoding="utf-8") as f:
         f.write('[agent]\nsandbox = "docker"\n')
+    workers.bootstrap(home)
+    disposable = [w for w in workers.load(home)
+                  if "docker" in (w.get("capabilities") or [])]
+    assert disposable, (
+        "no disposable worker was registered even though docker is running; "
+        "acquire.install will refuse and the ladder cannot complete")
     return root
 
 
@@ -180,13 +236,16 @@ def check_an_owned_capability_becomes_ready_in_the_toolbox_note(root, home):
 
 
 def main():
-    if not _docker_ready():
-        print("SKIP test_frontier_live — docker is not available on this "
-              "machine. Installing third-party code requires a sandbox: "
-              "acquire.install refuses without one and the frontier refuses "
-              "to ground an acquisition on a host observation, so there is "
-              "nothing here that could honestly run.")
+    ok, why = _can_actually_acquire()
+    if not ok:
+        print(f"[skipped] {why}")
+        print("SKIP test_frontier_live — a real acquisition cannot run here, "
+              "which is a legitimate installation. Installing third-party "
+              "code requires a sandbox: acquire.install refuses without one "
+              "and the frontier refuses to ground an acquisition on a host "
+              "observation, so there is nothing here that could honestly run.")
         return
+    print(f"[available] {why}")
     home = tempfile.mkdtemp(prefix="frontier-live-")
     root = _sandboxed_expert(home)
     try:
