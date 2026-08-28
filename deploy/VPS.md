@@ -11,6 +11,18 @@ Everything below assembles **shipped, tested parts** (`agent.service`,
 parts are tested; this exact assembly's first live run is its first real
 test — run the verification step at the end before trusting it.
 
+**The short path:** steps 1–3 below are automated by one line on a fresh
+Ubuntu server — it clones the repository and runs `setup-vps.sh`, which
+creates the user, installs the units *without enabling them*, and runs the
+full test suite on the server before anything may start:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/reda-baqechame/self-learning-24.7-agent/main/get-fleet.sh | sudo bash
+```
+
+Then resume at step 4 (keys, `loop.py check`, enable). The long form below
+remains the reference for what the short path did and why.
+
 ## 0. What you need
 
 - A VPS: 2 vCPU / 2–4 GB RAM / 40 GB disk (≈ $4–6/month at Hetzner,
@@ -31,7 +43,7 @@ usermod -aG docker agent
 
 ```bash
 su - agent
-git clone https://github.com/lilianneromano0205-coder/self-learning-24.7-agent.git agent
+git clone https://github.com/reda-baqechame/self-learning-24.7-agent.git agent
 cd agent && python3 bootstrap.py --offline --no-panel
 python3 bootstrap.py --key OPENROUTER_API_KEY=paste-your-key-here
 python3 loop.py check     # every role must say OK before going further

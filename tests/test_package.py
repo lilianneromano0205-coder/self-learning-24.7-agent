@@ -419,6 +419,62 @@ def check_evidence_refuses_to_invent(work):
           f"generated report")
 
 
+INSTALLERS = ["install.sh", "install.ps1", "get-fleet.sh", "setup-vps.sh"]
+REPO_SLUG = "reda-baqechame/self-learning-24.7-agent"
+
+
+def check_the_installers_are_shippable(zpath):
+    """The one-command install path is an artefact like any other: it ships
+    in the archive, it parses, and every script that names the repository
+    names the SAME repository. The failure modes here are all quiet — a
+    CRLF after `#!` makes the kernel hunt for "/bin/sh\\r" and report a
+    missing file that is plainly there; a stale repo slug installs somebody
+    else's code; a script left out of the archive makes the README's
+    install line a promise about a file the user does not have."""
+    with zipfile.ZipFile(zpath) as z:
+        shipped = {n.split("/", 1)[-1] for n in z.namelist()}
+    for name in INSTALLERS:
+        assert name in shipped, f"{name} is not in the shipped archive"
+        raw = open(os.path.join(AGENT_DIR, name), "rb").read()
+        if name.endswith(".sh"):
+            assert b"\r" not in raw, (
+                f"{name} carries CRLF — the kernel will look for an "
+                f"interpreter named '/bin/sh\\r' and say it does not exist")
+        text = raw.decode("utf-8")
+        if "github.com" in text or "githubusercontent.com" in text:
+            assert REPO_SLUG in text, (
+                f"{name} names a GitHub location that is not {REPO_SLUG} — "
+                f"an installer pointing at the wrong repository installs "
+                f"the wrong code, silently")
+        assert not re.search(r"sk-[A-Za-z0-9]{20}", text), (
+            f"{name} contains something shaped like a key")
+    bash = shutil.which("bash")
+    parsed = []
+    if bash:
+        for name in [n for n in INSTALLERS if n.endswith(".sh")]:
+            r = subprocess.run([bash, "-n", os.path.join(AGENT_DIR, name)],
+                               capture_output=True, text=True, timeout=60)
+            assert r.returncode == 0, f"{name} does not parse: {r.stderr}"
+            parsed.append(name)
+    ps = shutil.which("powershell") or shutil.which("pwsh")
+    if ps:
+        for name in [n for n in INSTALLERS if n.endswith(".ps1")]:
+            r = subprocess.run(
+                [ps, "-NoProfile", "-Command",
+                 "$t=$null;$e=$null;"
+                 "[void][System.Management.Automation.Language.Parser]::"
+                 f"ParseFile('{os.path.join(AGENT_DIR, name)}',"
+                 "[ref]$t,[ref]$e);"
+                 "if($e.Count){$e|ForEach-Object{Write-Output $_.Message};exit 1}"],
+                capture_output=True, text=True, timeout=120)
+            assert r.returncode == 0, f"{name} does not parse: {r.stdout}"
+            parsed.append(name)
+    print(f"[install] {len(INSTALLERS)} installers ship in the archive, "
+          f"every GitHub reference names {REPO_SLUG}, the shell scripts are "
+          f"CRLF-free, and {len(parsed)} parsed clean with the interpreters "
+          f"present here ({', '.join(parsed) or 'none available'})")
+
+
 def main():
     work = tempfile.mkdtemp(prefix="pkg-test-")
     try:
@@ -426,6 +482,7 @@ def main():
         check_no_credential_ships(z)
         check_no_private_data_ships(z)
         check_it_is_actually_runnable(z, work)
+        check_the_installers_are_shippable(z)
         check_a_planted_secret_does_not_ship(work)
         check_evidence_refuses_to_invent(work)
         check_a_skip_is_not_a_failure(work)

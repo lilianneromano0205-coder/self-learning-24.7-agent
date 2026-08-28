@@ -3,6 +3,21 @@
 Five steps, ~15 minutes, one API key (or none — see step 2's local lane).
 Every command runs from this `agent/` directory. Python 3.11+.
 
+Don't have the repository yet? One line installs it — Windows PowerShell:
+
+```bash
+irm https://raw.githubusercontent.com/reda-baqechame/self-learning-24.7-agent/main/install.ps1 | iex
+```
+
+Linux / macOS (installs a `fleet` command):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/reda-baqechame/self-learning-24.7-agent/main/install.sh | bash
+```
+
+For a server that runs 24/7 without your hardware, see the cloud line in
+the README's Install section and [deploy/VPS.md](deploy/VPS.md).
+
 ## 1. Bootstrap
 
 ```bash

@@ -3,7 +3,7 @@
 **A file-backed, stdlib-only platform for building expert AI agents that work
 continuously, prove what they did, and remember what they learned.**
 
-[![tests](https://github.com/lilianneromano0205-coder/self-learning-24.7-agent/actions/workflows/tests.yml/badge.svg)](https://github.com/lilianneromano0205-coder/self-learning-24.7-agent/actions/workflows/tests.yml)
+[![tests](https://github.com/reda-baqechame/self-learning-24.7-agent/actions/workflows/tests.yml/badge.svg)](https://github.com/reda-baqechame/self-learning-24.7-agent/actions/workflows/tests.yml)
 ![python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![dependencies](https://img.shields.io/badge/dependencies-stdlib%20only-brightgreen)
 ![tests](https://img.shields.io/badge/tests-117%20passing%20%C2%B7%206%20platforms-brightgreen)
@@ -24,6 +24,45 @@ control panel and opens it. **[QUICKSTART.md](QUICKSTART.md) is the
 provider table: the platform is provider-universal (OpenRouter, official
 Anthropic/OpenAI/Gemini/xAI/DeepSeek APIs, Groq, NVIDIA, Hugging Face,
 Cloudflare Workers AI, or a local Ollama model with no key at all).
+
+## Install
+
+Three ways to run it, all from this repository, all with your own keys.
+Nothing phones home; the panel binds localhost; keys live in `agent.env`,
+read by the platform and printed by nothing.
+
+**Desktop (Windows)** — one line in PowerShell installs to
+`%USERPROFILE%\ExpertFleet` and puts an "Expert Fleet" shortcut on the
+Desktop and Start Menu:
+
+```bash
+irm https://raw.githubusercontent.com/reda-baqechame/self-learning-24.7-agent/main/install.ps1 | iex
+```
+
+**Desktop (Linux / macOS)** — one line installs to `~/ExpertFleet` and a
+`fleet` command that proves the wiring before starting anything:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/reda-baqechame/self-learning-24.7-agent/main/install.sh | bash
+```
+
+**Cloud (24/7, no hardware of yours)** — one line on a fresh Ubuntu server
+runs the full audited bootstrap: unprivileged user, systemd units installed
+but *not* enabled, and the complete test suite passing on the server before
+anything is allowed to start:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/reda-baqechame/self-learning-24.7-agent/main/get-fleet.sh | sudo bash
+```
+
+Then follow [deploy/VPS.md](deploy/VPS.md): keys in, `loop.py check`
+green, services enabled, and the panel reached **privately** — over
+Tailscale or a Cloudflare Tunnel with `UI_TOKEN` set, never a raw open
+port. Work continues while you are away; the ⏸ button in every goal's
+cockpit is the only thing that stops it. Prefer containers?
+`docker compose up -d` gives the same fleet sandboxed and
+resource-braked, and the image refuses to build unless the whole test
+suite passes inside it.
 
 ---
 
