@@ -475,6 +475,49 @@ def check_the_installers_are_shippable(zpath):
           f"present here ({', '.join(parsed) or 'none available'})")
 
 
+def check_a_git_clone_lands_every_working_directory(_work):
+    """A CLONE MUST PRODUCE THE SAME TREE THE ZIP DOES.
+
+    Git does not track empty directories. `package.py` has always shipped
+    EMPTY_DIRS inside the archive, so the zip route was fine — but every
+    clone route (get-fleet.sh, install.sh, a manual `git clone`) landed
+    WITHOUT inbox, experts, logs, contexts, commons, backups, org and
+    federation. Measured on a real clone of the published repository: 134
+    files where the working tree has 142, and `inbox/` absent.
+
+    That is not cosmetic. setup-vps.sh's own closing instruction is "Drop
+    material into /home/agent/agent/inbox/" — the first action an owner is
+    told to take, into a directory that did not exist. The fix is one marker
+    file per directory plus the matching `!dir/.gitkeep` negations, so the
+    clone and the zip land the same tree.
+
+    Checked against the INDEX rather than the filesystem, because the working
+    tree has these directories for local reasons; what matters is whether a
+    fresh checkout would.
+    """
+    tracked = subprocess.run(["git", "ls-files"], cwd=AGENT_DIR,
+                             capture_output=True, text=True, timeout=120)
+    if tracked.returncode != 0:          # not a git checkout: nothing to prove
+        print("[clone-dirs] not a git checkout here, so the clone shape "
+              "cannot be checked from this tree")
+        return
+    files = set(tracked.stdout.replace("\\", "/").split("\n"))
+    needed = ["inbox", "experts", "logs", "contexts", "commons", "backups",
+              "org", "federation", "courses", "skills"]
+    missing = [d for d in needed if not any(
+        f == f"{d}/.gitkeep" or f.startswith(f"{d}/") for f in files)]
+    assert not missing, (
+        f"a fresh `git clone` would not create {missing} — git does not track "
+        f"empty directories, so these need a .gitkeep (and a matching "
+        f"'!{missing[0]}/.gitkeep' negation if the directory is gitignored). "
+        f"The installer tells the owner to drop files into inbox/, and that "
+        f"instruction fails when the clone does not create it.")
+    print(f"[clone-dirs] all {len(needed)} working directories survive a git "
+          f"clone, so the clone route and the zip route land the same tree — "
+          f"a real clone of the published repo had 8 of them missing, "
+          f"including the inbox the installer tells the owner to use")
+
+
 def check_the_mutation_harness_cannot_delete_a_real_credential_file(work):
     """THE VERIFICATION TOOL MUST NOT DESTROY WHAT IT IS VERIFYING.
 
@@ -526,6 +569,7 @@ def main():
         check_no_private_data_ships(z)
         check_it_is_actually_runnable(z, work)
         check_the_installers_are_shippable(z)
+        check_a_git_clone_lands_every_working_directory(work)
         check_the_mutation_harness_cannot_delete_a_real_credential_file(work)
         check_a_planted_secret_does_not_ship(work)
         check_evidence_refuses_to_invent(work)

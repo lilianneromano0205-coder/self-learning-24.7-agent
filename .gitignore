@@ -16,21 +16,27 @@ secrets/
 # The CODE is versioned; the MINDS are not. An expert's world is its own
 # history — back it up with backup.py, which excludes credentials properly.
 experts/
+!experts/.gitkeep
 retired/
 teamwork/
 demo-run*/
 backups/
+!backups/.gitkeep
 commons/
+!commons/.gitkeep
 
 # ---- generated at runtime --------------------------------------------------
 logs/
+!logs/.gitkeep
 contexts/
+!contexts/.gitkeep
 checkpoints/
 events/
 approvals/
 consults/
 goals/
 inbox/
+!inbox/.gitkeep
 state.json
 state.json.corrupt-*
 spend-*.json
@@ -48,3 +54,11 @@ tests/tmp/
 # Worker deps (deploy/worker) — restored with `npm install`
 node_modules/
 .wrangler/
+
+# A GIT CLONE DOES NOT CREATE EMPTY DIRECTORIES, and the installer's own
+# final instruction is "Drop material into inbox/". A fresh clone landed
+# without inbox, experts, logs, contexts, commons, backups, org and
+# federation, so the first thing an owner is told to do failed. package.py
+# already ships EMPTY_DIRS in the zip; only the clone path was bare. The
+# negations above keep one marker file per directory so every install
+# route lands the same tree.
