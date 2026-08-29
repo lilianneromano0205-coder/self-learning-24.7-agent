@@ -301,6 +301,37 @@ def run_test(name, timeout=900):
     return "CAUGHT" if r.returncode != 0 else "MISSED"
 
 
+def _plant_decoy(path, text):
+    """Create a decoy file, or return None if a REAL one is already there.
+
+    THE RETURN VALUE IS THE WHOLE POINT: `planted` must mean "a file WE
+    created and may therefore delete". It used to be assigned BEFORE the
+    existence check —
+
+        planted = os.path.join(AGENT, "agent.env")
+        if os.path.exists(planted):
+            results.append((label, "SKIP", "agent.env already exists"))
+            continue                 # a `continue` inside try RUNS finally
+        ...
+        finally:
+            if planted and os.path.exists(planted):
+                os.remove(planted)   # ...and deleted the owner's real keys
+
+    — so the guard correctly detected a real agent.env, announced that it was
+    SKIPPING to avoid touching it, and then deleted it on the way out.
+    Running `python mutate_check.py` destroyed the operator's API keys
+    silently, while reporting a skip. Found when a real agent.env vanished
+    from this working tree mid-session and the deletion was traced here.
+
+    A name that means "ours" cannot be assigned before we know it is ours.
+    """
+    if os.path.exists(path):
+        return None
+    with io.open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    return path
+
+
 def main():
     only = sys.argv[1] if len(sys.argv) > 1 else None
     results = []
@@ -328,12 +359,12 @@ def main():
         shutil.copy(path, backup)
         try:
             if find is None:                    # the packaging mutation
-                planted = os.path.join(AGENT, "agent.env")
-                if os.path.exists(planted):
+                planted = _plant_decoy(
+                    os.path.join(AGENT, "agent.env"),
+                    "OPENAI_API_KEY=sk-mutation-should-be-caught\n")
+                if planted is None:
                     results.append((label, "SKIP", "agent.env already exists"))
                     continue
-                with io.open(planted, "w", encoding="utf-8") as f:
-                    f.write("OPENAI_API_KEY=sk-mutation-should-be-caught\n")
                 src = io.open(path, encoding="utf-8").read()
                 mutated = src.replace("def should_skip(", "def _orig_skip(")
                 mutated += ("\n\ndef should_skip(*a, **k):\n"

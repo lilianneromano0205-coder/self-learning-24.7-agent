@@ -475,6 +475,49 @@ def check_the_installers_are_shippable(zpath):
           f"present here ({', '.join(parsed) or 'none available'})")
 
 
+def check_the_mutation_harness_cannot_delete_a_real_credential_file(work):
+    """THE VERIFICATION TOOL MUST NOT DESTROY WHAT IT IS VERIFYING.
+
+    `mutate_check.py` plants a decoy agent.env to prove the packaging rules
+    exclude credentials, and removes it afterwards. It guarded a REAL
+    agent.env by checking existence and skipping — but assigned the variable
+    holding "the file to clean up" BEFORE that check, and a `continue` inside
+    a `try` runs the `finally`. So the harness announced "SKIP — agent.env
+    already exists" and then deleted the operator's API keys on the way out.
+
+    Observed for real: an agent.env created earlier in a working session was
+    gone afterwards, and the deletion traced to exactly this path. An owner
+    who put a key in agent.env and then ran the project's own mutation
+    harness — which this project asks people to trust — would have lost it
+    silently.
+
+    The contract is now a return value: _plant_decoy returns the path ONLY
+    when it created the file, and None when a real one is already there, so
+    "planted" can never name something we did not make.
+    """
+    import mutate_check
+
+    real = os.path.join(work, "agent.env")
+    with io.open(real, "w", encoding="utf-8") as f:
+        f.write("OPENROUTER_API_KEY=the-owners-real-key\n")
+    assert mutate_check._plant_decoy(real, "decoy") is None, (
+        "a REAL credential file was reported as newly planted, which makes "
+        "the caller's cleanup delete it")
+    with io.open(real, encoding="utf-8") as f:
+        assert "the-owners-real-key" in f.read(), (
+            "the real credential file was overwritten by the decoy")
+
+    fresh = os.path.join(work, "not-there-yet.env")
+    got = mutate_check._plant_decoy(fresh, "planted\n")
+    assert got == fresh and os.path.exists(fresh), (
+        "a decoy that SHOULD be planted was not — the harness would then "
+        "prove nothing about the exclusion rules")
+    print("[harness-safety] the mutation harness plants a decoy only where no "
+          "real credential file exists, and reports None otherwise — so the "
+          "cleanup that follows can never remove an owner's keys, which it "
+          "did while announcing that it was skipping them")
+
+
 def main():
     work = tempfile.mkdtemp(prefix="pkg-test-")
     try:
@@ -483,6 +526,7 @@ def main():
         check_no_private_data_ships(z)
         check_it_is_actually_runnable(z, work)
         check_the_installers_are_shippable(z)
+        check_the_mutation_harness_cannot_delete_a_real_credential_file(work)
         check_a_planted_secret_does_not_ship(work)
         check_evidence_refuses_to_invent(work)
         check_a_skip_is_not_a_failure(work)
