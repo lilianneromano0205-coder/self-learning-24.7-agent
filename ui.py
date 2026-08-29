@@ -1164,6 +1164,19 @@ class Handler(BaseHTTPRequestHandler):
             spec = d.get("spec")
             if isinstance(spec, str):
                 spec = json.loads(spec)
+            # EVERY STAGE'S done_check GOES THROUGH THE SAME GATE THE OTHER
+            # ENDPOINTS USE. /task and /intention both call _net_gate, whose
+            # docstring says why in one line: "a free-form string here was
+            # arbitrary code execution". This endpoint did not call it, and a
+            # workflow stage's done_check was written verbatim into the task
+            # queue and later run as a shell command by loop.py — so the one
+            # guard the codebase wrote against RCE over HTTP was bypassed by
+            # the one POST route that forgot to ask for it. Reachable from
+            # any device on the tailnet in the deployment the docs recommend.
+            if isinstance(spec, dict):
+                for stage in (spec.get("stages") or []):
+                    if isinstance(stage, dict) and "done_check" in stage:
+                        stage["done_check"] = _net_gate(stage.get("done_check"))
             rec = wf.run(root, spec, d.get("vars") or {})
             if not is_running(slug):
                 start_expert(self.home, slug)

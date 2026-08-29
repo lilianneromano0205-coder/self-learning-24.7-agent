@@ -1,0 +1,54 @@
+# WITHOUT THIS FILE, `COPY . /home/agent/agent` PUT THE OPERATOR'S API KEYS
+# IN THE IMAGE.
+#
+# docker-compose.yml and the README both tell the owner to fill in agent.env
+# BEFORE building. The Dockerfile then copied the whole build context — so
+# the image carried agent.env (world-readable at 0755), the entire .git
+# history, 230 MB of deploy/worker/node_modules, the developer's trained
+# experts, and every test sandbox. Pushing that image to any registry
+# publishes the keys.
+#
+# Every other guard against shipping a secret — .gitignore, package.py's
+# credential scan, the CI archive assertion — lives on a different layer.
+# The docker build context had none of them, which is the same shape as
+# every other defect found in this project's deployment audit: a guard at
+# one layer, and the layer around it bare.
+
+# --- credentials, first and non-negotiable -------------------------------
+agent.env
+*.env
+!agent.env.example
+ui-token.txt
+keys/
+.keys/
+secrets/
+*.key
+*.pem
+*.p12
+*.pfx
+federation/identity.json
+
+# --- this fleet's memory: someone else's image must not carry it ---------
+experts/
+commons/
+org/
+logs/
+contexts/
+backups/
+inbox/
+proof/observations/
+demo-run/
+demo-run.prev-*
+state.json
+briefing.md
+commons-digest.md
+
+# --- weight, not danger ---------------------------------------------------
+.git/
+.github/
+deploy/worker/node_modules/
+tests/tmp/
+**/__pycache__/
+*.pyc
+*.zip
+docs/panel/*.png
