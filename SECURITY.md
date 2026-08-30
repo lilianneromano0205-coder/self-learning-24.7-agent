@@ -26,7 +26,7 @@ bypasses one.
 | **Model output** (every token) | provider HTTP responses | the tool loop: one typed tool call per step; `policy.py` screens commands; `fileauth.py` zones file writes; gates decide "done", never the model |
 | **Web content** (pages, PDFs, feeds) | `ingest.py`, `discover.py` | source tiering (`sources.py`); material is data in the window, never instructions — the grounding header says so and `test_guardrails` drives hostile material |
 | **MCP servers** (third-party tools) | `mcp.py` | catalog + `enable` requires owner review (`policy.py`); every `call` passes `guarded_call` risk classes, approvals, and the effects ledger |
-| **Federation peers** (other fleets) | `federation.py` | signed cards, fingerprints, answers labelled untrusted |
+| **Federation peers** (other fleets) | `federation.py` | pairwise-secret HMAC on requests AND replies (the identity secret signs only what the fleet itself re-verifies), nonce replay refusal, answers labelled untrusted |
 | **The control panel's network edge** | `ui.py` HTTP | bearer token, CSRF (Origin + Sec-Fetch-Site), per-route permission table, gate catalogue instead of free-form shell from the network |
 | **Packages the agent wants** | `acquire.py` | pinned versions required, typosquat distance checks, sandboxed install, capability probe before trust, owner promotion |
 

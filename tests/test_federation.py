@@ -17,6 +17,7 @@ Run from the agent/ directory:  python tests/test_federation.py
 
 import json
 import os
+import secrets
 import sys
 import threading
 import time
@@ -75,6 +76,8 @@ def main():
         "the fingerprint must never be the secret"
     cardB = F.make_card(homeB, ["alloy-expert"], name="Fleet B",
                         endpoint=f"http://127.0.0.1:{PORT}")
+    # only B itself can check the card's self-signature — that is what an
+    # identity secret means. A peer pins the FINGERPRINT, nothing more.
     assert F.verify(idB["secret"], {k: v for k, v in cardB.items()
                                     if k != "signature"}, cardB["signature"])
     assert [s["expert"] for s in cardB["skills"]] == ["alloy-expert"], \
@@ -83,8 +86,14 @@ def main():
     print("[card] each fleet has its own identity; the card exposes only what "
           "the owner chose, signed, with a fingerprint (never the secret)")
 
-    # the owners exchange the card AND a shared secret out of band
-    shared = idB["secret"]
+    # the owners exchange the card AND a shared secret out of band. The
+    # secret is INDEPENDENT of both identity secrets — this test used to set
+    # shared = idB["secret"], which handed fleet B's identity to fleet A and
+    # hid that answers were being signed with the wrong key: under honestly
+    # separate secrets, every reply failed verification and was discarded.
+    shared = secrets.token_urlsafe(32)
+    assert shared != idA["secret"] and shared != idB["secret"], \
+        "the pair secret must never be either fleet's identity secret"
     F.trust(homeA, {**cardB, "secret": shared})
     F.trust(homeB, {"fleet_id": idA["fleet_id"], "name": "Fleet A",
                     "key_fingerprint": idA["fingerprint"], "secret": shared,

@@ -1196,6 +1196,45 @@ def check_policy_fails_closed():
           "unaffected in both directions")
 
 
+def check_grant_kinds_cover_authority_classes():
+    """Every owner-authority class universal detects is either grantable or
+    named as deliberately not.
+
+    grants.py joins on the gap's exact description string, so a class added
+    to universal.AUTHORITY_HINTS without a matching KINDS value is silently
+    ungrantable: the owner is asked the same question forever with no way to
+    answer it once. That is exactly what happened in 2026-08 — five classes
+    were added, zero kinds followed, and the module's own comment still
+    claimed the mapping was one-to-one. This check makes the decision
+    mandatory: a new authority class must land in KINDS or in
+    NEVER_GRANTABLE, in the same commit, with the reasoning on the record.
+    """
+    import grants
+    import universal
+    detected = {what for _, what in universal.AUTHORITY_HINTS}
+    grantable = set(grants.KINDS.values())
+    never = set(grants.NEVER_GRANTABLE)
+    orphan_kinds = grantable - detected
+    assert not orphan_kinds, (
+        f"grants.KINDS promises coverage universal cannot detect: "
+        f"{sorted(orphan_kinds)} — the join is by exact description string, "
+        f"so these grants can never be consulted")
+    dead_exclusions = never - detected
+    assert not dead_exclusions, (
+        f"grants.NEVER_GRANTABLE names classes universal no longer detects: "
+        f"{sorted(dead_exclusions)}")
+    undecided = detected - grantable - never
+    assert not undecided, (
+        f"universal detects owner-authority classes with no grant decision: "
+        f"{sorted(undecided)} — add each to grants.KINDS (grantable, scoped, "
+        f"expiring) or grants.NEVER_GRANTABLE (asked every time, on purpose)")
+    both = grantable & never
+    assert not both, f"grantable AND never-grantable at once: {sorted(both)}"
+    print(f"[grants] {len(grantable)} authority classes grantable, "
+          f"{len(never)} deliberately ask-every-time, 0 undecided — the two "
+          f"vocabularies cannot drift apart silently")
+
+
 def check_health_checks_can_fail():
     """Every health check must be able to return NOT OK for some input.
 
@@ -1279,6 +1318,7 @@ def main():
     check_architecture_table_matches_code()
     check_policy_fails_closed()
     check_health_checks_can_fail()
+    check_grant_kinds_cover_authority_classes()
     print("PASS test_invariants")
 
 

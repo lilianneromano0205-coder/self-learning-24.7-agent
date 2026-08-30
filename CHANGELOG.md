@@ -1,5 +1,71 @@
 # Changelog
 
+## v10 — the sixth authority locked out the platform's own installer (2026-08-30)
+
+The second external audit made three verifiable claims about v9's own commit.
+All three were reproduced before anything was fixed; one was worse than
+described.
+
+### CI was red at the commit that claimed a green suite — and the auditor was right
+
+v9's local run was honestly green: `120 executed, 116 passed, 4 skipped` — but
+the four skips were the docker tests this Windows machine cannot execute, and
+two of them are exactly where the regression lived. GitHub Actions run
+33315927073 (Linux, real docker): `118 passed, 2 failed —
+test_acquire.py, test_frontier_live.py`.
+
+The cause was v9 doing its own job too broadly. Zoning `capabilities/` as
+CONTROL was right — toolbox reads it into decisions. But
+`controlplane.readonly_mounts()` binds every control path read-only into
+**every** docker container, and `acquire.py` pre-created
+`capabilities/<name>` then pointed pip's `--target` straight at it. The
+kernel refused the platform's own governed install; every acquisition on an
+isolated backend was rejected.
+
+The fix keeps the rule absolute — no container ever holds a writable control
+mount, no exception for the platform's own jobs. The installer now stages in
+`tmp/` (ZONE_ROOT, writable) and the trusted host-side ladder promotes the
+result into `capabilities/` only after the install succeeds — the same
+"the harness declares its own writes" shape the control plane already uses.
+`test_acquire.py` gained a docker-free check (mocked sandbox, runs on every
+machine) that asserts the container's write target is never a control path
+and that promotion is the host's; on the pre-fix code it fails with the
+control-path assertion. The install evidence now records the argv that
+actually ran — the old field printed `--target` even for npm installs.
+
+### Federation replies were signed with the wrong key, and the test hid it
+
+`handle_fetch` signed answers with the fleet's **identity** secret — the one
+`identity.json` says is never shared — while `ask_peer` verifies with the
+**pairwise** secret the owners exchange out of band. Under honestly
+independent secrets every federated answer failed verification on arrival
+and was discarded. The test passed only because it set
+`shared = idB["secret"]`: handing fleet B's identity to fleet A, the exact
+wiring that lets A forge B's card and answers.
+
+Answers are now signed with the pairwise secret that authenticated the
+request; the identity secret signs only what the fleet itself re-verifies
+(its own published card), and `make_card`'s docstring now says so. The test
+exchanges an independent secret and asserts it differs from both identities —
+on the pre-fix code it fails at "the reply must be signed by the peer".
+
+### Five authority classes the owner could never answer once
+
+universal.py's 2026-08 table added five owner-authority classes (equipment,
+infrastructure, external claims, shared repositories, likeness). grants.py
+still held the original six kinds while its comment claimed the mapping was
+one-to-one — so a fleet asked the owner the same repository question forty
+times with no way to grant it once, scoped and expiring. Four classes are now
+grantable (`actuate`, `infra`, `claim`, `repo`); a real person's voice or
+likeness is pinned in `NEVER_GRANTABLE` — that consent is per-person and
+per-use, not the owner's to park in a standing grant. A new invariant check
+makes the decision mandatory: an authority class added to universal without a
+grant decision fails the suite.
+
+Also verified this pass: `experiments/LIFT-001.md` remains PRE-REGISTERED,
+NOT YET RUN — the platform's central cheap-model-lift claim is still a frozen
+hypothesis, not a measured result, and no document claims otherwise.
+
 ## v9 — an outside reader found the gap between two authorities (2026-08-29)
 
 An external audit read the implementation rather than the README and made

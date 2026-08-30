@@ -119,7 +119,15 @@ def identity(home, create=True):
 
 
 def make_card(home, expose, name="", endpoint=""):
-    """The public Agent Card: what we offer, and how to verify our replies."""
+    """The public Agent Card: what we offer, under which stable identity.
+
+    The card's signature is made with the identity secret, so only THIS
+    fleet can re-verify it — it is tamper-evidence for our own published
+    card, not something a peer can check. What a peer uses from here is the
+    fingerprint (a stable NAME for our key, safe to publish) and the skill
+    list; request and answer verification run on the pairwise secret the two
+    owners exchange out of band, never on the identity secret.
+    """
     import fleet
     ident = identity(home)
     known = {e["name"]: e for e in fleet.list_experts(home)}
@@ -241,7 +249,15 @@ def handle_fetch(home, body):
     out = {"ticket": rec["id"], "status": "answered",
            "fleet_id": ident["fleet_id"], "expert": rec["expert"],
            "answer": answer, "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
-    out["signature"] = sign(ident["secret"], out)
+    # Signed with the PAIRWISE secret — the same one that just authenticated
+    # the request. The first version signed with this fleet's IDENTITY
+    # secret, which identity.json says is never shared, so under honestly
+    # independent secrets every answer failed verification on arrival and
+    # was discarded; the only wiring that worked was handing the identity
+    # secret to the peer, and a peer holding it can forge this fleet's card
+    # and answers wholesale. The test masked it by doing exactly that.
+    # Identity signs what only we verify; the pair secret is the channel.
+    out["signature"] = sign(secret, out)
     return 200, out
 
 

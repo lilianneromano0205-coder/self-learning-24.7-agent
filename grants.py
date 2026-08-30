@@ -74,10 +74,22 @@ USES = os.path.join("org", "grant-uses.jsonl")
 DEFAULT_DAYS = 30
 MAX_DAYS = 365
 
-# The kinds map ONE-TO-ONE onto the authority gaps universal.py already
-# routes to the owner. That is deliberate: a grant can only ever answer a
-# question the platform already knows how to ask, so a new kind of authority
-# cannot be granted before it can be detected.
+# Every kind maps onto an authority gap universal.py already routes to the
+# owner — the VALUE is the gap's exact description, because that string is
+# the join key universal uses to see whether a gap is covered. A grant can
+# only ever answer a question the platform already knows how to ask, so a
+# new kind of authority cannot be granted before it can be detected.
+#
+# The reverse is NOT one-to-one, and an external audit caught this table
+# claiming it was: universal.py grew five owner-authority classes in 2026-08
+# (equipment, infrastructure, claims, repositories, likeness) while this
+# table still held the original six, so the fleet asked the owner the same
+# repository question forty times with no way to answer it once. Four of the
+# five are now grantable below. The fifth — a real person's voice or
+# likeness — is EXCLUDED on purpose: that consent belongs to the person in
+# question, per use, and is not the owner's to park in a standing grant.
+# test_invariants pins this mapping, exclusion included, so the two
+# vocabularies cannot drift apart silently again.
 KINDS = {
     "account": "creating an account",
     "money": "spending money",
@@ -85,6 +97,16 @@ KINDS = {
     "publish": "publishing something to the world",
     "message": "sending something on your behalf",
     "destroy": "destroying something that cannot be restored",
+    "actuate": "acting on physical equipment, which cannot be undone by a retry",
+    "infra": "changing live infrastructure, which bills and breaks in the real world",
+    "claim": "making a claim in your name to someone outside",
+    "repo": "changing a shared repository other people depend on",
+}
+
+# Authority classes universal.py detects that are DELIBERATELY not grantable:
+# the question is asked every single time, and that is the feature.
+NEVER_GRANTABLE = {
+    "using a real person's voice or likeness, which is theirs to consent to",
 }
 
 

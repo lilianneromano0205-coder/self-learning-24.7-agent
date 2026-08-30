@@ -34,6 +34,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import sys
 import time
 
@@ -386,7 +387,22 @@ def install(root, home, acq_id, worker_id=None, task_text=""):
     # dependency that can rewrite the harness is not a dependency, it is a
     # new owner.
     target = os.path.join(root, "capabilities", _safe_name(rec["name"]))
-    os.makedirs(target, exist_ok=True)
+    # THE CONTAINER INSTALLS INTO STAGING, AND THIS PROCESS PROMOTES.
+    # capabilities/ is CONTROL state — toolbox reads it into decisions — so
+    # every sandbox container binds it read-only (controlplane.readonly_mounts)
+    # and the kernel refuses writes there, pip's included. The first CI run
+    # after that mount proved it: pip's move into /work/capabilities died
+    # (EXDEV, then the read-only bind) and every acquisition was rejected.
+    # The rule stays absolute — no container ever holds a writable control
+    # mount, no exceptions for the platform's own jobs — so the install lands
+    # in tmp/ (ZONE_ROOT, writable) and the trusted host-side ladder, which
+    # is the thing owner policy already governs, moves the result into
+    # control territory only after the install succeeded.
+    stage = os.path.join(root, "tmp",
+                         "acquire-stage-" + _safe_name(rec["name"]))
+    if os.path.isdir(stage):
+        shutil.rmtree(stage)                 # a dead earlier attempt
+    os.makedirs(stage)
     # A LOCAL path is the safest install there is: nothing is resolved from a
     # registry, so the name cannot be typosquatted and the bytes cannot change
     # between the inspection and the install. It is also what makes this step
@@ -406,7 +422,7 @@ def install(root, home, acq_id, worker_id=None, task_text=""):
     # acquisition would be rejected for a reason that has nothing to do with
     # the package. The cwd is the expert root in every backend, so relative
     # paths are the ones that mean the same thing everywhere.
-    rel_target = os.path.relpath(target, root).replace(os.sep, "/")
+    rel_target = os.path.relpath(stage, root).replace(os.sep, "/")
     rel_spec = spec
     if local:
         try:
@@ -519,13 +535,27 @@ def install(root, home, acq_id, worker_id=None, task_text=""):
                    for a in argv)
     rc, out, err = sandbox.run(cmd, root, dict(os.environ), 900, install_cfg)
     ok = (rc == 0)
+    if ok:
+        # promotion into control territory happens HERE, in the host process
+        # that walked the ladder — never inside the container. A reinstall
+        # replaces wholesale: half of yesterday's package under half of
+        # today's is a capability nobody tested.
+        if os.path.isdir(target):
+            shutil.rmtree(target)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        shutil.move(stage, target)
+    else:
+        shutil.rmtree(stage, ignore_errors=True)
     rec["worker"] = w["id"]
     rec["install_path"] = os.path.relpath(target, root).replace(os.sep, "/")
     rec["stage"] = "installed" if ok else "rejected"
     rec["install_evidence"] = {
         "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "worker": w["id"],
         "zone": w["zone"],
-        "command": " ".join(argv[:4] + ["--target", rec["install_path"], spec]),
+        # the argv that actually ran — the staged target included. An
+        # evidence field that "simplifies" the command is a claim, not a
+        # record (the old string also printed --target for npm installs).
+        "command": " ".join(argv),
         "exit_code": rc,
         "output": ((out or "") + (err or "")).strip()[-1200:],
         "installed_names": sorted(os.listdir(target))[:40] if ok else [],

@@ -127,6 +127,7 @@ def main():
     check_docker_mounts_the_control_plane_readonly()
     check_shell_capable_roles_are_the_ones_under_test()
     check_the_seal_stays_cheap_as_a_fleet_ages()
+    check_bytecode_is_cleansed_never_convicted()
     print("PASS test_controlplane")
 
 
@@ -526,6 +527,61 @@ def check_the_seal_stays_cheap_as_a_fleet_ages():
               f"ledgers) seals and verifies in {best * 1000:.0f} ms per "
               f"command — 27 s before the caches — and a change to a cached "
               f"path is still caught")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def check_bytecode_is_cleansed_never_convicted():
+    """Importing an adopted capability is not tampering; planting bytecode
+    still buys nothing.
+
+    Found by the first REAL acquisition-ladder run after capabilities/ became
+    control state: the capability probe imported the package it had just
+    installed, the import wrote __pycache__/__init__.cpython-314.pyc inside
+    it, and a probe that exited 0 came back CONTROL PLANE TAMPER
+    (test_acquire, 2026-08-30). Bytecode is DERIVED by the interpreter from
+    the sealed sources, so it cannot carry the verdict — but it is still
+    reverted every time, because a matching .pyc shadows recompilation and a
+    sourceless .pyc imports outright: cleansing denies the plant any life
+    beyond the process that wrote it. A source edit beside the bytecode
+    still convicts, and both revert in the same pass.
+    """
+    import shutil
+    import tempfile
+    import controlplane
+    root = tempfile.mkdtemp(prefix="cp-pyc-")
+    try:
+        pkg = os.path.join(root, "capabilities", "cap", "cap")
+        os.makedirs(pkg)
+        io.open(os.path.join(pkg, "__init__.py"), "w").write("VERSION='1'\n")
+        io.open(os.path.join(root, "settings.toml"), "w").write("[agent]\n")
+
+        # 1. an import's droppings alone: cleansed, the command stays clean
+        before = controlplane.seal(root)
+        pyc_dir = os.path.join(pkg, "__pycache__")
+        os.makedirs(pyc_dir)
+        pyc = os.path.join(pyc_dir, "__init__.cpython-314.pyc")
+        io.open(pyc, "wb").write(b"\x00planted")
+        clean, msg = controlplane.enforce(root, before, op="model_command",
+                                          command="import cap", role="t")
+        assert clean, f"bytecode alone must not convict: {msg}"
+        assert not os.path.exists(pyc), "the planted .pyc must be reverted"
+        assert not os.path.isdir(pyc_dir), "the emptied __pycache__ goes too"
+
+        # 2. bytecode BESIDE a real edit: tamper, and both revert
+        before = controlplane.seal(root)
+        os.makedirs(pyc_dir, exist_ok=True)
+        io.open(pyc, "wb").write(b"\x00planted")
+        src = os.path.join(pkg, "__init__.py")
+        io.open(src, "w").write("VERSION='EVIL'\n")
+        clean, msg = controlplane.enforce(root, before, op="model_command",
+                                          command="poison", role="t")
+        assert not clean and "TAMPER" in msg, msg
+        assert io.open(src).read() == "VERSION='1'\n", "source must revert"
+        assert not os.path.exists(pyc), "the .pyc reverts in the same pass"
+        print("[bytecode] an import's __pycache__ under capabilities/ is "
+              "reverted without failing the command; a planted .pyc never "
+              "survives the bracket; a source edit beside it still convicts")
     finally:
         shutil.rmtree(root, ignore_errors=True)
 

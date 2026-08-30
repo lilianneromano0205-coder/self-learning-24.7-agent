@@ -533,15 +533,49 @@ def describe_violations(violations, unrestored):
         f"for settings), or ask_human.{tail}")
 
 
+def _is_bytecode(rel):
+    """Interpreter cache, not control state: __pycache__/ contents and bare
+    .pyc/.pyo files. These are DERIVED from the sealed .py sources by the
+    import machinery itself."""
+    r = str(rel).replace("\\", "/")
+    return "/__pycache__/" in r or r.endswith((".pyc", ".pyo"))
+
+
 def enforce(root, before, op="", command="", role="", task=None):
     """The bracket's closing half. -> (clean, message).
 
     `clean` is True when nothing in the control zone moved. Otherwise the
     mutation is reverted, the event is recorded, and `message` is what the
     model is told.
+
+    One class is reverted WITHOUT convicting: interpreter bytecode. The first
+    real acquisition ladder run after capabilities/ became control state
+    proved why — the capability probe imported the freshly installed package,
+    the import wrote __pycache__/__init__.cpython-314.pyc inside it, and a
+    probe that exited 0 was reported as TAMPER (test_acquire, 2026-08-30).
+    Any host-backend command that legitimately imports an adopted capability
+    would fail the same way. Bytecode is derived state, so it cannot carry a
+    verdict — but it IS still reverted, every time, because a planted .pyc is
+    a real attack: Python loads matching cache instead of recompiling, and a
+    sourceless .pyc imports outright. Reverting denies both persistence; the
+    writer's own process was already the writer's to control. The cleanse is
+    recorded in the ledger, so an owner can still see who keeps shedding
+    bytecode where.
     """
     violations = verify(root, before)
     if not violations:
+        return True, ""
+    cache = [v for v in violations if _is_bytecode(v["path"])]
+    real = [v for v in violations if not _is_bytecode(v["path"])]
+    if not real:
+        unrestored = restore(root, before, cache)
+        for v in cache:
+            try:                     # the emptied __pycache__ dir itself
+                os.rmdir(os.path.dirname(os.path.join(root, v["path"])))
+            except OSError:
+                pass
+        note(root, "bytecode_cleansed", op=op, role=role, task=task,
+             cmd=str(command)[:400], violations=cache, unrestored=unrestored)
         return True, ""
     unrestored = restore(root, before, violations)
     note(root, "control_plane_tamper", op=op, role=role, task=task,

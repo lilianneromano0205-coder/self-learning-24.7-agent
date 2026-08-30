@@ -394,6 +394,75 @@ def check_ladder_and_rollback(sb):
           f"granting the last rung, and removal available")
 
 
+def check_staging_never_control(sb):
+    """The install container must never be told to write a CONTROL path.
+
+    capabilities/ is control state — toolbox reads it into decisions — so
+    every sandbox container binds it read-only. The first CI run after that
+    mount proved what happens when pip's --target points there anyway: the
+    kernel refused the write and every acquisition was rejected
+    (test_acquire and test_frontier_live, run 33315927073). The fix stages
+    the install in tmp/ and lets the trusted HOST process promote it. This
+    check is docker-free — the sandbox is mocked — so it runs on machines
+    where the real install rungs skip, and it fails on the old code by
+    construction: the old --target was capabilities/<name>, a control path.
+    """
+    import sandbox as SB
+    import fileauth
+    src = _local_package(sb, "stageprobe", "1.0.0")
+    rec = acquire.request(sb, "stageprobe", "pypi", "prove staging",
+                          version="1.0.0")
+    p = os.path.join(sb, "settings.toml")
+    with open(p, "r", encoding="utf-8-sig") as f:
+        original = f.read()
+    text = original if "sandbox = " in original else \
+        original.replace("[agent]", "[agent]\n" + 'sandbox = "docker"', 1)
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(text)
+    seen = {}
+    real_avail, real_run = SB.available, SB.run
+
+    def fake_run(cmd, root, env, timeout, cfg):
+        parts = [a.strip('"') for a in cmd.split()]
+        seen["target"] = parts[parts.index("--target") + 1]
+        d = os.path.join(root, seen["target"].replace("/", os.sep),
+                         "stageprobe")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "__init__.py"), "w", encoding="utf-8") as f:
+            f.write("VERSION = '1.0.0'\n")
+        return 0, "ok", ""
+
+    SB.available = lambda cfg: (True, "")
+    SB.run = fake_run
+    try:
+        rows = acquire.load(sb)
+        for r in rows:
+            if r["id"] == rec["id"]:
+                r["local_path"] = src
+        acquire._save(sb, rows)
+        rec = acquire.install(sb, sb, rec["id"], task_text="prove staging")
+    finally:
+        SB.available, SB.run = real_avail, real_run
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(original)
+    assert seen.get("target"), "the install never reached the sandbox"
+    assert fileauth.zone_of(seen["target"] + "/x") != fileauth.ZONE_CONTROL, (
+        f"the container was told to write into {seen['target']!r}, a CONTROL "
+        f"path — every sandbox binds the control zone read-only, so that "
+        f"install can only fail")
+    assert rec["stage"] == "installed", rec
+    assert os.path.exists(os.path.join(sb, "capabilities", "stageprobe",
+                                       "stageprobe", "__init__.py")), \
+        "the host process must promote the staged install into capabilities/"
+    assert not os.path.isdir(os.path.join(sb, "tmp",
+                                          "acquire-stage-stageprobe")), \
+        "staging must not survive promotion"
+    acquire.remove(sb, rec["id"], why="probe")
+    print("[staging] the install container wrote workspace staging, never a "
+          "control path, and the trusted host process promoted the result "
+          "into capabilities/ — the read-only control mounts stay absolute")
+
+
 def main():
     sb = make_sandbox("acquire", providers={"m": {"script": "s.json"}},
                       roles={"practitioner": "m"},
@@ -422,6 +491,10 @@ def main():
     print("[no-host-install] with sandbox = \"host\" there is nowhere isolated "
           "to run pip, so acquisition REFUSED rather than installing on this "
           "machine — a dependency's build backend executes at install time")
+
+    # Docker-free, so it runs everywhere: the container's write target must
+    # never be a control path, and promotion into capabilities/ is the host's.
+    check_staging_never_control(sb)
 
     # A real install therefore needs a real sandbox. Where one exists, the
     # ladder is walked for real; where it does not, that part SKIPS OUT LOUD
