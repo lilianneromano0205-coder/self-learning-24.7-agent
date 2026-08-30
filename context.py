@@ -246,16 +246,34 @@ class _Source:
         return True
 
     def add_text(self, label, text):
-        """Add generated (not file-backed) content, e.g. a premise warning."""
-        if len(text) > self.room():
-            text = text[:max(0, self.room())]
+        """Add generated (not file-backed) content, e.g. a premise warning.
+
+        HONEST ABOUT THE CUT, like add() beside it. This truncated with a
+        bare slice and then recorded `"trimmed": False, "of": len(text)` —
+        the length AFTER the cut — so the Context Window Viewer reported a
+        block as fully included while the model had received it chopped
+        mid-sentence, with no pointer to the rest. A gotchas block is a
+        BINDING instruction; half of one is worse than none, and a manifest
+        that cannot say so is worse than both.
+        """
+        raw = len(text)
+        room = self.room()
+        if room <= 0:
+            self.dropped.append({"path": label, "chars": raw,
+                                 "why": "source budget exhausted"})
+            return False
+        trimmed = False
+        if raw > room:
+            text = (text[:room]
+                    + f"\n[...trimmed: {raw - room} chars over budget]")
+            trimmed = True
         if not text.strip():
             return False
         self.blocks.append(text)
         self.used += len(text)
         self.included.append({"path": label, "chars": len(text),
-                              "tokens": est_tokens(text), "trimmed": False,
-                              "of": len(text)})
+                              "tokens": est_tokens(text), "trimmed": trimmed,
+                              "of": raw})
         return True
 
     def report(self):

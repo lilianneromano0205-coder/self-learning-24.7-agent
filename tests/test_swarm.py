@@ -65,8 +65,15 @@ def _proven(root, name, triggers, art):
         json.dump({"name": name, "triggers": triggers,
                    "steps": [{"do": _touch_cmd(art),
                               "verify": _exists(art)}]}, f)
+    # ACCEPTED wins, not bare runs: a runbook's own `verify` lines are
+    # written by whoever wrote the runbook, so only a caller's independent
+    # check earns trust (runbook.py, "TRUST IS EARNED"). Here the caller is
+    # this helper, checking the artifact itself.
     for _ in range(runbook.PROMOTE_WINS):
-        assert runbook.run(root, name, allow_candidate=True)["ok"]
+        r = runbook.run(root, name, allow_candidate=True,
+                        accept=lambda: os.path.exists(art))
+        assert r["ok"] and r["accepted"], r
+    assert runbook.status(root, name) == "proven", runbook.status(root, name)
     if os.path.exists(art):
         os.remove(art)
 
@@ -286,10 +293,25 @@ def check_rule3_workers_do_not_grade(root):
     assert "counts for nothing" in r["blocked"], r["blocked"]
     assert "A1" in r["blocked"], r["blocked"]
     assert contract.load(root, "g-grade2")["state"] != "verified"
+
+    # ...AND IT COUNTS FOR NOTHING IN THE TRUST LEDGER EITHER. This assertion
+    # is the one that was missing: the scenario above was already built here,
+    # and the test only ever looked at the contract. runbook.run recorded a
+    # win on every worker's self-verified steps, so the procedure that
+    # produced the WRONG artifact — the one the graders had just refused —
+    # walked toward "proven" on the strength of the run that proved it wrong.
+    trust = runbook._trust(root)
+    for nm in ("wrong-artifact", "good-artifact"):
+        t = trust.get(nm, {})
+        assert t.get("history"), (nm, t)
+        assert not t["history"][-1].get("accepted"), (
+            f"{nm} banked an ACCEPTED win on a swarm run the graders "
+            f"refused — a procedure that reliably produces the wrong "
+            f"artifact would reach 'proven' for its reliability: {t}")
     print("[rule3] both workers reported success; the central graders "
           "refused A1 and the swarm result was NOT verified, with the "
           "refusing test named — a worker's opinion of its own work "
-          "counts for nothing")
+          "counts for nothing, in the contract AND in the trust ledger")
 
 
 def check_the_cap_holds_with_overflow_named(root):

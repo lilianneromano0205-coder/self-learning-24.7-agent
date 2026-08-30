@@ -105,6 +105,7 @@ def main():
     check_replay_reconstructs_and_detects_forgery(root)
     check_the_contract_outranks_the_judge(home)
     check_no_convergence_ends_blocked(home)
+    check_the_state_machine_is_a_critical_section()
     print("PASS test_contract")
 
 
@@ -442,6 +443,61 @@ def check_no_convergence_ends_blocked(home):
           "1 and 2 ended the pursuit BLOCKED with the wall named — two of "
           "the four budgeted cycles were spent, not all four")
 
+
+
+def check_the_state_machine_is_a_critical_section():
+    """"The ONLY way state changes" has to hold when two things ask at once.
+
+    `transition` was read -> check TRANSITIONS -> write with nothing between
+    the steps, and `_write` used the shared `p + ".tmp"`. Two callers could
+    read the same `running`, each find its own move legal, and both write —
+    and TRANSITIONS gives a terminal state no exits, so the ledger could
+    record a jump the machine exists to refuse. On Windows the shared temp
+    turned the loser into a PermissionError instead, which is its own defect:
+    a legitimate transition failing with a rights error rather than a rule.
+    """
+    import threading
+    import tempfile
+    import contract as C
+    root = tempfile.mkdtemp(prefix="ct-race-")
+    C.create(root, "g", "goal",
+             accept=[{"id": "A1", "what": "x",
+                      "check": f'"{PY}" -c "pass"'}])
+    C.freeze(root, "g")
+    C.transition(root, "g", "running", why="t")
+
+    accepted, refused = [], []
+
+    def flip(to):
+        try:
+            C.transition(root, "g", to, why="race")
+            accepted.append(to)
+        except C.ContractError as e:
+            refused.append((to, "rule"))
+        except Exception as e:
+            refused.append((to, type(e).__name__))
+
+    ts = [threading.Thread(target=flip, args=(s,))
+          for s in ("verified", "blocked")]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+
+    assert len(accepted) == 1, (
+        f"both endings were accepted ({accepted}) — a terminal state has no "
+        f"exits, so the ledger now records a jump the machine refuses")
+    assert refused and refused[0][1] == "rule", (
+        f"the losing transition failed with {refused} rather than by the "
+        f"contract rule — a shared temp file is not a state machine")
+    state = C.load(root, "g")["state"]
+    assert state == accepted[0], (state, accepted)
+    kinds = [(e.get("kind"), e.get("to")) for e in C.events(root, "g")]
+    assert kinds.count(("state", "verified")) + \
+        kinds.count(("state", "blocked")) == 1, kinds
+    print(f"[machine] two threads raced one contract to two mutually "
+          f"exclusive endings: {accepted[0]} was accepted, the other was "
+          f"refused BY THE RULE, and the ledger carries exactly one ending")
 
 if __name__ == "__main__":
     main()

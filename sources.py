@@ -355,7 +355,103 @@ def path(root, course):
     return os.path.join(_dir(root, course), LEDGER)
 
 
-def load(root, course):
+# THE STORED TIER IS NOT AN AUTHORITY, AND NEITHER IS A STORED OVERRIDE.
+#
+# courses/ is the agent's own workspace by design — it writes its notes there,
+# and `ingest.py add-url` (a command the agent runs itself) records sources
+# into courses/<c>/sources.json. So the ledger has to stay writable, and an
+# audit sweep pointed out what that meant: a worker could rewrite its own
+# sources.json to rate a forum thread tier 1 AND forge
+# `override: {"by": "owner"}` beside it. tier feeds LEARN_MIN_TIER, which
+# decides what may become a CITED ATOM — this module's own docstring calls
+# false authority in the learning pipeline "the one contamination that
+# compounds".
+#
+# Zoning the file CONTROL would have broken ingestion. So the tier is
+# DERIVED instead of trusted: every row's tier is recomputed from classify()
+# on read, which is the same answer record() stored in the honest case and
+# not the answer a forger stored in the dishonest one. An owner's genuine
+# override lives in courses/<c>/source-overrides.json, which IS control-zoned
+# and which set_tier writes — so overruling a rating is still possible, and
+# still only by the owner.
+
+OVERRIDES = "source-overrides.json"
+
+
+def overrides_path(root, course):
+    return os.path.join(_dir(root, course), OVERRIDES)
+
+
+def _overrides(root, course):
+    try:
+        with open(overrides_path(root, course), "r", encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+_CFG_CACHE = {}
+
+
+def _root_cfg(root):
+    """The expert's own settings, so a re-derived tier still honours the
+    OWNER'S [agent.source_tier] table.
+
+    record() classified WITH the owner's config and stored the answer;
+    deriving without it would silently drop every rule an owner wrote — the
+    fix for a forged tier must not become a fix that ignores the owner. Cached
+    on the file's mtime because load() is called on every context compile.
+    """
+    p = os.path.join(root, "settings.toml")
+    try:
+        m = os.stat(p).st_mtime_ns
+    except OSError:
+        return {}
+    hit = _CFG_CACHE.get(p)
+    if hit and hit[0] == m:
+        return hit[1]
+    try:
+        import tomllib
+        with open(p, "rb") as f:
+            cfg = tomllib.loads(f.read().decode("utf-8-sig"))
+    except Exception:
+        cfg = {}
+    _CFG_CACHE[p] = (m, cfg)
+    return cfg
+
+
+def _derive(root, course, row, cfg=None, ov=None):
+    """Recompute one row's tier. Returns the row, mutated in place."""
+    cfg = _root_cfg(root) if cfg is None else cfg
+    ref = str(row.get("ref") or "")
+    ov = _overrides(root, course) if ov is None else ov
+    hit = ov.get(ref) or ov.get(str(row.get("id") or ""))
+    if hit and int(hit.get("to", 0)) in TIER_NAMES:
+        tier = int(hit["to"])
+        row["override"] = hit
+        row["why"] = f"owner override: {hit.get('why') or 'no reason given'}"
+    else:
+        _k, tier, why = classify(ref, row.get("kind") or "", cfg)
+        row["override"] = None
+        row["why"] = why
+    row["tier"] = tier
+    row["tier_name"] = TIER_NAMES[tier]
+    row["weight"] = TIER_WEIGHT[tier]
+    return row
+
+
+def load(root, course, cfg=None):
+    """Every row, with its tier RE-DERIVED — see the note above. Callers that
+    read `row["tier"]` therefore cannot be handed a forged rating."""
+    rows = _load_raw(root, course)
+    ov = _overrides(root, course)
+    for r in rows:
+        _derive(root, course, r, cfg, ov)
+    return rows
+
+
+def _load_raw(root, course):
     try:
         with open(path(root, course), "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -666,16 +762,29 @@ def record(root, course, ref, title="", kind="", lesson="", date="",
 
 
 def set_tier(root, course, sid, tier, why="", by="owner"):
-    """The owner overrules a rating. Recorded, never silent."""
+    """The owner overrules a rating. Recorded, never silent.
+
+    The override is written to courses/<c>/source-overrides.json, which the
+    File Authority zones CONTROL. The workspace ledger keeps a copy for
+    display; the control file is what `load` believes, because a rating
+    stored where the agent can write it is not an owner's decision."""
     tier = int(tier)
     if tier not in TIER_NAMES:
         raise ValueError(f"tier must be 1-4, not {tier}")
     rows = load(root, course)
     for r in rows:
         if r.get("id") == sid or r.get("ref") == sid:
-            r["override"] = {"from": r["tier"], "to": tier, "by": by,
-                             "why": why or "no reason given",
-                             "at": time.strftime("%Y-%m-%d")}
+            rec = {"from": r["tier"], "to": tier, "by": by,
+                   "why": why or "no reason given",
+                   "at": time.strftime("%Y-%m-%d")}
+            ov = _overrides(root, course)
+            ov[str(r.get("ref") or sid)] = rec
+            os.makedirs(_dir(root, course), exist_ok=True)
+            tmp = overrides_path(root, course) + f".{os.getpid()}.tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(ov, f, indent=1, ensure_ascii=False)
+            os.replace(tmp, overrides_path(root, course))
+            r["override"] = rec
             r["tier"], r["tier_name"] = tier, TIER_NAMES[tier]
             r["weight"] = TIER_WEIGHT[tier]
             r["why"] = f"owner override: {why or 'no reason given'}"
@@ -757,7 +866,15 @@ PROOF = (
     ("https://docs.python.org/3/library/asyncio-task.html", 1),
     ("https://doc.rust-lang.org/book/ch04-01-what-is-ownership.html", 1),
     ("https://go.dev/ref/spec", 1),
-    ("https://arxiv.org/abs/1706.03762", 1),
+    # tier 2, and this line is why the table exists. The REGISTRY was
+    # corrected to tier 2 when an audit caught the contradiction between
+    # arXiv's entry and the comment beside it — and this proof, whose stated
+    # job is "a future edit that quietly re-rates the web fails here, in one
+    # second, instead of six weeks later", was left expecting the old answer.
+    # It did not fail loudly because nothing ran it: `prove()` had no caller in
+    # tests/, CI, doctor.py or preflight.py. A self-test nobody runs is a
+    # comment. tests/test_sources.py now runs it.
+    ("https://arxiv.org/abs/1706.03762", 2),
     ("https://www.nature.com/articles/s41586-021-03819-2", 1),
     ("https://nvd.nist.gov/vuln/detail/CVE-2021-44228", 1),
     ("https://developer.mozilla.org/en-US/docs/Web/API/fetch", 2),

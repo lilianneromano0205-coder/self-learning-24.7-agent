@@ -170,16 +170,23 @@ SYSTEMS = {
                  "parsed, but no test renders it in a browser. Layout, "
                  "contrast and touch targets are verified by eye, not by CI.",
     },
-    "7. The five authorities": {
+    "7. The six authorities": {
         "what": "one mandatory gateway per kind of power — execution, file, "
-                "credential, model gateway, effect — plus the invariant tests "
-                "that enumerate every caller of each",
-        "tests": ["test_invariants.py"],
+                "credential, model gateway, effect, control plane — plus the "
+                "invariant tests that enumerate every caller of each",
+        "tests": ["test_invariants.py", "test_controlplane.py"],
         "blind": "these tests enumerate every path in THIS tree. They cannot "
                  "see a path added by a plugin, an MCP server or a future "
                  "module that does not exist yet — which is why the execution "
                  "audit is a source scan rather than a runtime check, and why "
-                 "it fails on a new raw subprocess call rather than warning.",
+                 "it fails on a new raw subprocess call rather than warning. "
+                 "The Control Plane Authority carries a second, sharper "
+                 "limit, stated in its own module: on `sandbox = \"host\"` it "
+                 "DETECTS AND REVERTS rather than prevents, because there is "
+                 "no filesystem boundary on that backend to prevent with. "
+                 "Prevention needs `sandbox = \"docker\"`, where the control "
+                 "paths are bound read-only and the boundary is the "
+                 "kernel's.",
     },
     "8. Proof, missions and long-horizon work": {
         "what": "capability proof levels derived from hash-bound evidence; "

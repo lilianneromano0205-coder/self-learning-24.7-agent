@@ -843,6 +843,19 @@ def _main():
             print(f"  review: {f}")
         return
     if a.cmd == "promote":
+        # OWNER ACTION. `promote` writes acquisitions.json, the ledger that
+        # grants a tool the fleet's trust — "the OWNER grants trust. Never
+        # the agent, never the outcome", as promote()'s own docstring puts
+        # it — so it may not run from inside an agent task. The seal around
+        # every model-authored command would revert the write anyway; this
+        # refuses FIRST, with a sentence, instead of letting the work happen
+        # model-authored command would revert the write anyway; this refuses
+        # first, with a sentence, instead of letting the work happen and
+        # then undoing it. (controlplane.py explains why the two controls
+        # are independent and neither relies on the other.)
+        import controlplane
+        controlplane.owner_only(
+            f"granting acquisition {a.id!r} the fleet's trust")
         rec = promote(root, a.id, permissions=a.can)
         print(f"{rec['name']} is now trusted (permissions: "
               f"{', '.join(rec['permissions']) or 'none declared'})")

@@ -28,18 +28,44 @@ than a substitute for them.
 
 `spend_today()` and `by_purpose()` read the same ledger, so "what did today
 cost" and "what did compaction cost" are the same question asked twice.
+
+WHY THERE IS AN AUDIT IN HERE NOW
+
+The line at the top of this file — "every provider call is metered" — was not
+true, and nothing in the suite could tell. The invariant test that
+REFERENCE.md cites as its proof enumerates the PURPOSES tuple and writes nine
+synthetic rows itself; it never opens a socket and never looks at a call site.
+Purposes are not call sites, and that substitution was the whole hole.
+
+Measured by walking every outbound HTTP call in the repository: five reach a
+model provider, and one of them was metered. ingest.transcribe_chunk (Groq
+Whisper) and ingest.vision (an OpenRouter chat/completions call carrying a
+base64 image) spent real money outside every ledger, and loop._probe billed a
+live token for each role on `loop.py check`.
+
+So this module now does what execution.py does for the shell: it makes the
+invariant CHECKABLE instead of asserted. `audit_sources()` finds every
+function that talks to a model provider and does not meter, and every one of
+them must either be fixed or declared in ALLOWED_UNMETERED with the reason.
+tests/test_invariants.py fails when a new bypass appears — which is the only
+way a rule like this survives contact with future features.
 """
 
+import ast
+import io
 import json
 import os
+import re
 import time
 
+HOME = os.path.dirname(os.path.abspath(__file__))
 LEDGER = os.path.join("logs", "model-calls.jsonl")
 
 # every purpose a provider call can serve; an unknown one is still recorded,
 # but naming them makes "which of these is eating the budget" answerable
 PURPOSES = ("step", "compaction", "replay", "benchmark", "probe",
-            "candidate", "judge", "research", "unknown")
+            "candidate", "judge", "research", "transcription", "vision",
+            "unknown")
 
 
 def _path(root):
@@ -135,6 +161,134 @@ def spend_today(root):
         if str(r.get("at", "")).startswith(today):
             total += float(r.get("cost_usd") or 0)
     return round(total, 6)
+
+
+# ------------------------------------------------------- the day's ceiling
+#
+# The ledger above answers "where did the money go". This is the file the
+# BREAKER reads — `logs/spend-<date>.json` — and until now the loop was its
+# only writer, which is why a provider call made outside the loop (ingestion's
+# transcription and vision rails) could not move the number the daily budget
+# is compared against. One writer, one lock, so a call from anywhere counts.
+
+def spend_file(root, day=None):
+    return os.path.join(root, "logs",
+                        f"spend-{day or time.strftime('%Y%m%d')}.json")
+
+
+def _read_spend(p):
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            s = json.load(f)
+        return s if isinstance(s, dict) else {"usd": 0.0, "notified": False}
+    except (OSError, ValueError):
+        return {"usd": 0.0, "notified": False}
+
+
+def _write_spend(p, s):
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    tmp = f"{p}.{os.getpid()}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(s, f, indent=1)
+    os.replace(tmp, p)
+
+
+def charge(root, usd):
+    """Add `usd` to today's spend, whoever spent it. -> the new total."""
+    if not usd or float(usd) <= 0:
+        return _read_spend(spend_file(root)).get("usd", 0.0)
+    import locks
+    p = spend_file(root)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with locks.holding(p, timeout=20.0):
+        s = _read_spend(p)
+        s["usd"] = round(float(s.get("usd") or 0.0) + float(usd), 6)
+        _write_spend(p, s)
+        return s["usd"]
+
+
+def mark_notified(root):
+    """Record that the owner has been told the ceiling was reached, once."""
+    import locks
+    p = spend_file(root)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with locks.holding(p, timeout=20.0):
+        s = _read_spend(p)
+        s["notified"] = True
+        _write_spend(p, s)
+        return s
+
+
+# ---------------------------------------------------- the call-site audit
+#
+# The same shape as execution.audit_sources: a rule that is only asserted is a
+# rule that decays. A function that reaches a model provider must meter, or be
+# named here with the reason it does not need to.
+
+ALLOWED_UNMETERED = {
+    "providers.py:catalog":
+        "a GET of the provider's /models listing. It returns model IDs, "
+        "consumes no tokens and is not billed — there is nothing to "
+        "attribute, and a $0 row would only make the ledger noisier.",
+    "modelgateway.py:audit_sources":
+        "IS the audit; its own markers are the patterns it searches for.",
+}
+
+_HTTP_RE = re.compile(
+    r"urlopen\(|requests\.(post|get)\(|httpx\.|\.open\(\s*req|"
+    r"session\.(post|get)\(")
+# what makes a call a MODEL PROVIDER call rather than any other HTTP request
+_PROVIDER_RE = re.compile(
+    r"chat/completions|audio/transcriptions|/v1/embeddings|\bbase_url\b|"
+    r"GROQ_TRANSCRIBE_URL|OPENROUTER_URL|VISION_RAIL")
+_METER_RE = re.compile(
+    r"modelgateway\.record|gateway\.record|_meter\(|\bcharge\(")
+
+
+def audit_sources(tree=HOME):
+    """-> {"violations": [...], "checked": n, "allowed": [...]}.
+
+    A violation is a FUNCTION that makes an outbound HTTP call, names a model
+    provider endpoint, and does not meter — and is not declared above.
+
+    Function-level on purpose. A file-level audit would have passed loop.py
+    (it calls _meter in call_model) while `_probe`, twenty lines away in the
+    same file, billed a live token per role and recorded nothing. The bug this
+    audit exists to catch would have been invisible to the coarser check.
+    """
+    violations, checked = [], 0
+    for fn in sorted(os.listdir(tree)):
+        if not fn.endswith(".py"):
+            continue
+        checked += 1
+        try:
+            src = io.open(os.path.join(tree, fn), encoding="utf-8",
+                          errors="replace").read()
+            mod = ast.parse(src)
+        except (OSError, SyntaxError):
+            continue
+        lines = src.splitlines()
+        for node in ast.walk(mod):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            end = getattr(node, "end_lineno", None) or node.lineno
+            body = "\n".join(lines[node.lineno - 1:end])
+            if not (_HTTP_RE.search(body) and _PROVIDER_RE.search(body)):
+                continue
+            if _METER_RE.search(body):
+                continue
+            key = f"{fn}:{node.name}"
+            if key in ALLOWED_UNMETERED:
+                continue
+            violations.append({
+                "file": fn, "line": node.lineno, "function": node.name,
+                "key": key,
+                "why": "this function calls a model provider and does not "
+                       "meter it. Record it with modelgateway.record(...) "
+                       "(and charge() it if it costs money), or declare it "
+                       "in modelgateway.ALLOWED_UNMETERED with the reason."})
+    return {"checked": checked, "violations": violations,
+            "allowed": sorted(ALLOWED_UNMETERED)}
 
 
 def attribution(root, task):

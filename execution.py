@@ -13,12 +13,20 @@ was thinking about while other paths reached the same operation untouched:
 were not. Adding a sixth check to a sixth site would repeat the mistake. So
 execution is now a TYPED operation, and the type decides the controls:
 
-    OP                CONTROLS                                    ORIGIN
-    model_command     policy + sandbox + scrub + approval + trace  the model
-    gate              policy + sandbox + scrub + trace             the model
-    capability_probe  policy + sandbox + scrub + trace             the workspace
-    converter         argv only, no shell, timeout + trace         the platform
-    platform_spawn    argv only, no shell, trace                   the platform
+    OP                CONTROLS                                       ORIGIN
+    model_command     policy+sandbox+scrub+approval+SEAL+trace       the model
+    gate              policy+sandbox+scrub+SEAL+trace                the model
+    capability_probe  policy+sandbox+scrub+SEAL+trace                the workspace
+    converter         argv only, no shell, timeout + trace           the platform
+    platform_spawn    argv only, no shell, trace                     the platform
+
+SEAL is the control plane bracket (controlplane.py). It closes the hole an
+audit found between the two authorities: fileauth refuses the write_file TOOL
+on control state, and policy screens a command STRING — so a model-authored
+command that started a program could rewrite settings.toml, prompts/ and
+approvals/ untouched by either. Every model-authored operation is now
+bracketed: the control zone is sealed before, verified after, reverted on
+change, and the command is reported failed regardless of its exit code.
 
 The distinction that matters is not "is this dangerous" but **who wrote the
 string**. Anything a model influenced is `model_command` or `gate` and gets
@@ -174,6 +182,25 @@ def run(op, command, root, cfg=None, role="default", task=None, timeout=300,
             _trace(root, op, command, role, task, refused=guard)
             raise Refused(guard)
 
+    # ---- the CONTROL PLANE bracket, opened before anything runs.
+    # policy screens a STRING and cannot follow the program that string
+    # starts; fileauth guards the write_file TOOL and nothing else. Between
+    # them was the hole an audit found and a real practitioner task proved:
+    # `python -c "open('settings.toml','w')..."` rewrote control state while
+    # write_file was being refused in the same transcript. controlplane.py
+    # seals the zone here and verifies it below — on the docker backend the
+    # mutation is prevented outright by a read-only bind, and on `host`,
+    # where there is no filesystem boundary at all, it is reverted and the
+    # command is failed. See controlplane.py for why that distinction is
+    # stated rather than smoothed over.
+    seal = None
+    if op in MODEL_AUTHORED:
+        try:
+            import controlplane
+            seal = controlplane.seal(root)
+        except Exception:                    # pragma: no cover — defensive
+            seal = None
+
     # ---- execute, contained according to the operation
     try:
         if spec["sandbox"] and spec["shell"]:
@@ -198,6 +225,23 @@ def run(op, command, root, cfg=None, role="default", task=None, timeout=300,
         rc, out, err = 124, "", f"timed out after {timeout}s"
     except (OSError, ValueError) as e:
         rc, out, err = 127, "", f"could not run: {e}"
+
+    # ---- the bracket's closing half. A command that moved control state is
+    # reported as FAILED whatever it exited with: a gate must not pass on a
+    # run that edited the gate, and the real exit code is kept in the message
+    # rather than thrown away.
+    if seal is not None:
+        try:
+            import controlplane
+            clean, why = controlplane.enforce(
+                root, seal, op=op, command=command, role=role, task=task)
+        except Exception:                    # pragma: no cover — defensive
+            clean, why = True, ""
+        if not clean:
+            _trace(root, op, command, role, task,
+                   refused=f"control plane tamper (command exited {rc})")
+            err = f"{why}\n(the command itself exited {rc})\n{err}"
+            rc = controlplane.TAMPER_RC
 
     _trace(root, op, command, role, task, rc=rc,
            ms=int((time.time() - started) * 1000), reason=reason)

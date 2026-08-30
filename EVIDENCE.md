@@ -1,6 +1,6 @@
 # Evidence — why we believe this works
 
-Generated 2026-08-28T15:35:29 from an actual suite run: **118/119 tests passed**, **621 observations** recorded.
+Generated 2026-08-30T10:04:34 from an actual suite run: **117/120 tests passed**, **620 observations** recorded.
 
 Each test below prints its own sentence describing what it proved; those sentences are quoted verbatim, not summarised. Every system also carries a **blind spot** — what these tests do not cover.
 
@@ -10,17 +10,17 @@ Each test below prints its own sentence describing what it proved; those sentenc
 
 | system | verdict | tests | observations |
 |---|---|---|---|
-| 1. Harness & loop | **proven except skipped** | 24/25 | 88 |
+| 1. Harness & loop | **proven except skipped** | 24/25 | 90 |
 | 2. Fleet & creation lanes | **proven** | 6/6 | 21 |
-| 3. Work systems | **proven** | 22/22 | 111 |
-| 4. Memory institution | **proven** | 18/18 | 74 |
-| 5. Improvement & governance | **proven** | 8/8 | 34 |
-| 6. Control plane & interop | **proven** | 19/19 | 118 |
-| 7. The five authorities | **proven** | 1/1 | 19 |
+| 3. Work systems | **proven** | 22/22 | 114 |
+| 4. Memory institution | **proven** | 18/18 | 76 |
+| 5. Improvement & governance | **proven** | 8/8 | 35 |
+| 6. Control plane & interop | **proven** | 19/19 | 120 |
+| 7. The six authorities | **proven** | 2/2 | 29 |
 | 8. Proof, missions and long-horizon work | **proven** | 4/4 | 27 |
-| 9. Computers, capability and organization | **proven** | 6/6 | 52 |
+| 9. Computers, capability and organization | **proven except skipped** | 4/6 | 36 |
 | 10. Training lab | **proven** | 1/1 | 6 |
-| 12. The paths that touch something real | **proven** | 5/5 | 41 |
+| 12. The paths that touch something real | **proven** | 5/5 | 34 |
 | 11. The interface itself | **proven** | 1/1 | 10 |
 | 13. The universal agent | **proven** | 3/3 | 20 |
 
@@ -28,10 +28,10 @@ Each test below prints its own sentence describing what it proved; those sentenc
 
 *the engine: context assembly, six tools, gates, brakes, retries, escalation, policy, effects, compaction*
 
-**Verdict: proven except skipped** — 24 of 25 declared tests ran and passed, producing 88 observations.
+**Verdict: proven except skipped** — 24 of 25 declared tests ran and passed, producing 90 observations.
 **NOT RUN HERE — test_shutdown.py:** Popen.terminate() on Windows is TerminateProcess, which no handler can intercept — there is no SIGTERM here to catch, so this asserts nothing rather than asserting something false. The container CI runs it.
 
-<details><summary>What the tests observed (88)</summary>
+<details><summary>What the tests observed (90)</summary>
 
 - `test_harness.py` **[manifest]** 5 tools with role allowlists, 9+ gates, policies, 14 memory tiers, budgets, events, file hashes - all read from what runs
 - `test_harness.py` **[contracts]** the real harness agrees with itself; a tool declared without an execution branch is named
@@ -75,11 +75,12 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_effects.py` **[policy]** destructive/escalating commands refused INSIDE the loop with the rule named; normal work passed; owner deny rules and per-role allowlists enforced
 - `test_effects.py` **[exemption]** the review exemption is per-SUBCOMMAND, not per-file: `mcp.py call` stays exempt because guarded_call gates it, while `mcp.py enable` — which grants a whole toolkit and is gated by nothing — now requires the owner. Checked across 7 shapes including chaining and a lookalike script.
 - `test_effects.py` **[governance]** role allowlists and tool deny lists enforced before the server is touched; 50k-char result capped at 20k; a vetted catalog of 8 open-source servers ships
+- `test_effects.py` **[claim]** two threads raced one effect key through the real lookup/unfinished/begin sequence and exactly one claimed it; the ledger holds 1 started row(s)
 - `test_sandbox.py` **[host]** the default backend runs in the expert's own root with the AGENT_* environment the harness promises
 - `test_sandbox.py` **[closed]** an unknown backend and unconfigured hosted backends refuse the command instead of quietly running it on this machine
 - `test_sandbox.py` **[loop]** with a hosted backend configured but no key, the agent was told exactly what is missing -- and nothing ran locally
 - `test_sandbox.py` **[order]** policy.py still decides what may be attempted at all, before any backend is asked to run it
-- `test_sandbox.py` **[docker]** ran inside a throwaway container at /work with no network, and the AGENT_* environment intact
+- `test_sandbox.py` **[docker]** skipped -- the docker daemon is not running (the backend is present and fails closed; install docker to exercise it here)
 - `test_secrets.py` **[scrub]** every credential-shaped variable was withheld by name pattern, including one the platform has never heard of
 - `test_secrets.py` **[scoped]** the transcription helper kept exactly the one credential it needs; a bare `env` got none
 - `test_secrets.py` **[owner]** an explicit allowlist entry passed one named key through, and nothing rode along with it
@@ -90,7 +91,7 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_chaos.py` **[provider]** the primary provider refused every connection; the fallback finished the task and the record names which one ran
 - `test_chaos.py` **[race]** two loops drained one expert at the same time: four tasks, four completions, no task claimed twice
 - `test_chaos.py` **[disk]** a write that failed with ENOSPC left the previous state byte-identical and the loop recovered
-- `test_chaos.py` **[size]** an 11 MB file, 1,000 atoms and 200 skills compiled to a 13292 token window in 1.4s, cut marked
+- `test_chaos.py` **[size]** an 11 MB file, 1,000 atoms and 200 skills compiled to a 13292 token window in 1.5s, cut marked
 - `test_chaos.py` **[clock]** a far-future deadline ran to completion and a long-past one refused to start, both naming the reason
 - `test_blocked.py` **[blocked]** question recorded in blocked.md, task blocked, loop moved on
 - `test_hardening.py` **[locks]** release verifies ownership: a stalled holder cannot free the lock that replaced it, and tokens are per-acquisition
@@ -111,9 +112,10 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_candidates.py` **[explain]** the winner is reported with the reason every loser lost
 - `test_candidates.py` **[wired]** the loop stashes every refused attempt (18 of them here) and promotes one only when it strictly beats the last — on a task where the verifier cannot discriminate it reports a tie and changes nothing, which is the honest answer rather than a shuffle
 - `test_candidates.py` **[discriminates]** a real answer scores 1.0, a one-character one 0.75, an unfinished one carrying TODO 0.75, and a .json that does not parse 0.6 — the composite can now tell attempts apart on ordinary work, where every other component declines to answer and six attempts previously tied at 0.0
+- `test_candidates.py` **[contained]** a planted stash could not overwrite prompts/constitution.md nor write outside the expert root, a traversal artifact was refused and RECORDED, and the score that decides which attempt wins is control state while the attempt's own files stay the agent's
 - `test_retention.py` **[bounded]** 300 tasks done, hot queue holds 40 finished (62 KB); queued and blocked work untouched
 - `test_retention.py` **[lossless]** all 302 tasks accounted for — 260 archived, every field intact and findable by id
-- `test_retention.py` **[flat]** the hot state is capped at 50 finished task(s) after 400 more were run (limit 65), so persist is bounded work forever — measured 12 ms -> 13 ms here, but the COUNT is the guarantee and the clock is only a smoke check
+- `test_retention.py` **[flat]** the hot state is capped at 50 finished task(s) after 400 more were run (limit 65), so persist is bounded work forever — measured 14 ms -> 15 ms here, but the COUNT is the guarantee and the clock is only a smoke check
 - `test_retention.py` **[context]** finished transcripts tidied into contexts/archive/, the verbatim never-lose tier left in place and still recallable
 - `test_retention.py` **[heartbeat]** the loop pulses with its current task; a stale pulse is what separates 'wedged' from 'idle'
 - `test_context.py` **[manifest]** the compiled window names every source it used and the files inside it; the transcript matches the manifest
@@ -164,9 +166,9 @@ Each test below prints its own sentence describing what it proved; those sentenc
 
 *task, goal engine, team, deterministic workflow, consultation, prospective intentions, routines, procedural mastery (sealed capability packs)*
 
-**Verdict: proven** — 22 of 22 declared tests ran and passed, producing 111 observations.
+**Verdict: proven** — 22 of 22 declared tests ran and passed, producing 114 observations.
 
-<details><summary>What the tests observed (111)</summary>
+<details><summary>What the tests observed (114)</summary>
 
 - `test_goal.py` **[judge]** a judge claiming ACHIEVED while a check failed was OVERRULED; the pursuit continued and finished the work for real
 - `test_goal.py` **[replan]** cycle 2 planned WITH the previous assessment in hand
@@ -184,17 +186,18 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_contract.py` **[replay]** the event ledger rebuilt the same state the snapshot held, and a snapshot forged to 'verified' with no such event was reported as divergence
 - `test_contract.py` **[outranked]** a lying judge AND a generous planner-authored check both said done while the deliverable did not exist — the frozen acceptance test refused, the pursuit was overruled into cycle 2, did the work for real, and only then ended VERIFIED, with the whole story in the event ledger
 - `test_contract.py` **[converge]** the same milestone failing the same check in cycles 1 and 2 ended the pursuit BLOCKED with the wall named — two of the four budgeted cycles were spent, not all four
+- `test_contract.py` **[machine]** two threads raced one contract to two mutually exclusive endings: verified was accepted, the other was refused BY THE RULE, and the ledger carries exactly one ending
 - `test_runbook.py` **[valid]** 6 malformed shapes refused with the defect named — a step with no verify, a TODO left in, a 21-step monolith; a runbook that cannot be validated cannot be trusted to run
 - `test_runbook.py` **[prove]** each step must pass its own verify before the next runs: a failing step 2 stopped the run at step 2 with the reason stated, after step 1 demonstrably executed
 - `test_runbook.py` **[contained]** a runbook step is a model-authored command and gets the model-command stack: `rm -rf /` in a `do` was refused by policy, not executed
-- `test_runbook.py` **[earned]** 3 verified wins promoted a candidate to proven, recorded by the harness in a ledger the worker cannot write; a self-declared 'proven' inside the file was ignored; 2 consecutive losses quarantined, and a quarantined runbook refuses to run
+- `test_runbook.py` **[earned]** 3 ACCEPTED wins promoted a candidate to proven, recorded by the harness in a ledger the worker cannot write; 5 self-verified runs with no caller acceptance promoted nothing, and a procedure the caller's graders rejected stayed a candidate after 4 of its own clean runs; a self-declared 'proven' inside the file was ignored; 2 consecutive losses quarantined, and a quarantined runbook refuses to run
 - `test_runbook.py` **[match]** trigger terms select the runbook; quarantined never volunteers; candidates appear only under explicit allowance; an unrelated goal matches nothing
 - `test_runbook.py` **[reconcile]** a goal contract was driven to VERIFIED by observe -> apply -> verify with no model and no task queue involvement; a goal with no matching procedure ended BLOCKED naming the frontier instead of improvising
 - `test_runbook.py` **[pennies]** goal.pursue completed a goal VERIFIED with ZERO tasks created and ZERO model calls — against a provider rigged to fail any task instantly, so the model path could not have produced this outcome even by accident. The model is now reserved for goals the library has never seen.
 - `test_runbook.py` **[draft]** a verified pursuit yields a skeleton carrying the proven VERIFICATIONS with the HOW left as named TODOs — validation refuses to run it until they are filled, because the machine can recover what was proven but not how it was done
 - `test_runbook.py` **[applicable]** a negative trigger vetoed a matching runbook; an unmet when.requires probe made a PROVEN match inapplicable and reconcile blocked NAMING the precondition; satisfying it let the identical goal reconcile to VERIFIED
 - `test_runbook.py` **[compose]** a parent runbook ran its child in place with the child's own trust gate enforced and its own wins recorded (candidate child stopped an unsupervised parent; the child earned proven through composition); a mutual cycle was refused with the chain named
-- `test_runbook.py` **[record]** a demonstrated procedure landed as a CANDIDATE with recorded provenance; a step without verify was refused; the rehearsal replayed the demo through the authority stack and counted as the first of three wins toward PROVEN
+- `test_runbook.py` **[record]** a demonstrated procedure landed as a CANDIDATE with recorded provenance; a step without verify was refused; the rehearsal replayed the demo through the authority stack, was recorded as a run, and earned NO trust — a procedure grading its own replay is still the procedure grading itself
 - `test_repair.py` **[law1]** a blocked goal's diagnosis and every grounded repair action carry the failing check and its recorded error VERBATIM from the ledger — there is no 'reflect and try again' action anywhere in the plan
 - `test_repair.py` **[law3]** a budget block and a tamper block both plan exactly one action — OWNER — and a repair pass left the contract's budget bit-for-bit unchanged: the machine cannot lift its own ceiling or forgive edits to its own graders
 - `test_repair.py` **[law4]** revising a failing runbook wrote publisher-v2 BESIDE its parent — parent file and earned trust untouched, child a zero-trust candidate carrying the exact failure it must answer, refused by validation until the TODO is filled
@@ -205,7 +208,7 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_swarm.py` **[rule2]** two groups served by one shared procedure did not fan out (two workers, one procedure buys nothing), and a group with no proven procedure was named as the frontier instead of being improvised in parallel
 - `test_swarm.py` **[fanout]** two declared groups with two distinct proven procedures ran as two workers, both artifacts produced, and the state moved only after the central graders passed — with the task queue untouched: multiplication of MACHINE work, zero model calls
 - `test_swarm.py` **[rule4]** a group whose lease was held by another swarm was NOT run twice — the worker reported the held lease, the other group proceeded; with the lease released, the single remaining group was correctly refused fan-out and finished on the sequential path instead
-- `test_swarm.py` **[rule3]** both workers reported success; the central graders refused A1 and the swarm result was NOT verified, with the refusing test named — a worker's opinion of its own work counts for nothing
+- `test_swarm.py` **[rule3]** both workers reported success; the central graders refused A1 and the swarm result was NOT verified, with the refusing test named — a worker's opinion of its own work counts for nothing, in the contract AND in the trust ledger
 - `test_swarm.py` **[cap]** a cap of 2 ran exactly 2 workers and NAMED the group it could not take (['c2']) instead of silently dropping it
 - `test_swarm.py` **[e2e]** goal.pursue on a grouped goal fanned out to two workers and ended VERIFIED with zero tasks and zero model calls — against a provider rigged to fail any task, so only the machine path can explain the outcome
 - `test_swarm.py` **[ledger]** 4 threads appended 100 events concurrently and the ledger holds exactly 100, none corrupt — the append is a critical section now, because it measurably was not one before
@@ -269,6 +272,8 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_url.py` **[page]** URL fetched deterministically, lesson written with provenance, watcher queued
 - `test_url.py` **[youtube]** link queued to the ripper with the yt-dlp + cookies playbook
 - `test_url.py` **[settle]** zero settling means zero even when the filesystem clock runs ahead of the wall clock, and a real window still holds a file back until it stops changing
+- `test_url.py` **[ssrf]** all 9 internal-address spellings refused — IPv4-mapped and long-form IPv6, decimal and hex integer hosts included — and an ordinary public host still fetches
+- `test_url.py` **[video-host]** a host is matched exactly or as a parent domain: an article about YouTube is fetched as a page, a lookalike domain buys nothing, and real video hosts still route to the downloader
 - `test_curriculum.py` **[authority]** arrival order was 01,02,03,04; the plan studies the tier-1 specification first: 03, 01, 04, 02
 - `test_curriculum.py` **[duplicate]** the blog covering the same ground as the spec was marked 'skim': 36% overlap with lesson 03: read it only for what it adds
 - `test_curriculum.py` **[relevance]** payroll tax law scored 0.0 against a contrast mission and was not studied in full
@@ -288,9 +293,9 @@ Each test below prints its own sentence describing what it proved; those sentenc
 
 *courses and atoms, skills graph, commons, failures, gotchas, premise, competence, recall, sources, conflicts, standards, self-model*
 
-**Verdict: proven** — 18 of 18 declared tests ran and passed, producing 74 observations.
+**Verdict: proven** — 18 of 18 declared tests ran and passed, producing 76 observations.
 
-<details><summary>What the tests observed (74)</summary>
+<details><summary>What the tests observed (76)</summary>
 
 - `test_knowledge.py` **[graph]** 8 atoms became 4 entities and 1 co-occurrence edge(s) across 1 topic(s) — derived entirely from files on disk, with every claim keeping its citation and its source tier, and nothing asked of a model
 - `test_knowledge.py` **[audit]** --weak names exactly the 2 claims resting below the learn bar (a content farm and a Medium post), and --load-bearing shows one RFC underpinning 37.5% of everything believed here — concentration is a real risk that a flat notes file cannot display at all
@@ -365,6 +370,8 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_sources.py` **[honest]** none of the 12 unreviewed scholarly hosts carries a why-text claiming review — the words a human reads now match what the host actually promises
 - `test_sources.py` **[fed]** all 8 scholarly discovery rails still produce results at or under the learn bar — the halo is gone, the pipeline is not
 - `test_sources.py` **[spoof]** lookalike subdomains still buy nothing
+- `test_sources.py` **[proof]** the module's own 29-reference proof table runs in the suite and agrees with the registry; no domain is rated twice
+- `test_sources.py` **[derived]** a tier and an owner override forged in the workspace ledger are both ignored — the tier is recomputed from the URL — while a genuine set_tier still overrules, recorded in a control-zoned file the agent cannot write and the workspace ledger stays writable so ingestion keeps working
 - `test_reflector.py` **[reflection]** exactly one Reflector task followed the work, it completed, and it did not chain further
 
 </details>
@@ -375,15 +382,16 @@ Each test below prints its own sentence describing what it proved; those sentenc
 
 *charter variants with predictions, approvals, replay, benchmark, promotion gates, the design gate*
 
-**Verdict: proven** — 8 of 8 declared tests ran and passed, producing 34 observations.
+**Verdict: proven** — 8 of 8 declared tests ran and passed, producing 35 observations.
 
-<details><summary>What the tests observed (34)</summary>
+<details><summary>What the tests observed (35)</summary>
 
 - `test_variants.py` **[guards]** no promotion without a trial; no trial on a single task
 - `test_variants.py` **[trial]** same battery, two real drains: base 0/2 (gate refused 12x), variant 2/2; live prompts untouched
 - `test_variants.py` **[promote]** strictly-better variant installed; base charter backed up
 - `test_variants.py` **[tie]** equal performance refused — churn without evidence is rot
 - `test_variants.py` **[rollback]** the exact pre-promotion charter restored; un-promoted variants cannot roll back
+- `test_variants.py` **[isolation]** each arm ran in its own clone of the expert; two identical charters scored identically (2 = 2), and neither arm's artifacts reached the live root
 - `test_decisions.py` **[declare]** a variant can state what it should improve and by how much; a vague prediction is refused outright
 - `test_decisions.py` **[refused]** the variant DID beat base, but missed the effect it predicted -- promotion refused and the live charter untouched
 - `test_decisions.py` **[held]** the variant that delivered exactly what it predicted was promoted, and rollback restored the previous charter byte for byte
@@ -422,9 +430,9 @@ Each test below prints its own sentence describing what it proved; those sentenc
 
 *panel, live events, cards, chief, doctor, preflight, backup, providers, MCP, A2A federation, traces*
 
-**Verdict: proven** — 19 of 19 declared tests ran and passed, producing 118 observations.
+**Verdict: proven** — 19 of 19 declared tests ran and passed, producing 120 observations.
 
-<details><summary>What the tests observed (118)</summary>
+<details><summary>What the tests observed (120)</summary>
 
 - `test_ui.py` **[up]** panel serving on 127.0.0.1, empty fleet listed
 - `test_ui.py` **[create]** one click -> expert with its own identity and memory
@@ -451,12 +459,14 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_frontend.py` **[serve]** page served from ui.html (322977 bytes)
 - `test_frontend.py` **[fresh]** a newly created expert answers on all six read endpoints, no 500s
 - `test_frontend.py` **[live]** frontend edits appear on reload with no server restart
-- `test_package.py` **[secrets]** 315 archive members checked four ways — by basename, by containing directory, by extension, and by READING every text member for assigned credential values. The content scan was calling a path-taking function on a line of text, so it had never evaluated true; now live, it finds exactly the 7 synthetic fixtures the tests are built from and nothing else, and an unlisted hit or a stale exemption both fail
-- `test_package.py` **[private]** none of 5 private-data shapes carries CONTENT in the archive — no expert memory, task state, logs, context windows or organization roster — while 6 empty placeholder(s) keep the working directories so a fresh unzip runs with no setup. Proof observations DO ship, deliberately: every one is bound to a code hash and none names this machine, so the recipient inherits evidence that falls the moment they change the code
-- `test_package.py` **[runnable]** the archive carries 90 modules, 119 tests, the prompts and settings.toml — and unzipped into an empty directory it passes `harness.py --check` with no setup at all
+- `test_package.py` **[secrets]** 320 archive members checked four ways — by basename, by containing directory, by extension, and by READING every text member for assigned credential values. The content scan was calling a path-taking function on a line of text, so it had never evaluated true; now live, it finds exactly the 7 synthetic fixtures the tests are built from and nothing else, and an unlisted hit or a stale exemption both fail
+- `test_package.py` **[private]** none of 5 private-data shapes carries CONTENT in the archive — no expert memory, task state, logs, context windows or organization roster — while 8 empty placeholder(s) keep the working directories so a fresh unzip runs with no setup. Proof observations DO ship, deliberately: every one is bound to a code hash and none names this machine, so the recipient inherits evidence that falls the moment they change the code
+- `test_package.py` **[runnable]** the archive carries 91 modules, 120 tests, the prompts and settings.toml — and unzipped into an empty directory it passes `harness.py --check` with no setup at all
 - `test_package.py` **[install]** 4 installers ship in the archive, every GitHub reference names reda-baqechame/self-learning-24.7-agent, the shell scripts are CRLF-free, and 4 parsed clean with the interpreters present here (install.sh, get-fleet.sh, setup-vps.sh, install.ps1)
-- `test_package.py` **[planted]** 3 decoy credential file(s) were created in the source tree and the archive excluded every one, by file and by value — an exclusion rule is only worth what it catches
-- `test_package.py` **[evidence]** all 119 registered tests are classified into 13 systems with no overlap and no drift, every system states a blind spot, and the standing 'every call is a mock' caveat is in the module and in the generated report
+- `test_package.py` **[clone-dirs]** all 10 working directories survive a git clone, so the clone route and the zip route land the same tree — a real clone of the published repo had 8 of them missing, including the inbox the installer tells the owner to use
+- `test_package.py` **[harness-safety]** the mutation harness plants a decoy only where no real credential file exists, and reports None otherwise — so the cleanup that follows can never remove an owner's keys, which it did while announcing that it was skipping them
+- `test_package.py` **[planted]** 2 decoy credential file(s) were created in the source tree and the archive excluded every one, by file and by value — an exclusion rule is only worth what it catches
+- `test_package.py` **[evidence]** all 120 registered tests are classified into 13 systems with no overlap and no drift, every system states a blind spot, and the standing 'every call is a mock' caveat is in the module and in the generated report
 - `test_package.py` **[skip]** a deliberate skip is held apart from both outcomes it resembles: it does not make a green suite publish a FAILING artifact, it contributes no observations so it is never counted as proof, the artifact names it and quotes its reason, a genuine non-pass is still FAILING, and a system where everything skipped reads UNPROVEN rather than proven
 - `test_panel_v2.py` **[identity]** the owner rewrote who this agent is; the previous version was kept and the new words were in the next window
 - `test_panel_v2.py` **[pins]** the owner's binding lines are injected first, for every agent, and re-materialised the moment they are saved
@@ -488,7 +498,7 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_mcp.py` **[toolbox]** the capability note advertises the server with the exact commands
 - `test_mcp.py` **[a2a]** A2A v1.0 card served at the standard well-known path: exposed experts as skills, signed transport declared, zero secret material
 - `test_mcp.py` **[url-args]** 6 tool arguments pointing at file://, loopback, private and link-local addresses are refused BEFORE the server is called — including nested ones, which is how a browser server passes its options — and 4 ordinary argument shapes still pass
-- `test_mcp.py` **[sees]** an image block is written to tmp/ (mcp-1787945271-1.png) and the result names the exact `ingest.py vision` command that reads it, so a screenshot becomes something the agent can answer questions about; an undecodable blob is reported as gone, not hidden
+- `test_mcp.py` **[sees]** an image block is written to tmp/ (mcp-1788098162-1.png) and the result names the exact `ingest.py vision` command that reads it, so a screenshot becomes something the agent can answer questions about; an undecodable blob is reported as gone, not hidden
 - `test_federation.py` **[card]** each fleet has its own identity; the card exposes only what the owner chose, signed, with a fingerprint (never the secret)
 - `test_federation.py` **[trust]** unknown fleet, forged signature, and unexposed expert all refused before a single model call
 - `test_federation.py` **[ask]** a signed request became a citation-gated consultation, framed as coming from outside the fleet
@@ -523,7 +533,7 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_backup.py` **[freshness]** the age helpers the preflight depends on report a real number, and None when there is nothing to report
 - `test_backup.py` **[sigv4]** 2 of AWS's own published example signatures reproduced byte for byte, and the secret appears in no header -- the request is signed with a derivation of it, never the key
 - `test_backup.py` **[fail-closed]** a push with no credentials refuses by name and sends nothing -- it does not reach the network to find out
-- `test_backup.py` **[compounding]** four snapshots into the DEFAULT output directory stayed flat at 76,270 bytes with zero nested archives — a backup no longer archives its own backups, which on a 24/7 fleet filled the disk the fleet needs in order to save itself
+- `test_backup.py` **[compounding]** four snapshots into the DEFAULT output directory stayed flat at 76,273 bytes with zero nested archives — a backup no longer archives its own backups, which on a 24/7 fleet filled the disk the fleet needs in order to save itself
 - `test_backup.py` **[pull]** a good archive downloads and verifies; one flipped byte deep inside is caught and REFUSED with the reason — the check the feature advertised now actually runs, having previously crashed on every archive and, once unpacked, trusted a damaged one
 - `test_backup.py` **[never-raises]** verify() reports zlib.error, BadZipFile, OSError and MemoryError as a NAMED corrupt member instead of raising — the layer that notices damage differs by platform, and the narrow except list was green on 4 of 6 runners
 - `test_preflight.py` **[blocker]** a fleet with no backup is NOT READY, and the finding carries the exact command that fixes it
@@ -549,26 +559,29 @@ Each test below prints its own sentence describing what it proved; those sentenc
 
 **Blind spot.** the panel is driven through its HTTP API and its HTML is parsed, but no test renders it in a browser. Layout, contrast and touch targets are verified by eye, not by CI.
 
-## 7. The five authorities
+## 7. The six authorities
 
-*one mandatory gateway per kind of power — execution, file, credential, model gateway, effect — plus the invariant tests that enumerate every caller of each*
+*one mandatory gateway per kind of power — execution, file, credential, model gateway, effect, control plane — plus the invariant tests that enumerate every caller of each*
 
-**Verdict: proven** — 1 of 1 declared tests ran and passed, producing 19 observations.
+**Verdict: proven** — 2 of 2 declared tests ran and passed, producing 29 observations.
 
-<details><summary>What the tests observed (19)</summary>
+<details><summary>What the tests observed (29)</summary>
 
-- `test_invariants.py` **[execution]** 86 modules scanned; 0 raw subprocess sites outside the authority (16 declared platform-internal, each with a stated reason)
+- `test_invariants.py` **[execution]** 87 modules scanned; 0 raw subprocess sites outside the authority (16 declared platform-internal, each with a stated reason)
 - `test_invariants.py` **[catalogue]** 5 execution operations: every model-authored one enforces policy+sandbox, every platform one refuses a shell string, and each of the 1 declaring approval actually requires one for a consequential command while still letting ordinary work through
-- `test_invariants.py` **[zones]** 15 paths + every declared control file/dir/path (6 files, 6 dirs, 1 paths) classified and enforced by zone
-- `test_invariants.py` **[ledgers]** all 6 ledgers harness treats as integrity invariants are CONTROL and refused to the agent — including skills/graph.json, the skill trust graph, which sat in the workspace because `skills/` is legitimately the agent's own
+- `test_invariants.py` **[zones]** 15 paths + every declared control file/dir/path (10 files, 9 dirs, 1 paths) classified and enforced by zone
+- `test_invariants.py` **[ledgers]** all 8 ledgers harness treats as integrity invariants are CONTROL and refused to the agent — including skills/graph.json, the skill trust graph, which sat in the workspace because `skills/` is legitimately the agent's own
 - `test_invariants.py` **[traversal]** 12 escape spellings (posix, windows, UNC, mixed, nested) all refused or contained
 - `test_invariants.py` **[credentials]** all 4 sources (env, agent.env, inline, api_key_file) resolve, count as funded, are excluded from packaging, are redacted, and are unreadable by the agent
-- `test_invariants.py` **[metering]** all 9 call purposes reach the ledger, attribute per call, and count toward today's spend
+- `test_invariants.py` **[metering]** 87 modules scanned by AST; every function that reaches a model provider meters it (2 declared free, each with a stated reason and each still present in the source)
+- `test_invariants.py` **[metering]** all 11 call purposes reach the ledger, attribute per call, and count toward today's spend
+- `test_invariants.py` **[keys]** every string-keyed dict literal in the platform is collision-free, and both proof capabilities that were competing for one name exist (16 registered)
+- `test_invariants.py` **[control-plane]** the seal is derived from fileauth's zone model: all 30 control shapes sealed, the workspace untouched, every path with a declared treatment
 - `test_invariants.py` **[roles]** 9 roles: every one can finish/escalate, the Student holds neither read_file nor a shell, and no untrusted-material role holds run_command
 - `test_invariants.py` **[gates]** 5 catalogue entries build a command; a raw shell string never does
 - `test_invariants.py` **[birth]** 3 modules mint experts; the gateway seeds a never-bootstrapped home itself (library AND CLI, from any working directory), is idempotent, does not clobber owner edits, and refuses with a sentence when the home is genuinely impossible
 - `test_invariants.py` **[exams]** 4 recorded formats: the loop's completion check, the self-model, and the block injected into every context window all read the same score from the same file
-- `test_invariants.py` **[sandboxes]** 163 sandbox names across 119 test files, every one claimed by exactly one file — a shared temp directory is the failure that only shows up under load
+- `test_invariants.py` **[sandboxes]** 172 sandbox names across 120 test files, every one claimed by exactly one file — a shared temp directory is the failure that only shows up under load
 - `test_invariants.py` **[cli]** 76 documented subcommands across 47 modules all parse, and every module prints its own --help on a non-UTF-8 console
 - `test_invariants.py` **[clocks]** every .py in the platform parsed: no file timestamp is compared against another file's, which is the comparison a coarse filesystem tick corrupts (U19, U20). The 4 remaining getmtime sites sort, or measure age against the wall clock — sound, but not unconditionally: an age can come back NEGATIVE when the two clocks disagree, which is what U22 was, so this check bans the pattern it can prove and the docstring records the edge it cannot
 - `test_invariants.py` **[capabilities]** every dual-installed tool resolves the same way for the report and the runtime, and each one actually executes: yt-dlp via module
@@ -576,10 +589,17 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_invariants.py` **[arch-table]** all 5 rows of ARCHITECTURE.md's control table match execution.describe() flag for flag — the doc gave capability_probe an approval the code never implemented
 - `test_invariants.py` **[policy]** an uncompilable deny OR allow pattern refuses every command and names the rule, instead of being skipped in silence while the rules around it keep working; a valid policy is unaffected in both directions
 - `test_invariants.py` **[health]** the sandbox health check can actually FAIL: a configured backend that does not exist is reported, and `host` still passes — it was reading agent.agent.sandbox and defaulting to OK forever
+- `test_controlplane.py` **[matrix]** 100 shell commands from a role holding run_command — truncate, append, delete, create and a redirect — against all 30 control paths fileauth declares: not one durable change, every attempt reported exit=3, 100 tamper events on the record
+- `test_controlplane.py` **[owner]** all 8 owner-level CLI entry points refused from inside an agent task and the seeded approval is still denied; the same call succeeds outside one
+- `test_controlplane.py` **[state]** rewriting state.json is reported as tampering and NOT reverted (a sibling loop owns it), and the compensating control holds: the task could not mark itself done, because the loop's next commit rewrites its own record from memory
+- `test_controlplane.py` **[approvals]** a PENDING request may appear while a command runs (execution.run creates one); a GRANTED record may not, and the one that did was removed
+- `test_controlplane.py` **[docker]** 29 read-only bind(s) layered over /work cover every one of the 30 control paths; on that backend the boundary is the kernel's, not a check's
+- `test_controlplane.py` **[premise]** in the SHIPPED settings.toml, 4 role(s) hold run_command (default, examiner, practitioner, ripper) and 5 do not (consultant, librarian, reflector, student, watcher) — so the matrix above attacks the real configuration; and the seal brackets all 3 model-authored operations, because a done_check is written by the model as surely as a command is
+- `test_controlplane.py` **[cost]** a 1910-path control plane (1500 approvals, 200 goal ledgers) seals and verifies in 188 ms per command — 27 s before the caches — and a change to a cached path is still caught
 
 </details>
 
-**Blind spot.** these tests enumerate every path in THIS tree. They cannot see a path added by a plugin, an MCP server or a future module that does not exist yet — which is why the execution audit is a source scan rather than a runtime check, and why it fails on a new raw subprocess call rather than warning.
+**Blind spot.** these tests enumerate every path in THIS tree. They cannot see a path added by a plugin, an MCP server or a future module that does not exist yet — which is why the execution audit is a source scan rather than a runtime check, and why it fails on a new raw subprocess call rather than warning. The Control Plane Authority carries a second, sharper limit, stated in its own module: on `sandbox = "host"` it DETECTS AND REVERTS rather than prevents, because there is no filesystem boundary on that backend to prevent with. Prevention needs `sandbox = "docker"`, where the control paths are bound read-only and the boundary is the kernel's.
 
 ## 8. Proof, missions and long-horizon work
 
@@ -595,7 +615,7 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_proof.py` **[failure]** a failing run is recorded as failing — the ledger keeps both, so a regression is visible rather than overwritten
 - `test_proof.py` **[expiry]** live and stress evidence older than its window expired automatically and the badge fell back to OFFLINE VERIFIED — a green light cannot rot into a lie by sitting still
 - `test_proof.py` **[stability]** the code hash survives line-ending translation while still changing on real edits
-- `test_proof.py` **[registry]** 15 declared capabilities each state a user capability, invariants, code and tests; nothing with unwritten code claims a level above SPEC
+- `test_proof.py` **[registry]** 16 declared capabilities each state a user capability, invariants, code and tests; nothing with unwritten code claims a level above SPEC
 - `test_mission.py` **[persisted]** the mission contract is a file on disk, not a passage in a transcript that compaction can summarise away
 - `test_mission.py` **[model-swap]** the contract names no model or provider, so swapping one cannot change what the mission is
 - `test_mission.py` **[bound]** an action must name the criterion it serves and the evidence it will produce; unbound work and unrecognisable outcomes are both refused
@@ -625,9 +645,11 @@ Each test below prints its own sentence describing what it proved; those sentenc
 
 *where work runs and why that computer was chosen; how a capability is acquired without gaining authority; who may do what, and the trail that records it*
 
-**Verdict: proven** — 6 of 6 declared tests ran and passed, producing 52 observations.
+**Verdict: proven except skipped** — 4 of 6 declared tests ran and passed, producing 36 observations.
+**NOT RUN HERE — test_acquire.py:** no isolated sandbox on this machine (docker not available), so the install rungs cannot be exercised without breaking the rule they protect. The refusals above were all checked.
+**NOT RUN HERE — test_frontier_live.py:** a real acquisition cannot run here, which is a legitimate installation. Installing third-party code requires a sandbox: acquire.install refuses without one and the frontier refuses to ground an acquisition on a host observation, so there is nothing here that could honestly run.
 
-<details><summary>What the tests observed (52)</summary>
+<details><summary>What the tests observed (36)</summary>
 
 - `test_workers.py` **[registry]** 4 computers registered with zone, capability and cost; scale-to-zero kinds start stopped, so one expert does not imply one always-on machine
 - `test_workers.py` **[isolation]** free work went to the disposable container, not to the equally-free, faster-starting organization machine — blast radius outranks speed
@@ -637,17 +659,6 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_workers.py` **[explain]** the choice reads as a sentence: 'Using Office Windows PC because excel + internal-network are required (no compute cost)'
 - `test_workers.py` **[policy]** a computer restricted to named experts is invisible to the others, and the refusal says it was policy rather than capability
 - `test_workers.py` **[cost]** an idle computer accrued nothing, an hour of GPU time accrued $2.50, and stopping it stopped the meter
-- `test_acquire.py` **[no-host-install]** with sandbox = "host" there is nowhere isolated to run pip, so acquisition REFUSED rather than installing on this machine — a dependency's build backend executes at install time
-- `test_acquire.py` **[search-first]** a second request for a capability we already trust was refused and pointed at the existing tool — an unnecessary dependency is permanent
-- `test_acquire.py` **[malicious]** the package's own manifest was read before install: 2 risk signal(s) surfaced (pipes a download straight into a shell; reads credentials)
-- `test_acquire.py` **[typosquat]** names one character from a very common package were blocked; the genuine package passed
-- `test_acquire.py` **[pinning]** an unpinned dependency was refused: evidence recorded today would otherwise describe something that no longer exists
-- `test_acquire.py` **[permissions]** a tool that wants a credential declared it during inspection, before anyone decided whether to install it
-- `test_acquire.py` **[no-host]** with only a trusted computer available, acquisition FAILED rather than falling back to the host — including when the host was named explicitly
-- `test_acquire.py` **[mandatory-test]** a tool that installed cleanly could not be promoted: the capability test is required, needs evidence, and a failing one blocks trust
-- `test_acquire.py` **[sources]** the source now chooses the installer: an unknown source is refused at request(), and mcp/skill/apt each refuse BY NAME with the route to take instead of silently running pip against PyPI — which for a name like 'express' is a different package
-- `test_acquire.py` **[cli-test]** `acquire.py test` RUNS the probe by default and failed an acquisition with nothing installed; recording a pass on the owner's word now requires --owner-asserts-pass AND evidence — the library had this control and its only entry point did not
-- `test_acquire.py` **[ladder]** requested -> installed -> tested -> trusted, each rung recorded with its evidence, the exact version pinned, the owner granting the last rung, and removal available
 - `test_org.py` **[solo]** with no organization created, every capability is available — adding RBAC must not make a person ask themselves for permission
 - `test_org.py` **[ladder]** each role includes every role beneath it and nothing above: builder can run and approve, cannot manage secrets; only the owner can transfer ownership
 - `test_org.py` **[refusals]** a denial names the actor's role, the role required, and what to do next — a refusal nobody understands is one they route around
@@ -676,11 +687,6 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_frontier.py` **[shadow]** a frontier capability may not take a built-in's name ('video_download') nor carry it as a substring, and the capability note still parses into its sections
 - `test_frontier.py` **[shell]** the sealed command carries no shell metacharacter, three metacharacter-bearing published commands were refused, and both adopt and acquire-promote now require review
 - `test_frontier.py` **[shapes]** scan(None) and recipe(cap) answer exactly as they always did, capabilities(None) is empty rather than raising, and a frontier route appears only when a root is passed
-- `test_frontier_live.py` **[available]** docker runs python:3.12-slim and the registry answers
-- `test_frontier_live.py` **[live]** the sealed probe for ulid-py failed before the install and passes after it, inside the container, and the pass is bound to an install digest over the bytes that landed
-- `test_frontier_live.py` **[sealed]** the acquisition reached stage 'tested' through the shipped ladder, and the unsealed lookalike probe acquire writes to tmp/ was removed (1 test event(s) recorded)
-- `test_frontier_live.py` **[target]** the sealed probe, acquire's naming and the directory on disk all name 'capabilities/ulid-py' — a probe that tests a different directory from the one the install writes proves nothing
-- `test_frontier_live.py` **[adopt]** a PROVEN capability is not yet READY to any agent, and adoption refused without a granted approval — leaving a pending one for a human, which is the only thing that can publish it
 
 </details>
 
@@ -697,7 +703,7 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_training.py` **[sanitised]** a credential inside a captured step was redacted before it ever reached the trajectory store
 - `test_training.py` **[split]** 12 train / 3 held-out, deterministic across re-exports and provably non-overlapping
 - `test_training.py` **[verifier]** a candidate evaluated with a different verifier was refused — comparing those numbers would measure the verifier, not the model
-- `test_training.py` **[gate]** a change below its declared threshold and a single-seed result were both refused; a +0.05 improvement over three seeds was promoted
+- `test_training.py` **[gate]** a change below its declared threshold and a single-seed result were both refused; a +0.05 improvement over three seeds was promoted, and the promotion record carries the four things that make the number re-checkable — checkpoint, verifier hash, holdout hash and the evidence sha256 — plus the word DECLARED
 - `test_training.py` **[rollback]** the promotion recorded what it replaced and the rollback returned to it — a promotion without a way back is a one-way door
 - `test_training.py` **[boundary]** the export states plainly that this platform does not perform gradient updates, names what an external trainer must do, and refuses a corpus too small to mean anything
 
@@ -709,30 +715,22 @@ Each test below prints its own sentence describing what it proved; those sentenc
 
 *the two code paths that had never been executed by anything — the live provider HTTP client, and the docker sandbox — each driven against a real server and a real container*
 
-**Verdict: proven** — 5 of 5 declared tests ran and passed, producing 41 observations.
+**Verdict: proven** — 5 of 5 declared tests ran and passed, producing 34 observations.
 
-<details><summary>What the tests observed (41)</summary>
+<details><summary>What the tests observed (34)</summary>
 
 - `test_live_provider.py` **[wire]** one real HTTP call carried the model, the messages, the configured 4096-token ceiling, exactly the 6 tools this role is allowed, the bearer key and the configured extra header — and with the ceiling left at its default, max_tokens is omitted rather than sent as 0
 - `test_live_provider.py` **[cost]** the provider reported 1M+1M tokens and the ledger charged $18.00 at the configured rates — spend is read from the response, never estimated by the client
 - `test_live_provider.py` **[retry]** 429 then 503 then success in 3 calls with growing backoff; a 400 stopped after exactly 1 call instead of burning five
-- `test_live_provider.py` **[retry-after]** a 429 asking for 45s slept 45.3s (the blind backoff would have been 2s and retried into a closed window), a 503 asking for 1s slept 1.0s instead of 2s or more, and both carry jitter so simultaneous experts do not return in lockstep
+- `test_live_provider.py` **[retry-after]** a 429 asking for 45s slept 45.9s (the blind backoff would have been 2s and retried into a closed window), a 503 asking for 1s slept 1.2s instead of 2s or more, and both carry jitter so simultaneous experts do not return in lockstep
 - `test_live_provider.py` **[retry-after]** the header parser pinned across 15 shapes: both legal formats, the 120s cap, negatives and past dates clamped to 0, and every unreadable value falling back to blind backoff rather than to 0
-- `test_live_provider.py` **[unreachable]** a refused connection failed over to the fallback in 2.02s and was logged as unreachable, instead of costing five backoffs per step forever
+- `test_live_provider.py` **[unreachable]** a refused connection failed over to the fallback in 2.04s and was logged as unreachable, instead of costing five backoffs per step forever
 - `test_live_provider.py` **[keys]** all 3 configured key sources (env, inline, file) reached the Authorization header and were accepted by a server that checks them
 - `test_live_provider.py` **[malformed]** a non-JSON body and a body with no choices are each retried through the full ladder, then failed over to the configured fallback, and logged against the provider that sent them — they used to raise straight out of the loop, killing the task and never trying the fallback
 - `test_live_provider.py` **[timeout]** a provider that hung for 20s was cut off by the 2s ceiling and retried, finishing in 2.0s — the timeout is a real bound, not a suggestion
 - `test_live_provider.py` **[inline]** a provider with native_tools = false received NO tool schema and answered with inline JSON, which the loop parses
 - `test_live_provider.py` **[end-to-end]** a gated task was completed with 2 model calls over a real socket, the artefact exists, the gate passed, and all 2 of THIS task's calls are metered against the provider that actually served them
-- `test_docker_live.py` **[available]** docker ready with python:3.12-slim
-- `test_docker_live.py` **[isolated]** the command ran inside a Debian container on python 3.12.14, under its own hostname 'f16bf058bdc4' which is not this machine's, on a Windows host running python 3.14 — this is not the host backend wearing a different name
-- `test_docker_live.py` **[mount]** the expert's root is /work inside the container: a file written there landed on the host, and a file the host wrote was readable inside — in both directions, byte for byte
-- `test_docker_live.py` **[containment]** 3 probes for the host filesystem — a drive root, the platform's own source directory, and the fleet home above the mount — all came back empty from inside the container
-- `test_docker_live.py` **[network]** egress is refused by default (--network none is on the argv, and a real connection attempt failed inside), and only [agent] sandbox_network = true removes it
-- `test_docker_live.py` **[credentials]** three credential-shaped variables were withheld from the container by name and by value, and of the 10 variables it did receive none came from this host except the image's own — both filters checked, not just the outer one
-- `test_docker_live.py` **[timeout]** a 60-second command under a 6-second ceiling was cut off in 7.1s, reported as a failure, and left no container behind
-- `test_docker_live.py` **[limits]** every run carries --rm, --memory 1g and --pids-limit 256; asked for 768 processes the container reached 0 and went no further — the ceiling is enforced by the daemon, not merely declared
-- `test_docker_live.py` **[end-to-end]** the loop completed a gated task with sandbox = docker: the model wrote a file inside a container, and the gate command ran in a container to verify it
+- `test_docker_live.py` **[skipped]** the docker daemon is not running
 - `test_hosted_sandbox.py` **[no-key]** both hosted backends refuse without a key, name the key as the reason, and — the property that matters — run nothing on this machine instead
 - `test_hosted_sandbox.py` **[contract]** the exec request carried the command, a working directory, a 45000ms deadline and the key in both header styles the two services use
 - `test_hosted_sandbox.py` **[credentials]** four credential-shaped values, including the sandbox service's own key, were all absent from the JSON sent to a third-party machine
@@ -744,11 +742,12 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_first_day.py` **[probe-fail]** a rejected key reports FAIL with the HTTP status and exits non-zero; a missing key reports FAIL naming the exact environment variable to set — the two failures a first day actually produces, told apart
 - `test_first_day.py` **[unreachable]** a base_url nothing is listening on reported FAIL in 2.3s instead of hanging on a 20-second timeout per role
 - `test_first_day.py` **[cheap]** 9 roles sharing 1 model(s) produced 1 probe request(s): the check caches by provider/model pair rather than charging once per role
-- `test_first_day.py` **[first-task]** with the probe green, a gated task ran to completion over the same provider — the artefact exists, the gate passed, and the key appears nowhere in 2435 characters of log
+- `test_first_day.py` **[metered]** all 4 probe call(s) landed in the model-call ledger with their provider and model — `loop.py check` is a real provider call and is now attributed like any other
+- `test_first_day.py` **[first-task]** with the probe green, a gated task ran to completion over the same provider — the artefact exists, the gate passed, and the key appears nowhere in 3157 characters of log
 - `test_first_day.py` **[activate]** one key repoints every role at the provider that key belongs to, writes its verified endpoint and leaves the file's comments intact; 11 providers are catalogued, ranked by what they actually give away; incomplete credentials are refused rather than half-applied; and running it twice changes nothing
 - `test_endurance.py` **[soak]** driving 120 real tasks through a real loop (AGENT_SOAK_TASKS to change)
-- `test_endurance.py` **[queue]** 120 tasks completed; the hot queue held 20 then 42 against a retention of 20, 78 moved to the append-only archive with none lost, and state.json went 32378 -> 67971 bytes (2.1x)
-- `test_endurance.py` **[latency]** per-task wall time across 6 batches: 0.11s, 0.12s, 0.12s, 0.12s, 0.12s, 0.12s — median 0.12s, and the last batch is not an outlier: the loop does not get slower as its own history grows
+- `test_endurance.py` **[queue]** 120 tasks completed; the hot queue held 20 then 42 against a retention of 20, 78 moved to the append-only archive with none lost, and state.json went 32378 -> 68006 bytes (2.1x)
+- `test_endurance.py` **[latency]** per-task wall time across 6 batches: 0.12s, 0.12s, 0.12s, 0.13s, 0.13s, 0.12s — median 0.12s, and the last batch is not an outlier: the loop does not get slower as its own history grows
 - `test_endurance.py` **[logs]** agent.log is 116 KB and rotates at 5 MB x 5 backups — a hard ceiling of 29 MB per expert, whatever happens
 - `test_endurance.py` **[locks]** no lock file survived 120+ tasks and 6 loop restarts — every one was released by its holder or reclaimed as stale
 - `test_endurance.py` **[ledgers]** the whole expert directory is 1.3 MB after 120+ tasks (11.3 KB per task): the model gateway 48 KB, routing outcomes 24 KB, compiled context windows 1000 KB
@@ -770,7 +769,7 @@ Each test below prints its own sentence describing what it proved; those sentenc
 - `test_ux.py` **[first-mission]** the command bar, four primary actions and a 7-step checklist that reads real state are all on Home; the briefing offers 1 next action(s) without opening Guide
 - `test_ux.py` **[create-expert]** 5 intent questions cover all 5 lanes and none of them names a lane; every lane declares which of the six steps it can honour
 - `test_ux.py` **[supervision]** one request answers objective, current action ('read the Acme MSA' -> C1), 2 open criteria, 1 blocker(s), and cost — and the blocker routes to a person rather than to a retry
-- `test_ux.py` **[proof]** 15 capabilities each carry level, badge, the reason, the covering tests and the code hash the evidence is bound to; the panel has no way to set a level, only to re-run the evidence
+- `test_ux.py` **[proof]** 16 capabilities each carry level, badge, the reason, the covering tests and the code hash the evidence is bound to; the panel has no way to set a level, only to re-run the evidence
 - `test_ux.py` **[worker]** a computer card shows zone, what it can do (declared and implied), cost, scale-to-zero and who may use it; the choice reads 'Using Office Windows PC because excel + internal-network are required (no compute cost)' and names why each other computer was passed over
 - `test_ux.py` **[training]** ingested / covered / examined / still-open are four separate numbers: 0 source(s), 1/2 requirements evidenced, exam 88% (pass), 1 gap(s) still open — and no percentage is computed anywhere without its denominator
 - `test_ux.py` **[errors]** 9 failure classes, each naming which part failed (7 distinct owners incl. the verifier, the platform, the provider, the budget breaker and you), what happens next and what you can do; the raw trace sits under Advanced

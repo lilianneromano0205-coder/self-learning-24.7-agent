@@ -26,7 +26,7 @@ non-negotiable disciplines; everything else is open.
    byte-for-byte. See `mutate_check.py` for the pattern.
 
 5. **Security boundaries are code, never prompts.** New powers route through
-   the five authorities (Execution, File, Credential, Model Gateway,
+   the six authorities (Execution, File, Credential, Model Gateway,
    Effect). `python execution.py --audit` must stay at zero violations.
    Never print or log a credential value; `credentials.py` is the single
    reader.

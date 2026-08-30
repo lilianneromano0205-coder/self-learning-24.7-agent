@@ -28,10 +28,11 @@ import sys
 from common import AGENT_DIR, PY, agent_setting, make_sandbox
 
 sys.path.insert(0, AGENT_DIR)
-import candidates
-import conflicts
-import loop
-import sources
+import candidates          # noqa: E402
+import conflicts           # noqa: E402
+import fileauth            # noqa: E402
+import loop                # noqa: E402
+import sources             # noqa: E402
 
 GOOD_HTML = """<!DOCTYPE html>
 <html lang="en"><head><style>
@@ -288,7 +289,95 @@ def main():
           f"attempts apart on ordinary work, where every other component "
           f"declines to answer and six attempts previously tied at 0.0")
 
+    check_the_stash_cannot_be_used_as_a_write_primitive(sb)
     print("PASS test_candidates")
+
+
+def check_the_stash_cannot_be_used_as_a_write_primitive(sb):
+    """A best-of-N artifact list is MODEL-SUPPLIED DATA, never a licence.
+
+    Both halves of this were reproduced against the shipped code, and neither
+    needed a shell — so the Rule-of-Two roles that hold no run_command could
+    do it with write_file alone:
+
+      * `written_paths` reads the artifact list out of the task's own
+        write_file STEPS, and a REFUSED write_file is still recorded as a
+        step — so the list could name any path the model ever typed. The
+        stash directory itself classified as ZONE_ROOT, so the worker could
+        also write candidates/<id>/<n>/score.json declaring
+        `artifacts: ["prompts/constitution.md"]`, drop its own constitution
+        beside it, and let the loop's own _promote_best_attempt copy that
+        over the FIRST block of every system prompt.
+      * naming `../../../../OUT.txt` as an artifact made promote() write
+        outside the expert root entirely. It did: the reproduction created a
+        file in the user's home directory.
+
+    The File Authority existed the whole time; this module simply reached the
+    filesystem with os.path.join instead of asking it.
+    """
+    import io as _io
+    import json as _json
+    import shutil
+    import tempfile
+    root = tempfile.mkdtemp(prefix="cand-contain-")
+    try:
+        os.makedirs(os.path.join(root, "prompts"), exist_ok=True)
+        real = os.path.join(root, "prompts", "constitution.md")
+        _io.open(real, "w", encoding="utf-8").write("THE REAL CONSTITUTION\n")
+
+        # a planted stash whose "artifact" is a control file, plus one that
+        # walks out of the root
+        d = os.path.join(root, "candidates", "t1", "1")
+        os.makedirs(os.path.join(d, "prompts"), exist_ok=True)
+        _io.open(os.path.join(d, "prompts", "constitution.md"), "w",
+                 encoding="utf-8").write("PWNED\n")
+        escapee = os.path.normpath(os.path.join(root, "..", "CAND-ESCAPE.txt"))
+        if os.path.exists(escapee):
+            os.remove(escapee)
+        _io.open(os.path.join(d, "score.json"), "w", encoding="utf-8").write(
+            _json.dumps({"attempt": 1, "passed": True, "score": 1.0,
+                         "artifacts": ["prompts/constitution.md",
+                                       "../CAND-ESCAPE.txt"]}))
+
+        restored = candidates.promote(root, "t1", 1)
+        assert restored == [], (
+            f"promote() restored {restored} — a path the agent could not "
+            f"have written is not a path it may have restored")
+        assert _io.open(real, encoding="utf-8").read() == \
+            "THE REAL CONSTITUTION\n", \
+            "the stash overwrote prompts/constitution.md"
+        assert not os.path.exists(escapee), \
+            f"promote() wrote {escapee}, outside the expert root"
+
+        # stash() is contained in both directions too
+        kept = candidates.stash(root, "t2", 1,
+                                ["prompts/constitution.md",
+                                 "../../etc/passwd"], {"score": 1.0})
+        meta = _json.load(_io.open(os.path.join(kept, "score.json"),
+                                   encoding="utf-8"))
+        assert meta["artifacts"] == [], meta
+        assert meta.get("refused_paths"), (
+            "a refused artifact must be RECORDED, not dropped in silence — "
+            "a stash that quietly keeps nothing reads as a stash that had "
+            "nothing to keep")
+
+        # and the score itself is control state: rank() is gate-first, so a
+        # writable "passed": true would restore the attempt the gate refused
+        try:
+            fileauth.resolve(root, "candidates/t1/1/score.json", "write",
+                             "agent")
+            raise AssertionError("the agent may write a candidate's score")
+        except fileauth.Denied:
+            pass
+        fileauth.resolve(root, "candidates/t1/1/out/page.html", "write",
+                         "agent")        # its own artifacts stay writable
+        print("[contained] a planted stash could not overwrite "
+              "prompts/constitution.md nor write outside the expert root, a "
+              "traversal artifact was refused and RECORDED, and the score "
+              "that decides which attempt wins is control state while the "
+              "attempt's own files stay the agent's")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 if __name__ == "__main__":

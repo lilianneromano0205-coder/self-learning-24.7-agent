@@ -25,6 +25,7 @@ testable without a single gradient:
 Run from the agent/ directory:  python tests/test_training.py
 """
 
+import hashlib
 import json
 import os
 import sys
@@ -85,18 +86,73 @@ def check_split_is_deterministic_and_clean(root):
     return a
 
 
+def _evidence(root, name, body="holdout run: 24/24 checks, score 0.95\n"):
+    """A stand-in for the external trainer's evaluation OUTPUT.
+
+    register() requires one because this platform does not run the
+    evaluation: the score is a DECLARATION, and an artifact is what makes a
+    declaration re-checkable later. See training.py's "WHERE THE SCORE COMES
+    FROM, SAID PLAINLY"."""
+    p = os.path.join(root, f"eval-{name}.txt")
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(body)
+    return p
+
+
 def check_verifier_is_immutable_to_the_trainee(root, man):
     """The comparison that would otherwise measure the verifier."""
     try:
         training.register(root, man["id"], "ckpt-1", 0.91,
-                          verifier_hash="a-different-verifier", seeds=2)
+                          verifier_hash="a-different-verifier", seeds=2,
+                          evidence=_evidence(root, "ckpt-1"))
         raise AssertionError("a checkpoint judged by a different verifier "
                              "must not enter the registry")
     except training.Refused as e:
         assert "DIFFERENT verifier" in str(e)
+    ev = _evidence(root, "ckpt-1")
     c = training.register(root, man["id"], "ckpt-1", 0.91,
-                          verifier_hash=man["verifier_hash"], seeds=2)
+                          verifier_hash=man["verifier_hash"], seeds=2,
+                          evidence=ev)
     assert c["holdout_hash"] == man["holdout"]["hash"]
+    # THE SCORE IS DECLARED, AND THE RECORD SAYS SO. This platform cannot run
+    # the evaluation (no GPU, no trainer), so what the registry governs is a
+    # declaration — pinned to the evaluation's own output by sha256 so a
+    # score edited later no longer matches the artifact it claimed to be
+    # from. An audit was right that binding the number is the most a
+    # stdlib-only platform can honestly do; a registry with NOTHING behind
+    # the number was the gap.
+    assert c["score_origin"] == "declared", c
+    assert c["evidence_sha256"] == hashlib.sha256(
+        open(ev, "rb").read()).hexdigest(), c
+    for bad, needle in ((None, "EVALUATION'S OWN OUTPUT"),
+                        (os.path.join(root, "nope.txt"), "could not be read")):
+        try:
+            training.register(root, man["id"], "ckpt-bare", 0.99,
+                              verifier_hash=man["verifier_hash"], seeds=2,
+                              evidence=bad)
+            raise AssertionError(f"a candidate with evidence={bad!r} was "
+                                 f"accepted — its score has nothing behind it")
+        except training.Refused as e:
+            assert needle in str(e), str(e)
+    empty = os.path.join(root, "eval-empty.txt")
+    open(empty, "w").close()
+    try:
+        training.register(root, man["id"], "ckpt-bare", 0.99,
+                          verifier_hash=man["verifier_hash"], seeds=2,
+                          evidence=empty)
+        raise AssertionError("an empty evidence file was accepted")
+    except training.Refused as e:
+        assert "empty" in str(e), str(e)
+    for bad_score in (1.4, -0.2, float("nan")):
+        try:
+            training.register(root, man["id"], "ckpt-bad-score", bad_score,
+                              verifier_hash=man["verifier_hash"], seeds=2,
+                              evidence=ev)
+            raise AssertionError(f"score {bad_score} was accepted — the "
+                                 f"promotion gate compares it to a baseline "
+                                 f"on the 0..1 scale")
+        except training.Refused as e:
+            assert "0..1" in str(e), str(e)
     print("[verifier] a candidate evaluated with a different verifier was "
           "refused — comparing those numbers would measure the verifier, not "
           "the model")
@@ -111,7 +167,8 @@ def check_promotion_gate(root, man):
         assert "below the" in str(e), str(e)
     # single seed
     training.register(root, man["id"], "ckpt-lucky", 0.99,
-                      verifier_hash=man["verifier_hash"], seeds=1)
+                      verifier_hash=man["verifier_hash"], seeds=1,
+                      evidence=_evidence(root, "ckpt-lucky"))
     try:
         training.promote(root, "ckpt-lucky", baseline_score=0.50)
         raise AssertionError("one seed cannot distinguish an improvement from "
@@ -120,17 +177,24 @@ def check_promotion_gate(root, man):
         assert "seed" in str(e)
     # a genuine improvement, properly seeded
     training.register(root, man["id"], "ckpt-good", 0.95,
-                      verifier_hash=man["verifier_hash"], seeds=3)
+                      verifier_hash=man["verifier_hash"], seeds=3,
+                      evidence=_evidence(root, "ckpt-good"))
     p = training.promote(root, "ckpt-good", baseline_score=0.90)
     assert p["checkpoint"] == "ckpt-good"
+    assert p["score_origin"] == "declared" and p["evidence_sha256"], p
+    assert p["verifier_hash"] == man["verifier_hash"], p
+    assert p["holdout_hash"] == man["holdout"]["hash"], p
     print("[gate] a change below its declared threshold and a single-seed "
           "result were both refused; a +0.05 improvement over three seeds "
-          "was promoted")
+          "was promoted, and the promotion record carries the four things "
+          "that make the number re-checkable — checkpoint, verifier hash, "
+          "holdout hash and the evidence sha256 — plus the word DECLARED")
 
 
 def check_rollback_is_mandatory(root, man):
     training.register(root, man["id"], "ckpt-next", 0.97,
-                      verifier_hash=man["verifier_hash"], seeds=2)
+                      verifier_hash=man["verifier_hash"], seeds=2,
+                      evidence=_evidence(root, "ckpt-next"))
     p = training.promote(root, "ckpt-next", baseline_score=0.95)
     assert p["rollback_to"] == "ckpt-good", (
         "every promotion must record what it replaced")

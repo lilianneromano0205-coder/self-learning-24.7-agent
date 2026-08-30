@@ -27,6 +27,16 @@ Two rules make the switch safe:
 The command contract is identical everywhere: run in the expert's root, with
 the AGENT_* environment variables, capture stdout/stderr, honour a timeout,
 return (returncode, stdout, stderr).
+
+WHAT THE BOUNDARY DOES AND DOES NOT COVER, on each backend. `docker` binds the
+expert root read-write at /work — right for the workspace, and it used to be
+wrong for everything else: an audit pointed out that switching backends
+improved HOST isolation while leaving the agent free to edit its own
+settings.toml, prompts and approvals, because they were inside the mount.
+Every control path is now layered with a read-only bind
+(controlplane.readonly_mounts), so on this backend the control plane is
+immutable by the kernel. On `host` there is no such boundary and this module
+does not pretend otherwise; controlplane.py reverts instead, and says so.
 """
 
 import os
@@ -244,6 +254,22 @@ def _docker(cmd, root, env, timeout, cfg):
     argv = ["docker", "run", "--rm", "--name", name,
             "--memory", "1g", "--pids-limit", "256",
             "-v", f"{mount}:/work", "-w", "/work"]
+    # THE CONTROL PLANE IS READ-ONLY INSIDE THE CONTAINER. The bind above is
+    # the whole expert root read-write, which is right for the workspace and
+    # was wrong for everything else: an audit pointed out that switching to
+    # docker improved HOST isolation and did nothing about the agent editing
+    # its own settings.toml, prompts and approvals, because they were inside
+    # the mount. Docker applies the most specific mount, so a read-only bind
+    # at /work/settings.toml wins over the read-write /work beneath it, and
+    # the boundary is the kernel's rather than a check's — which is the whole
+    # reason to prefer this backend. On `host` there is no equivalent, and
+    # controlplane.py reverts instead; see its docstring for that distinction.
+    try:
+        import controlplane
+        for host_path, container_path in controlplane.readonly_mounts(root):
+            argv += ["-v", f"{host_path}:{container_path}:ro"]
+    except Exception:                       # pragma: no cover — defensive
+        pass
     if os.name != "nt":
         # Files created in a bind mount belong to the user INSIDE the
         # container, and with no --user that user is root. On Linux — where

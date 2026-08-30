@@ -169,7 +169,7 @@ def check_law4_revision_keeps_lineage(root):
     with open(runbook.path(root, "publisher"), "w", encoding="utf-8") as f:
         json.dump(parent, f)
     # the parent earned real history before failing
-    runbook.record(root, "publisher", True, "earlier win")
+    runbook.record(root, "publisher", True, "earlier win", accepted=True)
     parent_trust = dict(runbook._trust(root)["publisher"])
 
     ERR = "the CDN rejected the upload: 403 on PUT /bulletin"
@@ -221,7 +221,10 @@ def check_law2_only_the_graders_verify(home, root):
                    "steps": [{"do": _touch_cmd(art),
                               "verify": _exists(art)}]}, f)
     for _ in range(runbook.PROMOTE_WINS):
-        assert runbook.run(root, "bulletin-fix", allow_candidate=True)["ok"]
+        r = runbook.run(root, "bulletin-fix", allow_candidate=True,
+                        accept=lambda: os.path.exists(art))
+        assert r["ok"] and r["accepted"], r
+    assert runbook.status(root, "bulletin-fix") == "proven"
     os.remove(art)
 
     r = repair.apply(root, "g-grade", resume=True)

@@ -104,8 +104,15 @@ REGISTRY = {
         "live": "docker or a hosted sandbox backend executes a real command",
     },
     "file-authority": {
-        "capability": "Model-influenced paths cannot escape the workspace or "
-                      "rewrite the state that defines the agent's permissions.",
+        # The claim used to read "…or rewrite the state that defines the
+        # agent's permissions", full stop — which was true of the FILE TOOL
+        # and false of the platform, because a shell-capable role reached the
+        # same files through run_command. The capability now says what this
+        # module actually proves, and the control plane, which spans two
+        # authorities, has its own entry below.
+        "capability": "Model-influenced PATHS cannot escape the workspace, "
+                      "and the agent's file tools cannot write control, "
+                      "runtime or credential state.",
         "invariants": ["traversal and symlink escapes refused",
                        "control and runtime zones are not agent-writable",
                        "credential files are never readable"],
@@ -114,6 +121,34 @@ REGISTRY = {
                   "test_invariants.py"],
         "stress_tests": ["test_invariants.py", "test_material.py"],
         "live": None,
+    },
+    # NOT "control-plane": that key was already taken, 90 lines below, by the
+    # PANEL's capability. A dict literal keeps the last of two identical keys,
+    # so naming this one that deleted it at runtime while both read fine in
+    # the source — the registry would have shown one green panel capability
+    # and no worker-authority capability at all. Found by an audit sweep, not
+    # by the suite; check_registry_keys_are_unique in test_invariants.py now
+    # parses this file's AST so a third collision cannot be silent either.
+    "worker-authority": {
+        "capability": "A worker cannot durably change its own authority — "
+                      "not through the file tool, and not by running a "
+                      "program that does the same thing.",
+        "invariants": ["the sealed set is derived from fileauth's zones, "
+                       "never listed twice",
+                       "a model-authored command that edits control state is "
+                       "reverted and reported as failed",
+                       "the docker backend mounts control state read-only",
+                       "owner-level CLIs refuse to run inside an agent task"],
+        # Deliberately spanning BOTH authorities plus the loop, because that
+        # is where the defect lived: fileauth was right about the tool,
+        # policy was right about the string, and the invariant that spans them
+        # was owned by nobody.
+        "code": ["controlplane.py", "fileauth.py", "execution.py",
+                 "sandbox.py", "policy.py", "loop.py"],
+        "tests": ["test_controlplane.py", "test_invariants.py",
+                  "test_hardening.py", "test_guardrails.py"],
+        "stress_tests": ["test_controlplane.py"],
+        "live": "a docker container refuses a write to /work/settings.toml",
     },
     "credential-authority": {
         "capability": "One credential model: what the runtime resolves is what "
@@ -131,8 +166,19 @@ REGISTRY = {
                       "so cost ceilings cannot be bypassed by a code path.",
         "invariants": ["compaction, replay and benchmark calls are metered",
                        "attribution is per call, not per task",
-                       "the daily breaker sees every call"],
-        "code": ["modelgateway.py", "modelrouter.py"],
+                       "the daily breaker sees every call",
+                       "every function that reaches a provider meters it, "
+                       "or is declared free with a reason"],
+        # THE BOUNDARY MUST CONTAIN THE CALL SITES. It listed modelgateway.py
+        # and modelrouter.py — neither of which calls a provider — so the
+        # capability could stay "verified" while unmetered spending was added
+        # anywhere else. It was: ingest.py's transcription and vision rails
+        # billed real money outside every ledger, and loop._probe billed a
+        # live token per role, all with this proof green. A proof hash that
+        # does not cover the code that can break the invariant proves the
+        # wrong thing.
+        "code": ["modelgateway.py", "modelrouter.py", "loop.py", "ingest.py",
+                 "providers.py"],
         "tests": ["test_guardrails.py", "test_modelrouter.py",
                   "test_invariants.py"],
         "stress_tests": ["test_invariants.py"],
@@ -155,8 +201,10 @@ REGISTRY = {
         "invariants": ["every claim carries a resolvable citation",
                        "a contested point cannot become a standard",
                        "an unknown source cannot rank itself"],
+        # memcheck.py resolves the citations; "every claim carries a
+        # resolvable citation" is its verdict, not this list's.
         "code": ["memory.py", "sources.py", "conflicts.py", "standards.py",
-                 "curriculum.py", "recall.py", "premise.py"],
+                 "curriculum.py", "recall.py", "premise.py", "memcheck.py"],
         "tests": ["test_memory.py", "test_conflicts.py", "test_curriculum.py",
                   "test_memory_kinds.py", "test_recall.py"],
         "stress_tests": ["test_faults.py"],
@@ -168,7 +216,12 @@ REGISTRY = {
         "invariants": ["a skill file cannot self-declare trust",
                        "community scripts stay disabled until promoted",
                        "promotion requires distinct verified wins"],
-        "code": ["skills.py", "routines.py"],
+        # fileauth.py is in this boundary because CONTROL_PATHS is what
+        # actually enforces "trust comes from the graph, which only the owner
+        # writes" — delete that one line and an agent marks its own skill
+        # proven while this badge stays green. The same reasoning that moved
+        # loop.py and ingest.py into the model-gateway boundary.
+        "code": ["skills.py", "routines.py", "fileauth.py"],
         "tests": ["test_skillgraph.py", "test_skillmd.py", "test_hardening.py"],
         "stress_tests": ["test_invariants.py"],
         "live": None,
@@ -214,7 +267,10 @@ REGISTRY = {
         "invariants": ["no install on the host or control plane",
                        "exact version and provenance recorded",
                        "a capability test must pass before registration"],
-        "code": ["acquire.py", "toolbox.py"],
+        # sandbox.py: acquire.install REFUSES without a containment
+        # boundary, so the module that decides whether one exists is inside
+        # the trusted computing base of this capability.
+        "code": ["acquire.py", "toolbox.py", "sandbox.py"],
         "tests": ["test_acquire.py"],
         "stress_tests": ["test_acquire.py"],
         "live": "a real package installs in a disposable worker and passes "

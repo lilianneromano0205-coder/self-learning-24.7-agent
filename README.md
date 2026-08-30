@@ -6,11 +6,11 @@ continuously, prove what they did, and remember what they learned.**
 [![tests](https://github.com/reda-baqechame/self-learning-24.7-agent/actions/workflows/tests.yml/badge.svg)](https://github.com/reda-baqechame/self-learning-24.7-agent/actions/workflows/tests.yml)
 ![python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![dependencies](https://img.shields.io/badge/dependencies-stdlib%20only-brightgreen)
-![tests](https://img.shields.io/badge/tests-119%20passing%20%C2%B7%206%20platforms-brightgreen)
+![tests](https://img.shields.io/badge/tests-120%20passing%20%C2%B7%206%20platforms-brightgreen)
 ![mutations](https://img.shields.io/badge/mutation%20tests-56%2F56%20killed-brightgreen)
 ![license](https://img.shields.io/badge/license-AGPL--3.0-orange)
 
-86 Python modules · 119 acceptance tests · one HTML control panel · no
+87 Python modules · 120 acceptance tests · one HTML control panel · no
 database, no framework, no build step. Python 3.11+ and your own API keys.
 
 ```bash
@@ -154,15 +154,15 @@ are laws with tests that would fail, not features with descriptions.**
 | Property | The well-known harnesses | Expert Fleet |
 |---|---|---|
 | Who says "done"? | the model or its framework judges its own run | frozen, caller-authored graders sealed before planning, run only by the harness; even the judge is overruled when they disagree — **56/56 mutation-tested laws** |
-| Self-improvement | trust the loop to compound | validation-gated: a procedure is PROVEN only after 3 all-verified wins; oscillation stops the lane; drafts refuse to run — matching what the 2026 fragility literature demands |
-| Learn by demonstration | recorded, then trusted | `runbook.py record`: recorded → **CANDIDATE**; a rehearsal replayed through the full authority stack is win #1; a demo you watched is a claim, a demo the graders re-ran is evidence |
-| Security | wrapper products exist *because* the frameworks need wrapping (see the published security analyses of the popular ones) | five mandatory authorities inside the platform — Execution, File, Credential, Model Gateway, Effect — `--audit` at 0 bypasses **in CI**, plus directive-shaped memory flagged at the source |
+| Self-improvement | trust the loop to compound | validation-gated: a procedure is PROVEN only after 3 wins in which its own steps verified **and the caller's independent acceptance test passed afterwards**; oscillation stops the lane; drafts refuse to run — matching what the 2026 fragility literature demands |
+| Learn by demonstration | recorded, then trusted | `runbook.py record`: recorded → **CANDIDATE**; a rehearsal replays the demo through the full authority stack, which proves the recording RUNS and earns no trust — a procedure grading its own replay is still the procedure grading itself; a demo you watched is a claim, a demo the *caller's* graders accepted is evidence |
+| Security | wrapper products exist *because* the frameworks need wrapping (see the published security analyses of the popular ones) | six mandatory authorities inside the platform — Execution, File, Credential, Model Gateway, Effect, Control Plane — `--audit` at 0 bypasses **in CI**, a worker that cannot change its own authority even through a shell, plus directive-shaped memory flagged at the source |
 | Competence claims | self-reported benchmarks | sealed capability packs the student can neither read nor edit; pretest → exam lift measured by harness-run validators; the author never sits its own exam |
 | Memory over years | vectors and summaries | file-backed cited atoms with expiry, supersession, and a **retraction feed** — plus the compaction-cliff law: safety rules are never summarized, ever |
 | Long context | a bigger window | **recursive sub-calls** (the RLM result, MIT 2025): the material never enters the window — slices go to disposable sub-calls on the cheapest rail, only distilled answers return, metered and contained like every call |
 | New tools | a fixed integration catalogue, or an agent that installs what it likes | **the capability frontier**: an agent may PROPOSE a tool it lacks, never author the test — it declares an import or a binary, the *platform* generates the probe, and the probe must FAIL before anything is installed. Readiness is decided by a seal outside the agent's reach, and a human adopts it from a terminal |
 | Knowing what a goal needs | a prompt asking the model to list its tools | two measured corpora, 50 goals across 40+ trades, pinned as tests. The broad set went **24% → 100%** honest coverage; the adversarial set found that **5 goals carrying irreversible physical or financial effects did not stop for the owner** — cutting power to a heater, changing a CNC feed rate, filing a claim in your name — because every authority rule was about a digital permission and none about a machine that moves. Now 0 |
-| Dependencies | large stacks | Python stdlib. Zero. 119 tests on 6 CI platforms |
+| Dependencies | large stacks | Python stdlib. Zero. 120 tests on 6 CI platforms |
 | Your state | often hosted, often theirs | files you own, provider-universal (any key, or a zero-key local model) — the model is a swappable part; the memory, graders, runbooks and ledgers are the asset |
 
 Four shipped archetypes cover the famous products' ground on this
@@ -215,13 +215,37 @@ by evidence, never assertion. Every action must name the criterion it serves.
 The contract is recompiled into every context window, so a compaction, a
 restart or a model swap cannot erase the goal.
 
-**3. Five authorities, not scattered checks.**
+**3. Six authorities, not scattered checks.**
 A forensic audit of this codebase found the same pattern everywhere: *a
 control defends the path its author was thinking about, and does not know
 about the other paths.* Six places executed shell; one was tested. The answer
 is one mandatory gateway per kind of power — Execution, File, Credential,
-Model Gateway, Effect — and `python execution.py --audit` fails the build if
-any module bypasses one. Today: **0 violations across 85 modules**, 16 declared platform-internal.
+Model Gateway, Effect, Control Plane — and `python execution.py --audit`
+fails the build if any module bypasses one. Today: **0 violations across 87
+modules**, 16 declared platform-internal.
+
+The sixth arrived the same way the pattern predicts. A later audit asked what
+the first five answered *between* them, and found nothing there: the File
+Authority correctly refuses the `write_file` **tool** on control state, and
+`policy.py` correctly screens a command **string** while saying in its own
+docstring that it cannot follow the program that string starts. So a role
+holding `run_command` rewrote `settings.toml` and `prompts/` by running a
+program — measured, on the shipped default, in the same transcript where the
+file tool was being refused. `controlplane.py` owns that invariant now:
+read-only binds on docker (prevented by the kernel), seal-and-revert on
+`host` (there is no boundary there to prevent with, and the module says so).
+`tests/test_controlplane.py` crosses every control path with every way a
+shell changes a file — **100 attacks, 0 durable changes**.
+
+Closing that one meant reading the neighbourhood, and the neighbourhood held
+a worse hole: the best-of-N engine restored an attempt's artifacts by
+`os.path.join`, and the artifact list came from the task's own steps — so a
+role with **no shell at all** could have the loop copy its own file over
+`prompts/constitution.md`, or write outside the expert root entirely. Both
+reproduced; both now cross the File Authority. Seven more paths that are read
+into a prompt or a decision turned out to be agent-writable and are control
+state now. The lesson the codebase keeps re-learning, in its own words: *a
+control that lives at a call site protects that call site and nothing else.*
 
 **4. Proof is derived, never claimed.**
 Six levels from SPEC to PRODUCTION PROVEN, computed from evidence bound to a
@@ -643,7 +667,7 @@ its own holes as carefully as its features.
 | [MANUAL.md](MANUAL.md) | the operator's guide: every command, every setting |
 | **[GOAL_SYSTEM_COMPLETE.md](GOAL_SYSTEM_COMPLETE.md)** | **the goal system end to end** — every module, loop, file format, the reasoning, and what is missing |
 | **[GOAL_SPECIALIST.md](GOAL_SPECIALIST.md)** | the goal contract: graders the worker cannot write, and the audit's 115-gap register with honest statuses |
-| [SECURITY.md](SECURITY.md) | trust boundaries, the five authorities, and the seven things deliberately NOT defended |
+| [SECURITY.md](SECURITY.md) | trust boundaries, the six authorities, and the seven things deliberately NOT defended |
 | **[CLOUDFLARE.md](CLOUDFLARE.md)** | can this run on Cloudflare? what fits, what cannot, and what it costs |
 | **[deploy/VPS.md](deploy/VPS.md)** | **hosting it 24/7 on a $5 VPS, reachable from anywhere** — systemd, secure access, off-site snapshots |
 | [deploy/README.md](deploy/README.md) | running it in a container: the R2 restore/snapshot lifecycle an ephemeral disk makes mandatory |

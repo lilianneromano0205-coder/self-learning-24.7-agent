@@ -30,14 +30,98 @@ bypasses one.
 | **The control panel's network edge** | `ui.py` HTTP | bearer token, CSRF (Origin + Sec-Fetch-Site), per-route permission table, gate catalogue instead of free-form shell from the network |
 | **Packages the agent wants** | `acquire.py` | pinned versions required, typosquat distance checks, sandboxed install, capability probe before trust, owner promotion |
 
-## The five authorities
+## The six authorities
 
-All power flows through five gateways; scattered checks are the defect this
+All power flows through six gateways; scattered checks are the defect this
 architecture exists to prevent. Execution (`execution.py`), File
 (`fileauth.py`), Credential (`credentials.py`), Model Gateway
-(`modelgateway.py`), Effect (`effects.py`). The invariant test enumerates
-every subprocess call site in the tree and fails on any that bypasses the
-Execution Authority.
+(`modelgateway.py`), Effect (`effects.py`), Control Plane
+(`controlplane.py`). The invariant tests enumerate every subprocess call site
+and every model-provider call site in the tree, and fail on any that bypasses
+its authority.
+
+### Why the sixth one exists
+
+An external audit asked the question the first five did not answer between
+them. `fileauth` refuses the `write_file` **tool** on control state;
+`policy.py` screens a command **string** and says in its own docstring that
+it cannot follow the program that string starts. So a role that legitimately
+holds `run_command` — practitioner, examiner, ripper and the default role,
+because `settings.toml` gives them no `tools` list — could do this:
+
+```
+write_file("settings.toml", ...)                        -> REFUSED
+run_command('python -c "open('settings.toml','w')..."')  -> exit 0, WROTE IT
+```
+
+Measured on the shipped default through a real practitioner task:
+`settings.toml`, `prompts/constitution.md` and `approvals/*.json` were all
+rewritten while the file tool was being refused in the same transcript.
+Switching to `sandbox = "docker"` did not fix it either — the container
+bind-mounted the whole expert root **read-write** at `/work`.
+
+`controlplane.py` brackets every model-authored execution and is honest about
+the difference between its two backends:
+
+* **docker (and the hosted backends)** — every control path is bound
+  read-only inside the container. The write is **prevented**, by the kernel.
+* **host, the default** — there is no filesystem boundary to prevent with, so
+  the control zone is sealed before the command and verified after: a change
+  is **reverted**, the command is reported failed whatever it exited with (so
+  no gate can pass on a run that edited the gate), and the attempt is
+  recorded in `logs/controlplane.jsonl`. That is detect-and-revert, and this
+  document does not call it prevention.
+
+`state.json` is the one declared exception: it is reported and **not**
+reverted, because a sibling loop writes it constantly and reverting would
+destroy that loop's committed work. The compensating control is in the loop
+itself — the next `commit_task` rewrites the running task from memory, so a
+task cannot mark itself done by editing the queue.
+
+Every owner-level CLI (`approvals.py grant`, `variants.py promote`,
+`training.py register|promote|rollback`, `skills.py promote`,
+`acquire.py promote`, `frontier.py adopt`) additionally refuses to run from
+inside an agent task. Two independent controls; neither relies on the other.
+
+`tests/test_controlplane.py` is the regression: it crosses every control path
+`fileauth` declares with every way a shell changes a file, drives them through
+a real loop task as a role that really holds `run_command`, and requires the
+bytes to be identical afterwards.
+
+### The second one, which needed no shell
+
+Fixing the first meant reading the neighbourhood, and the neighbourhood had a
+worse hole. `candidates.py` — the best-of-N engine — stashes each attempt's
+artifacts and restores the winner, and it reached the filesystem with
+`os.path.join` rather than through the File Authority. Two consequences, both
+reproduced, both reachable with `write_file` **alone**:
+
+* the artifact list comes from the task's own `write_file` STEPS, and a
+  *refused* write is still recorded as a step; `candidates/` classified as
+  ZONE_ROOT, so a worker could write
+  `candidates/<id>/<n>/score.json` claiming `artifacts:
+  ["prompts/constitution.md"]`, drop its own constitution beside it, and let
+  the loop's `_promote_best_attempt` copy it over the first block of every
+  system prompt;
+* naming `../../../../OUT.txt` as an artifact made `promote()` write outside
+  the expert root — the reproduction created a file in the user's home
+  directory.
+
+So the Rule-of-Two roles that are deliberately denied a shell had a write
+primitive anyway. Every path in that module now crosses `fileauth.resolve`
+with the agent's own rights, its stash destinations are contained against the
+stash directory, a refused artifact is *recorded* rather than dropped in
+silence, and `score.json` — which decides which attempt wins, gate-first — is
+control state.
+
+The same walk found seven more paths the agent could write that are read into
+a prompt or a decision: `commons-digest.md`, `missions/*/mission.json`,
+`mastery/*/events.jsonl`, `commons/quarantine.md`, `capabilities/`,
+`identity.history.jsonl` and the `identity.md.bak-*` rollback copies. All
+CONTROL now. `courses/*/sources.json` could not be zoned — the agent runs
+`ingest.py add-url` itself, and that records sources — so its **tier is
+derived rather than trusted**, recomputed from `classify()` on read, with
+genuine owner overrides moved to a control-zoned file beside it.
 
 ## The goal contract (anti-reward-hacking)
 

@@ -142,6 +142,14 @@ def main():
     p.add_argument("--note", default="")
     a = ap.parse_args()
     root = os.path.abspath(a.root)
+    if a.cmd in ("grant", "deny"):
+        # THE OWNER DECIDES. This is the human-in-the-loop mechanism the whole
+        # module exists to provide, and it had no gate at all: a shell-capable
+        # role could run `python approvals.py grant ap-...` on the approval its
+        # own blocked command had just created. The id is a sha256 of the
+        # command, so the agent can compute it without being told.
+        import controlplane
+        controlplane.owner_only(f"deciding approval {a.id!r}")
     if a.cmd == "list":
         for r in history(root):
             print(f"{r['id']}  {r['status']:<8} {r['server']}.{r['tool']}  "

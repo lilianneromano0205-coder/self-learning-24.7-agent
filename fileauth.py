@@ -43,13 +43,58 @@ import time
 CONTROL_FILES = {
     "settings.toml", "mcp.json", "state.json", "prospective.json",
     "routines.json", "org.json",
+    # identity.md is a SYSTEM PROMPT SOURCE — loop.system_sources() puts it
+    # in every window, right after the constitution — and the panel writes it
+    # for the OWNER, with a backup and an identity.history.jsonl line stamped
+    # `"by": "owner"`. It was nonetheless ZONE_ROOT, which this module treats
+    # as workspace, so `write_file("identity.md", ...)` succeeded: an agent
+    # could rewrite its own charter with the ordinary file tool, no shell
+    # required — so even the Rule-of-Two roles that hold no run_command could
+    # do it. Found by walking the zone model against what is actually read
+    # into a prompt, rather than by reading the zone list.
+    "identity.md",
+    # the acquisition ledger. acquire.promote's own docstring is "the OWNER
+    # grants trust. Never the agent, never the outcome" — and the file that
+    # records that grant sat in the agent's writable zone.
+    "acquisitions.json",
+    # commons.write_digest materialises the FLEET'S shared lessons here and
+    # context.compile loads it into every window as the commons block — the
+    # one the compiler introduces as what the fleet learned. A worker that can
+    # write it authors owner- and fleet-attributed instructions to itself.
+    "commons-digest.md",
+    # who changed the charter and when. The panel appends a row stamped
+    # `"by": "owner"` on every identity edit; a worker that can write the file
+    # can fabricate an owner edit that never happened, or erase the real ones.
+    "identity.history.jsonl",
 }
 # `frontier` holds the sealed probe SPECS and the capability ledger. If the
 # worker could write there through the ordinary write_file tool it could edit
 # the test that says its own new tool works, which is the one thing the
 # frontier exists to prevent.
 CONTROL_DIRS = {"prompts", "approvals", "variants", "effects", "org",
-                "frontier"}
+                "frontier",
+                # training/registry.json decides which checkpoint this fleet
+                # considers promoted, and training/runs/*/manifest.json pins
+                # the verifier hash that a candidate is measured against. Both
+                # were ZONE_ROOT: an agent could register itself a candidate
+                # and promote it by writing the file, with no CLI involved.
+                "training",
+                # THE ISOLATED INSTALL. acquire.py's capability probe replaces
+                # sys.path with capabilities/<name> and imports from there,
+                # then checks the module resolved to a real file inside that
+                # directory — guards that a package the AGENT wrote passes as
+                # easily as one pip installed. The probe was already moved out
+                # of this directory for a related namespace-package false pass
+                # (acquire.py's own comment records the measurement); the
+                # install target itself stayed writable.
+                "capabilities",
+                # premise.quarantined reads root/commons/quarantine.md into
+                # the PREMISE block as "the fleet withdrew this claim". The
+                # fleet's real copy lives at HOME level (commons.py writes
+                # there); nothing in the platform writes the per-root one, so
+                # it existed only as an agent-forgeable alias for a
+                # fleet-attributed warning the next window is told to obey.
+                "commons"}
 # Root-relative paths that are CONTROL wherever they sit, because the
 # DIRECTORY around them is legitimately the agent's own workspace.
 #
@@ -89,6 +134,33 @@ CONTROL_NAMES_IN = {
     # author who could edit the ledger could promote their own procedure to
     # "proven" without the three verified wins that word means.
     "runbooks": {"trust.json"},
+    # The stashed ARTIFACTS of a best-of-N attempt are the agent's own work
+    # and stay writable. score.json is not: it records which attempt passed
+    # its gate and what it scored, and `candidates.rank` is gate-first — so
+    # an author who could write `"passed": true` could have the loop restore
+    # the attempt the gate had just refused. (What closed the ESCAPE was
+    # routing candidates.promote's destinations through this module; this
+    # closes the grading beside it.)
+    "candidates": {"score.json"},
+    # The mission contract is the objective held OUTSIDE the transcript —
+    # mission.py writes it as the harness and context.compile recompiles it
+    # into every window "so the objective cannot drift out". A worker that
+    # can rewrite it replaces the objective it was given with one it can
+    # satisfy. goals/<id>/contract.json was already control for exactly this
+    # reason; its older sibling was not.
+    "missions": {"mission.json"},
+    # mastery/<pack>/events.jsonl is what mastery.verdict computes MASTERED
+    # from, and _event appends to it under the platform lock, calling it "the
+    # evidence" in as many words. The sealed-pack architecture holds — the
+    # transfer tasks and validators really are unreachable — but the ledger
+    # the verdict is read from was not.
+    "mastery": {"events.jsonl"},
+    # courses/ is the agent's own workspace and stays writable; the SOURCE
+    # AUTHORITY inside it is not. source-overrides.json is where an owner's
+    # re-rating lives (sources.set_tier writes it), because a tier recorded
+    # in the workspace ledger is now re-derived rather than trusted — see
+    # sources.tier_of.
+    "courses": {"source-overrides.json"},
 }
 RUNTIME_DIRS = {"logs", "contexts", "checkpoints", "events", "archive"}
 # the agent's own workspace: everything it is FOR
@@ -123,6 +195,11 @@ def zone_of(rel):
     if r.lower() in CONTROL_PATHS:
         return ZONE_CONTROL
     if head in CONTROL_DIRS or name in CONTROL_FILES:
+        return ZONE_CONTROL
+    # the panel keeps the last ten copies of a charter it replaced. They are
+    # what a rollback restores FROM, so they are the charter, under another
+    # name — and a name is all that kept them out of this zone.
+    if name.startswith("identity.md.bak-"):
         return ZONE_CONTROL
     if name in CONTROL_NAMES_IN.get(head, ()):
         return ZONE_CONTROL

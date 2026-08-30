@@ -13,12 +13,17 @@ import json
 import os
 import sys
 
-from common import AGENT_DIR, make_sandbox, read_state, run_drain
+from common import (AGENT_DIR, agent_setting, make_sandbox, read_state,
+                    run_drain)
 
 sys.path.insert(0, AGENT_DIR)
 import loop
 
 REEXAM = [{"tool": "finish_task", "args": {"summary": "re-exam done"}}]
+# an Examiner that cannot finish: every step is a path the File Authority
+# refuses, and there are more of them than the step ceiling below, so the task
+# never reaches the mock's script-exhausted finish_task and ends `failed`
+BAD_EXAMINER = [{"tool": "read_file", "args": {"path": "../escape.txt"}}] * 8
 
 
 def write(sb, rel, content):
@@ -76,7 +81,66 @@ def main():
     assert len([t for t in read_state(sb)["tasks"] if t["role"] == "examiner"]) == 1, \
         "a done schedule entry must never re-queue"
     print("[re-exam] scheduled on completion, queued once, ran, never re-queued")
+
+    check_a_failed_reexam_is_not_recorded_as_taken()
     print("PASS test_course")
+
+
+def check_a_failed_reexam_is_not_recorded_as_taken():
+    """`done` must mean the re-examination HAPPENED, not that one was ordered.
+
+    The flag used to be set on the same line that created the task, so
+    scheduled -> queued -> permanently done was reached whether the
+    examination succeeded, failed, or never ran at all. The test above cannot
+    see that: its mock always finishes, so schedule.json comes out identical
+    in the success case and in the total-failure case — an assertion that
+    cannot discriminate.
+
+    Here the Examiner's provider is scripted so every attempt fails. The entry
+    must stay open and re-queue, and after REEXAM_MAX_ATTEMPTS it must close
+    as outcome='failed' — recorded as UNEXAMINED, which is a different and
+    more honest thing than recorded as passed.
+    """
+    sb = make_sandbox("course_reexam_fail",
+                      providers={"m": {"script": "s.json"},
+                                 "bad": {"script": "bad.json"}},
+                      roles={"tester": "m", "examiner": "bad"},
+                      scripts={"s.json": REEXAM, "bad.json": BAD_EXAMINER})
+    # a short ceiling so the failing Examiner reaches `failed` quickly, and no
+    # harness retries so every Examiner task in state.json is one re-exam
+    # ATTEMPT rather than a retry of one
+    agent_setting(sb, "max_steps = 2")
+    agent_setting(sb, "max_task_retries = 0")
+    a = loop.Agent(sb)
+    c = "courses/mycourse"
+    write(sb, f"{c}/spec.md", "R-001: only item\n")
+    write(sb, f"{c}/exam-results.md", "R-001: PASS - evidence\nSCORE: 95\n")
+    write(sb, f"{c}/gaps.md", "")
+    assert a.course_status("mycourse")["complete"]
+
+    sched_path = os.path.join(sb, c, "exam", "schedule.json")
+    trail = []
+    for _round in range(loop.REEXAM_MAX_ATTEMPTS + 2):
+        run_drain(sb)
+        with open(sched_path, "r", encoding="utf-8") as f:
+            entry = json.load(f)["entries"][0]
+        trail.append((entry["done"], entry.get("attempts"),
+                      entry.get("outcome")))
+        if entry["done"]:
+            break
+
+    exams = [t for t in read_state(sb)["tasks"] if t["role"] == "examiner"]
+    assert exams and all(t["status"] == "failed" for t in exams), \
+        [t["status"] for t in exams]
+    assert len(exams) == loop.REEXAM_MAX_ATTEMPTS, (
+        f"a failed re-exam must be RETRIED, not filed as taken: "
+        f"{len(exams)} attempt(s) for {loop.REEXAM_MAX_ATTEMPTS} allowed "
+        f"- trail {trail}")
+    assert entry["done"] and entry.get("outcome") == "failed", entry
+    assert entry.get("attempts") == loop.REEXAM_MAX_ATTEMPTS, entry
+    print(f"[re-exam failure] {loop.REEXAM_MAX_ATTEMPTS} failed attempts were "
+          f"re-queued, never counted as taken, and the entry closed as "
+          f"outcome='failed' rather than silently done")
 
 
 if __name__ == "__main__":

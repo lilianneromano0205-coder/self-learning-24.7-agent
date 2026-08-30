@@ -55,6 +55,7 @@ is the model's job or the owner's, never improvised in parallel.
 import argparse
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -150,16 +151,34 @@ def _worker(root, gid, assignment, allow_candidates, results, idx):
     import locks
     import runbook
     g = assignment["group"]
+    # THE LEASE IS ON THE RUNBOOK, NOT ONLY THE GROUP. RULE 4 exists so one
+    # procedure never runs twice at once — its `do` steps are real commands
+    # with real side effects (publish, deploy, send). Keying the lease on the
+    # GROUP left that open whenever two groups were served by the same
+    # procedure, which the fan-out gate permits: it requires two DISTINCT
+    # runbooks across the plan, not per pair. Both names are held, so a
+    # group runs once and a procedure runs once.
+    rb_name = assignment["runbook"]
     lease = os.path.join(root, "goals", str(gid), f"swarm-{g}")
+    rb_lease = os.path.join(root, "goals", str(gid),
+                            f"swarm-rb-{re.sub(r'[^a-z0-9_-]', '_', str(rb_name).lower())}")
     try:
-        with locks.holding(lease, timeout=0.5, stale=WORKER_STALE):
+        with locks.holding(lease, timeout=0.5, stale=WORKER_STALE), \
+                locks.holding(rb_lease, timeout=0.5, stale=WORKER_STALE):
+            # RULE 3 APPLIES TO THE TRUST LEDGER TOO. A worker cannot record
+            # its own win: it only knows that its steps verified, and this
+            # module's own docstring says a worker's opinion of its own work
+            # counts for nothing. The outcome is filed by the reducer, after
+            # the graders have spoken — see run() below.
             rr = runbook.run(root, assignment["runbook"],
-                             allow_candidate=allow_candidates)
+                             allow_candidate=allow_candidates,
+                             record_outcome=False)
             contract.event(root, gid, "swarm_worker", group=g,
                            runbook=assignment["runbook"],
                            ok=bool(rr["ok"]), why=rr["why"][:150])
             results[idx] = {"group": g, "runbook": assignment["runbook"],
-                            "ok": bool(rr["ok"]), "why": rr["why"]}
+                            "ok": bool(rr["ok"]), "ran": True,
+                            "why": rr["why"]}
     except TimeoutError:
         contract.event(root, gid, "swarm_worker", group=g,
                        runbook=assignment["runbook"], ok=False,
@@ -167,8 +186,8 @@ def _worker(root, gid, assignment, allow_candidates, results, idx):
                            "this group")
         results[idx] = {"group": g, "runbook": assignment["runbook"],
                         "ok": False,
-                        "why": "lease held by another worker; not run "
-                               "twice (RULE 4)"}
+                        "why": "lease held by another worker (group or "
+                               "procedure); not run twice (RULE 4)"}
     except Exception as e:
         # A WORKER THAT DIES MUST STILL REPORT. The first version caught
         # only the lease timeout; any other exception killed the thread
@@ -229,6 +248,20 @@ def run(root, gid, allow_candidates=False):
     # run every acceptance test centrally and alone decide the state.
     st = runbook.settle(root, gid)
     verified = bool(st["verified"])
+
+    # ...and the reducer files the trust outcomes, for the same reason. Each
+    # runbook that actually RAN is recorded once: a win when its own steps
+    # verified, and an ACCEPTED win only when the graders then passed. A
+    # worker that never ran (lease held elsewhere, or it vanished) records
+    # nothing — a procedure is not penalised for a scheduling outcome.
+    for r in rounds:
+        if not r.get("ran"):
+            continue
+        runbook.record(
+            root, r["runbook"], bool(r["ok"]), accepted=verified,
+            why=(r.get("why") or "")[:150] or
+                ("graders passed after this group" if verified else
+                 "steps verified; the graders still refuse the contract"))
     if not verified:
         failed = st["vr"].get("failed") or []
         blocked = (f"workers finished ({sum(1 for r in rounds if r['ok'])}"

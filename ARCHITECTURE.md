@@ -29,7 +29,7 @@ reports.
 2. [The central thesis](#2-the-central-thesis)
 3. [The eleven concepts](#3-the-eleven-concepts)
 4. [Architecture: how a task actually runs](#4-architecture-how-a-task-actually-runs)
-5. [The five authorities](#5-the-five-authorities)
+5. [The six authorities](#5-the-six-authorities)
 6. [The memory institution](#6-the-memory-institution)
 7. [Learning: from material to measured competence](#7-learning-from-material-to-measured-competence)
 8. [The proof system](#8-the-proof-system)
@@ -388,7 +388,7 @@ no role that handles untrusted material holds `run_command`.
 
 ---
 
-## 5. The five authorities
+## 5. The six authorities
 
 ### Execution Authority
 
@@ -431,6 +431,38 @@ capabilities is out of reach.
 
 Containment is tested against **twelve escape spellings** — posix, Windows,
 UNC, mixed separators, nested traversal, absolute paths, drive letters.
+
+The "agent may write?" column above is about the agent's FILE TOOLS. It was
+read as a claim about the platform, and it was not one: a role holding
+`run_command` reached the same files by running a program. That gap is the
+Control Plane Authority's, below.
+
+### Control Plane Authority
+
+The invariant "a worker cannot change what it is allowed to do" spans two
+gateways, and belonged to neither. The File Authority is right about the
+tool; `policy.py` is right about the string and says in its own docstring
+that it cannot follow the program that string starts. Between them,
+`run_command` wrote `settings.toml`, `prompts/` and `approvals/` on the
+shipped default — measured through a real practitioner task — and switching
+to docker did not help, because the container bind-mounted the whole expert
+root read-write.
+
+`controlplane.py` brackets every **model-authored** execution
+(`model_command`, `gate`, `capability_probe` — a done-check is written by the
+model as surely as a command is):
+
+| Backend | What happens to a control-plane write |
+|---|---|
+| `docker` / hosted | **prevented** — each control path is bound read-only inside the container; the boundary is the kernel's |
+| `host` (default) | **reverted** — the zone is sealed before and verified after; the command is reported `exit=3` whatever it returned, and the attempt is logged |
+
+The sealed set is DERIVED from `fileauth`'s zone model rather than listed a
+second time, so a control directory added there is sealed the same day;
+`tests/test_invariants.py` asserts the derivation. `state.json` is the one
+declared exception — reported, never reverted, because a sibling loop writes
+it and reverting would destroy that loop's work; the loop's own
+`commit_task` is what stops a task marking itself done.
 
 ### Credential Authority
 

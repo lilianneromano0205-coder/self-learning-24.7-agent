@@ -33,6 +33,7 @@ on a thing should never walk into it a second time.
 import json
 import os
 import re
+import threading
 import time
 
 STOP = {"the", "a", "an", "and", "or", "of", "to", "in", "for", "with", "on",
@@ -259,8 +260,14 @@ def _read(path):
 
 
 def _write(path, text):
+    """UNIQUE temp. The shared `path + ".tmp"` is the one every other ledger
+    in this platform stopped using: two writers share the scratch name, one
+    os.replace lands first and the second raises FileNotFoundError — which
+    the loop logs as `gotcha_failed` and the warning is simply never filed.
+    Compare prospective.py, checkpoint.py and skills.py, which all key the
+    temp on the process."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
+    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         f.write(text)
     for attempt in range(8):
@@ -270,6 +277,21 @@ def _write(path, text):
         except PermissionError:
             time.sleep(0.05 * (attempt + 1))
     os.replace(tmp, path)
+
+
+# THE READ-MODIFY-WRITE IS A CRITICAL SECTION, like every other ledger here.
+# gotchas.py was the one that had neither a lock nor a unique temp: two loops
+# filing a warning at the same moment could each read the file, each append
+# their own line, and the later write would drop the earlier warning
+# outright. locks.py's own docstring names this as the platform's standing
+# race; this module was simply missed.
+
+def _hold(path):
+    # the directory has to exist before the LOCKFILE can: _write makes it,
+    # and _write now runs inside this lock rather than before it
+    import locks
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    return locks.holding(path, timeout=10.0, stale=8.0)
 
 
 def from_failure(root, task, rec):
@@ -291,42 +313,58 @@ def from_failure(root, task, rec):
     written = []
     for rel in _scopes(root, task, rec):
         path = os.path.join(root, rel)
-        body = _read(path) or HEADER
-        # dedupe on (scope, when): a repeat is a COUNT, not a new line
-        hit = None
-        for line in body.splitlines():
-            m = ENTRY_RE.match(line)
-            if m and m.group("when").strip() == when:
-                hit = line
-                break
-        if hit:
-            n = 2
-            mt = re.search(r"x(\d+) hit again", hit)
-            if mt:
-                n = int(mt.group(1)) + 1
-            new = re.sub(r"\s*\| x\d+ hit again [\d-]+$", "", hit)
-            # A RESURRECTION is the most important thing this file can record.
-            # The warning was withdrawn because a later task ran the same
-            # thing successfully — and here it is failing again. That means
-            # the environment is FLAPPING, not fixed, and an intermittent
-            # failure is worth more attention than a steady one because it is
-            # the kind that passes review and breaks in production. So the
-            # retirement is lifted (the gotcha binds again) and the fact that
-            # it came back from retirement is kept in the line forever.
-            was = _RETIRED_RE.search(new)
-            if was:
-                new = _RETIRED_RE.sub("", new).rstrip()
-                new += (f" | UNRETIRED {time.strftime('%Y-%m-%d')} "
-                        f"(disproved {was.group('rdate')} by task "
-                        f"{was.group('rsrc')}, then failed again)")
-            new += f" | x{n} hit again {time.strftime('%Y-%m-%d')}"
-            body = body.replace(hit, new)
-        else:
-            if not body.endswith("\n"):
-                body += "\n"
-            body += entry_line(rec, trigger, when, do, src, probe)
-        _write(path, body)
-        written.append(rel.replace(os.sep, "/"))
+        with _hold(path):
+            written += _file_failure(path, rel, rec, trigger, when, do, src,
+                                     probe)
+    return written
+
+
+def _file_failure(path, rel, rec, trigger, when, do, src, probe):
+    """One gotcha file's read-modify-write, held by the caller's lock.
+
+    Split out of from_failure so the whole cycle — read, dedupe, rewrite —
+    happens inside one critical section. It used to be an unlocked
+    read-modify-write per file, so two loops filing a warning at the same
+    moment each read the old body and the later write dropped the earlier
+    warning outright.
+    """
+    written = []
+    body = _read(path) or HEADER
+    # dedupe on (scope, when): a repeat is a COUNT, not a new line
+    hit = None
+    for line in body.splitlines():
+        m = ENTRY_RE.match(line)
+        if m and m.group("when").strip() == when:
+            hit = line
+            break
+    if hit:
+        n = 2
+        mt = re.search(r"x(\d+) hit again", hit)
+        if mt:
+            n = int(mt.group(1)) + 1
+        new = re.sub(r"\s*\| x\d+ hit again [\d-]+$", "", hit)
+        # A RESURRECTION is the most important thing this file can record.
+        # The warning was withdrawn because a later task ran the same
+        # thing successfully — and here it is failing again. That means
+        # the environment is FLAPPING, not fixed, and an intermittent
+        # failure is worth more attention than a steady one because it is
+        # the kind that passes review and breaks in production. So the
+        # retirement is lifted (the gotcha binds again) and the fact that
+        # it came back from retirement is kept in the line forever.
+        was = _RETIRED_RE.search(new)
+        if was:
+            new = _RETIRED_RE.sub("", new).rstrip()
+            new += (f" | UNRETIRED {time.strftime('%Y-%m-%d')} "
+                    f"(disproved {was.group('rdate')} by task "
+                    f"{was.group('rsrc')}, then failed again)")
+        new += f" | x{n} hit again {time.strftime('%Y-%m-%d')}"
+        body = body.replace(hit, new)
+    else:
+        if not body.endswith("\n"):
+            body += "\n"
+        body += entry_line(rec, trigger, when, do, src, probe)
+    _write(path, body)
+    written.append(rel.replace(os.sep, "/"))
     return written
 
 
@@ -407,29 +445,37 @@ def retire(root, probes, task_id, course=None):
     stamp = time.strftime("%Y-%m-%d")
     for rel in _gotcha_files(root, course):
         path = os.path.join(root, rel)
-        body = _read(path)
-        if not body:
+        with _hold(path):
+            out += _retire_file(path, rel, probes, task_id, stamp)
+    return out
+
+
+def _retire_file(path, rel, probes, task_id, stamp):
+    """One gotcha file's retirement pass, held by the caller's lock."""
+    out = []
+    body = _read(path)
+    if not body:
+        return out
+    changed = False
+    lines = body.splitlines(True)
+    for i, line in enumerate(lines):
+        m = ENTRY_RE.match(line.rstrip("\n"))
+        if not m:
             continue
-        changed = False
-        lines = body.splitlines(True)
-        for i, line in enumerate(lines):
-            m = ENTRY_RE.match(line.rstrip("\n"))
-            if not m:
-                continue
-            pm = _PROBE_RE.search(line)
-            if not pm or pm.group("probe") not in probes:
-                continue
-            if _RETIRED_RE.search(line):
-                continue                        # already withdrawn
-            lines[i] = (line.rstrip("\n") +
-                        f" | RETIRED {stamp} by task {task_id}\n")
-            changed = True
-            out.append({"scope": rel.replace(os.sep, "/"),
-                        "when": m.group("when").strip(),
-                        "probe": pm.group("probe"),
-                        "by": task_id})
-        if changed:
-            _write(path, "".join(lines))
+        pm = _PROBE_RE.search(line)
+        if not pm or pm.group("probe") not in probes:
+            continue
+        if _RETIRED_RE.search(line):
+            continue                        # already withdrawn
+        lines[i] = (line.rstrip("\n") +
+                    f" | RETIRED {stamp} by task {task_id}\n")
+        changed = True
+        out.append({"scope": rel.replace(os.sep, "/"),
+                    "when": m.group("when").strip(),
+                    "probe": pm.group("probe"),
+                    "by": task_id})
+    if changed:
+        _write(path, "".join(lines))
     return out
 
 

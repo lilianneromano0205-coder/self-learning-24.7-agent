@@ -12,10 +12,11 @@ So this module is a genome-lite with a promotion gate:
 
   spawn     a VARIANT of one or more role prompts (the agent's charter),
             stored under variants/<id>/ — the live prompts are untouched.
-  trial     the SAME battery of gated tasks runs twice on this expert —
-            once with the base charter, once with the variant (selected by
-            an environment variable, so nothing on disk changes) — and both
-            arms are scored by the same mechanical done-checks.
+  trial     the SAME battery of gated tasks runs twice — once with the base
+            charter, once with the variant (selected by an environment
+            variable, so nothing on disk changes) — and both arms are scored
+            by the same mechanical done-checks. EACH ARM RUNS IN ITS OWN
+            CLONE of the expert; see `trial` for why that is not a detail.
   promote   REFUSED unless the variant strictly beat the base on gated
             passes over at least two tasks. Promotion backs up the replaced
             prompts first; the record keeps both scores.
@@ -129,6 +130,18 @@ def spawn(root, vid, role, prompt_text, note="", prediction=None):
     return e
 
 
+def _owner_only(cmd, vid):
+    """Installing or reverting a CHARTER is an owner action: it rewrites
+    prompts/, which is what every future agent of that role is told it is.
+
+    The seal around every model-authored command (controlplane.py) would
+    revert such a write anyway — this refuses FIRST, with a sentence, rather
+    than letting the work happen and then undoing it. Two independent
+    controls; neither relies on the other."""
+    import controlplane
+    controlplane.owner_only(f"{cmd} of charter variant {vid!r}")
+
+
 def _drain(root, env_extra, timeout):
     env = {**os.environ, "PYTHONUTF8": "1", **env_extra}
     env.pop(ENV_VAR, None) if not env_extra else None
@@ -139,11 +152,55 @@ def _drain(root, env_extra, timeout):
     return r.returncode
 
 
-def trial(root, vid, battery, timeout=600):
+def _clone_root(root, dest, arm):
+    """A pristine copy of the expert for ONE arm to work in.
+
+    Excluded, and why each is safe to leave behind: backups/ (large, and an
+    arm never reads it), logs/ and contexts/ (the harness's own record of a
+    DIFFERENT run — copying them would make the arm's own heartbeat check see
+    a stale pulse), and __pycache__.
+    """
+    skip = {"backups", "logs", "contexts", "__pycache__", ".git"}
+    shutil.copytree(root, dest,
+                    ignore=lambda d, names: [n for n in names if n in skip],
+                    dirs_exist_ok=True)
+    os.makedirs(os.path.join(dest, "logs"), exist_ok=True)
+    os.makedirs(os.path.join(dest, "contexts"), exist_ok=True)
+    # a state.json carried over would let the arm adopt the other arm's tasks
+    for leftover in ("state.json",):
+        p = os.path.join(dest, leftover)
+        if os.path.exists(p):
+            os.remove(p)
+    return dest
+
+
+def trial(root, vid, battery, timeout=600, isolate=True):
     """Run the battery under BOTH charters and score with the same gates.
     battery: list of {role, goal, done_check, course?}. The variant arm is
     selected purely by an environment variable in the child process — the
-    live prompts on disk never change during a trial."""
+    live prompts on disk never change during a trial.
+
+    EACH ARM GETS ITS OWN CLONE OF THE EXPERT, and this is the difference
+    between an experiment and an anecdote.
+
+    Both arms used to run sequentially against the SAME root, base first,
+    every time. So the base arm's work was still there when the variant
+    started: its out/ files, its courses/, its skills and gotchas, its
+    finished tasks, its memory. A battery whose done_check is `test -f
+    out/report.md` — the ordinary shape — is satisfied for the variant by the
+    file the BASE wrote, and "the variant beat the base" measures the order
+    the arms ran in. The arm order was fixed, so the confound was systematic
+    rather than noisy, which is the worse kind: it points the same way every
+    time and looks like a result.
+
+    With independent clones the order stops mattering, which is why this is
+    isolation rather than counterbalancing — counterbalancing would only
+    average the contamination out.
+
+    `isolate=False` restores the old shared-root behaviour for a caller that
+    has its own isolation. Nothing in the platform passes it; it exists so the
+    honest default cannot be mistaken for the only option.
+    """
     if len(battery) < MIN_TASKS:
         raise SystemExit(f"a trial needs >= {MIN_TASKS} tasks — one task "
                          f"proves nothing (that is the fragility lesson)")
@@ -165,24 +222,33 @@ def trial(root, vid, battery, timeout=600):
     except (OSError, ValueError):
         pass
     results = {}
-    for arm, env_extra in (("base", {}), ("variant", {ENV_VAR: vid})):
-        agent = loop.Agent(root)
-        ids = []
-        for item in battery:
-            ids.append(agent.add_task(
-                item.get("role", "practitioner"), item["goal"],
-                course=item.get("course"),
-                done_check=item.get("done_check")))
-        _drain(root, env_extra, timeout)
-        agent = loop.Agent(root)
-        passes = rejects = 0
-        for tid in ids:
-            t = agent.find_task(tid) or {}
-            if t.get("status") == "done":
-                passes += 1
-            rejects += t.get("done_rejects", 0)
-        results[arm] = {"tasks": len(ids), "passes": passes,
-                        "gate_rejects": rejects, "task_ids": ids}
+    import tempfile
+    arena = tempfile.mkdtemp(prefix=f"trial-{vid}-") if isolate else None
+    try:
+        for arm, env_extra in (("base", {}), ("variant", {ENV_VAR: vid})):
+            arm_root = (_clone_root(root, os.path.join(arena, arm), arm)
+                        if isolate else root)
+            agent = loop.Agent(arm_root)
+            ids = []
+            for item in battery:
+                ids.append(agent.add_task(
+                    item.get("role", "practitioner"), item["goal"],
+                    course=item.get("course"),
+                    done_check=item.get("done_check")))
+            _drain(arm_root, env_extra, timeout)
+            agent = loop.Agent(arm_root)
+            passes = rejects = 0
+            for tid in ids:
+                t = agent.find_task(tid) or {}
+                if t.get("status") == "done":
+                    passes += 1
+                rejects += t.get("done_rejects", 0)
+            results[arm] = {"tasks": len(ids), "passes": passes,
+                            "gate_rejects": rejects, "task_ids": ids,
+                            "root": arm_root if isolate else root}
+    finally:
+        if arena:
+            shutil.rmtree(arena, ignore_errors=True)
     observed = {"passes": results["variant"]["passes"] - results["base"]["passes"],
                 "gate_rejects": (results["variant"]["gate_rejects"]
                                  - results["base"]["gate_rejects"])}
@@ -310,9 +376,11 @@ def main():
         r = trial(root, a.id, battery, a.timeout)
         print(json.dumps(r, indent=2))
     elif a.cmd == "promote":
-        e = promote(root, a.id)
+        _owner_only(a.cmd, a.id)
+        promote(root, a.id)
         print(f"PROMOTED {a.id} — base prompts backed up; rollback available")
     elif a.cmd == "rollback":
+        _owner_only(a.cmd, a.id)
         rollback(root, a.id)
         print(f"rolled back {a.id}")
     elif a.cmd == "list":

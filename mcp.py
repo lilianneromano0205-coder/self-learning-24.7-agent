@@ -356,6 +356,14 @@ def _bad_url_argument(arguments, root=None, _depth=0):
     return ""
 
 
+def _nullcontext():
+    """The no-key path (a server with no lineage) claims nothing, so it holds
+    nothing — expressed as an empty context rather than by duplicating the
+    body under an `if`."""
+    from contextlib import nullcontext
+    return nullcontext()
+
+
 def guarded_call(s, tool, arguments, root=None, fresh=False):
     """tools/call through the owner's policy AND the effects ledger:
     denied tools never reach the server; identical calls inside one task
@@ -387,50 +395,66 @@ def guarded_call(s, tool, arguments, root=None, fresh=False):
     lineage = os.environ.get("AGENT_TASK_LINEAGE") or "manual"
     task_id = os.environ.get("AGENT_TASK_ID", "-")
     import effects
+    import locks
     key = effects.key_of(lineage, s.name, tool, arguments)
-    if not fresh:
-        prior = effects.lookup(root, key)
-        if prior:
-            return prior["result"], "replayed"
-    # the human in the loop, as a mechanism: risky calls pause for the
-    # owner and resume exactly once after approval
-    spec = getattr(s, "spec", {}) or {}
-    risk = classify(spec, s.tool_def(tool))
-    if needs_approval(spec, risk, tool):
-        import approvals
-        st = approvals.status_of(root, key)
-        if st == "denied":
-            return {"isError": True, "content": [{"type": "text", "text":
-                    f"DENIED by the owner: {s.name}.{tool} with these "
-                    f"arguments will not run. Do not retry; choose another "
-                    f"route or finish with what you have."}]}, "denied"
-        if st != "granted":
-            rec = approvals.request(root, key, s.name, tool, arguments,
-                                    reason=f"{risk} tool", task_id=task_id,
-                                    lineage=lineage)
-            return {"isError": True, "content": [{"type": "text", "text":
-                    f"APPROVAL REQUIRED ({rec['id']}): {s.name}.{tool} is a "
-                    f"{risk} action and the owner must approve it first. Do "
-                    f"NOT retry it. Call ask_human now with exactly: "
-                    f"\"Approve {rec['id']}: {s.name}.{tool} "
-                    f"{json.dumps(arguments)[:200]} ?\" — the owner decides "
-                    f"in the panel; when this task is answered and retried, "
-                    f"the call runs once."}]}, "approval_required"
-    if key:
-        # an effect that was STARTED and never resolved: the previous process
-        # died between hitting the world and recording it, so we cannot know
-        # whether it landed. Repeating it is exactly the duplicate this ledger
-        # exists to prevent, so the owner decides instead of the harness.
-        pending = effects.unfinished(root, key)
-        if pending:
-            return {"isError": True, "content": [{"type": "text", "text":
-                    f"UNRESOLVED EFFECT: a previous run started "
-                    f"{s.name}.{tool} with these exact arguments and did not "
-                    f"record the outcome — it may already have happened. This "
-                    f"will NOT be repeated automatically. Call ask_human with "
-                    f"what you need confirmed, or the owner clears it in the "
-                    f"effects ledger."}]}, "unresolved"
-        effects.begin(root, key, task_id, s.name, tool, arguments)
+    # ONE CRITICAL SECTION FOR THE WHOLE CLAIM. "has this already happened",
+    # "did a previous run start it and die", and "I am starting it now" were
+    # three separate steps with nothing between them, so two processes
+    # retrying the same task could both read an empty ledger and both hit the
+    # world — the duplicated external effect this ledger exists to prevent,
+    # and the one failure here that cannot be undone by reading a log
+    # afterwards. The lock is per EFFECT, not per ledger, so a slow network
+    # call never serialises unrelated effects behind it; and it is released
+    # before s.call() runs, because a sibling arriving mid-call must see the
+    # `started` row and stop, not queue behind it.
+    _claim = locks.holding(effects.claim_path(root, key), timeout=30.0,
+                           stale=20.0) if key else _nullcontext()
+    with _claim:
+        if not fresh:
+            prior = effects.lookup(root, key)
+            if prior:
+                return prior["result"], "replayed"
+        # the human in the loop, as a mechanism: risky calls pause for the
+        # owner and resume exactly once after approval
+        spec = getattr(s, "spec", {}) or {}
+        risk = classify(spec, s.tool_def(tool))
+        if needs_approval(spec, risk, tool):
+            import approvals
+            st = approvals.status_of(root, key)
+            if st == "denied":
+                return {"isError": True, "content": [{"type": "text", "text":
+                        f"DENIED by the owner: {s.name}.{tool} with these "
+                        f"arguments will not run. Do not retry; choose another "
+                        f"route or finish with what you have."}]}, "denied"
+            if st != "granted":
+                rec = approvals.request(root, key, s.name, tool, arguments,
+                                        reason=f"{risk} tool", task_id=task_id,
+                                        lineage=lineage)
+                return {"isError": True, "content": [{"type": "text", "text":
+                        f"APPROVAL REQUIRED ({rec['id']}): {s.name}.{tool} is a "
+                        f"{risk} action and the owner must approve it first. Do "
+                        f"NOT retry it. Call ask_human now with exactly: "
+                        f"\"Approve {rec['id']}: {s.name}.{tool} "
+                        f"{json.dumps(arguments)[:200]} ?\" — the owner decides "
+                        f"in the panel; when this task is answered and retried, "
+                        f"the call runs once."}]}, "approval_required"
+        if key:
+            # an effect that was STARTED and never resolved: the previous
+            # process died between hitting the world and recording it, so we
+            # cannot know whether it landed. Repeating it is exactly the
+            # duplicate this ledger exists to prevent, so the owner decides
+            # instead of the harness.
+            pending = effects.unfinished(root, key)
+            if pending:
+                return {"isError": True, "content": [{"type": "text", "text":
+                        f"UNRESOLVED EFFECT: a previous run started "
+                        f"{s.name}.{tool} with these exact arguments and did "
+                        f"not record the outcome — it may already have "
+                        f"happened. This will NOT be repeated automatically. "
+                        f"Call ask_human with what you need confirmed, or the "
+                        f"owner clears it in the effects ledger."}]}, \
+                    "unresolved"
+            effects.begin(root, key, task_id, s.name, tool, arguments)
     result = s.call(tool, arguments)
     if key:
         effects.record(root, key, task_id, s.name, tool, arguments, result,

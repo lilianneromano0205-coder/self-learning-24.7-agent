@@ -113,7 +113,69 @@ def main():
     assert run_drain(sb) == 0 and len(read_state(sb)["tasks"]) == 4, \
         "the replaced exam must be sat exactly once too"
     print("[re-dispatch] replaced question file -> exactly one fresh sitting + grading")
+    check_a_failed_exam_is_not_recorded_as_sat()
     print("PASS test_exam: closed-book by context AND by tools; dispatch once per content")
+
+
+def check_a_failed_exam_is_not_recorded_as_sat():
+    """DISPATCHED IS NOT SAT — the same defect the spaced re-exam scheduler
+    carried, in its sibling function.
+
+    `est["dispatched"][fn] = digest` was written on the same beat as
+    add_task, so a Student task that died terminally — provider outage,
+    retries exhausted, a loop killed between the two — left the exam recorded
+    as dispatched with a matching content hash, and the tick skipped it
+    forever. An exam nobody sat is not an exam that was skipped once; it is a
+    course that quietly stopped being examined, while the panel and the
+    self-model keep reading the last score as current.
+
+    Here the Student's provider fails every attempt. The exam must be
+    re-dispatched, bounded, and then recorded as failed rather than as sat.
+    """
+    import sys
+    from common import AGENT_DIR, agent_setting
+    sys.path.insert(0, AGENT_DIR)
+    import loop
+
+    BAD = [{"tool": "read_file", "args": {"path": "../escape.txt"}}] * 8
+    sb = make_sandbox("exam_failure",
+                      providers={"m": {"script": "s.json"},
+                                 "bad": {"script": "bad.json"}},
+                      roles={"student": "bad", "examiner": "m"},
+                      scripts={"s.json": [{"tool": "finish_task",
+                                           "args": {"summary": "ok"}}],
+                               "bad.json": BAD})
+    agent_setting(sb, "max_steps = 2")
+    agent_setting(sb, "max_task_retries = 0")
+    c = "courses/hydro"
+    pend = os.path.join(sb, c, "exam", "pending")
+    os.makedirs(pend, exist_ok=True)
+    with open(os.path.join(pend, "q1.md"), "w", encoding="utf-8") as f:
+        f.write("1. What is the exit criterion?\n")
+
+    state_path = os.path.join(sb, c, "exam", "exam-state.json")
+    trail = []
+    for _ in range(loop.REEXAM_MAX_ATTEMPTS + 2):
+        run_drain(sb)
+        with open(state_path, encoding="utf-8") as f:
+            est = json.load(f)
+        rec = (est.get("tasks") or {}).get("q1.md") or {}
+        trail.append((bool(est.get("dispatched", {}).get("q1.md")),
+                      rec.get("attempts"), rec.get("outcome")))
+        if rec.get("outcome"):
+            break
+
+    students = [t for t in read_state(sb)["tasks"] if t["role"] == "student"]
+    assert students and all(t["status"] == "failed" for t in students), \
+        [t["status"] for t in students]
+    assert len(students) == loop.REEXAM_MAX_ATTEMPTS, (
+        f"a Student task that died left the exam recorded as sat: "
+        f"{len(students)} attempt(s) for {loop.REEXAM_MAX_ATTEMPTS} allowed "
+        f"— trail {trail}")
+    assert rec.get("outcome") == "failed", rec
+    print(f"[exam failure] {loop.REEXAM_MAX_ATTEMPTS} Student tasks died and "
+          f"the exam was re-dispatched each time, then closed as "
+          f"outcome='failed' — recorded as UNEXAMINED rather than sat")
 
 
 if __name__ == "__main__":

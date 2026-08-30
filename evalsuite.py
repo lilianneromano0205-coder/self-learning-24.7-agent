@@ -29,13 +29,21 @@ half of the problem.
 WHAT IS MEASURED, AND BY WHAT
 
 Exit codes. Every task carries a `check` that a computer runs; nothing here
-asks a model whether the work is good. Two arms run on the SAME model:
+asks a model whether the work is good.
 
-    bare      one call, output accepted as-is — "just use the model"
-    harness   the same model inside the loop: gate, retry, memory, verify
+ONE ARM, AND THIS PARAGRAPH USED TO CLAIM TWO. It described a bare-vs-harness
+comparison — "one call, output accepted as-is" against "the same model inside
+the loop" — and called the difference "the only thing this platform can
+honestly claim credit for". `run_split` runs the HARNESS arm and stamps every
+row `arm: "harness"`; there is no bare arm here and never was. A reader of
+this docstring, or of `python evalsuite.py history` with its `arm` column,
+would reasonably have concluded the number below was a lift. It is not: it is
+a pass rate for the harness on a held-out set.
 
-The difference between those two numbers is the only thing this platform can
-honestly claim credit for, because the model is held constant across them.
+The bare-vs-harness comparison is real and lives in **benchmark.py**, which
+runs both arms against one scripted model. What this module measures is
+narrower and still worth having: how often the whole system finishes a task
+whose grader it did not write.
 
 SMALL SAMPLES ARE REPORTED AS SMALL SAMPLES
 

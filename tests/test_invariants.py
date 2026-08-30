@@ -268,6 +268,171 @@ def check_credential_sources(sb):
           "redacted, and are unreadable by the agent")
 
 
+def check_registry_keys_are_unique():
+    """No dict literal in this platform may define the same key twice.
+
+    Python keeps the LAST of two identical keys and reports nothing, so a
+    collision reads perfectly in the source and deletes an entry at runtime.
+    It happened here: a capability written to own the worker-authority
+    invariant was added to proof.REGISTRY under a name the PANEL's capability
+    already used ninety lines below, and the new entry simply did not exist —
+    the registry would have looked complete while the thing it was added to
+    prove was absent.
+
+    A `in REGISTRY` check cannot catch that, because by the time the module
+    is imported there is only one key. So this parses the SOURCE.
+    """
+    import ast as _ast
+    hits = []
+    for fn in sorted(os.listdir(AGENT_DIR)):
+        if not fn.endswith(".py"):
+            continue
+        try:
+            tree = _ast.parse(io.open(os.path.join(AGENT_DIR, fn),
+                                      encoding="utf-8").read())
+        except (OSError, SyntaxError):
+            continue
+        for node in _ast.walk(tree):
+            if not isinstance(node, _ast.Dict):
+                continue
+            seen = set()
+            for k in node.keys:
+                if not isinstance(k, _ast.Constant) or \
+                        not isinstance(k.value, str):
+                    continue
+                if k.value in seen:
+                    hits.append(f"{fn}:{k.lineno} duplicate key {k.value!r}")
+                seen.add(k.value)
+    assert not hits, (
+        "a dict literal defines the same key twice — Python keeps the last "
+        "one and says nothing, so an entry exists in the source and not at "
+        "runtime:\n  " + "\n  ".join(hits))
+    import proof
+    assert "worker-authority" in proof.REGISTRY, sorted(proof.REGISTRY)
+    assert "control-plane" in proof.REGISTRY, sorted(proof.REGISTRY)
+    print(f"[keys] every string-keyed dict literal in the platform is "
+          f"collision-free, and both proof capabilities that were competing "
+          f"for one name exist ({len(proof.REGISTRY)} registered)")
+
+
+def check_control_plane_zone_derivation():
+    """The sealed set is DERIVED from fileauth, never listed a second time.
+
+    controlplane.py brackets every model-authored command with a seal of the
+    control zone. If that seal carried its own hand-written list of paths, the
+    two lists would drift and a control directory added to fileauth tomorrow
+    would be unsealed tomorrow — which is the two-descriptions-of-one-truth
+    defect this codebase keeps finding, reintroduced by the module written to
+    fix an instance of it.
+
+    So: build a root containing one file for every control shape fileauth
+    knows about, and assert the authority seals ALL of them.
+    """
+    import controlplane
+    import shutil
+    root = tempfile.mkdtemp(prefix="cp-derive-")
+    try:
+        expected = set()
+
+        def put(rel, body="x"):
+            p = os.path.join(root, rel.replace("/", os.sep))
+            os.makedirs(os.path.dirname(p) or root, exist_ok=True)
+            io.open(p, "w", encoding="utf-8").write(body)
+            expected.add(rel)
+
+        for name in fileauth.CONTROL_FILES:
+            put(name)
+        for d in fileauth.CONTROL_DIRS:
+            put(f"{d}/probe.txt")
+        for rel in fileauth.CONTROL_PATHS:
+            put(rel)
+        for head, names in fileauth.CONTROL_NAMES_IN.items():
+            for n in names:
+                put(f"{head}/probe-goal/{n}")
+        # a workspace file that must NOT be sealed, so the derivation is shown
+        # to be a filter rather than "everything"
+        put("courses/c1/notes.md")
+        expected.discard("courses/c1/notes.md")
+
+        sealed = set(controlplane.control_paths(root))
+        missing = expected - sealed
+        assert not missing, (
+            f"fileauth calls these CONTROL and the control plane authority "
+            f"does not seal them: {sorted(missing)}")
+        assert "courses/c1/notes.md" not in sealed, (
+            "the seal must cover control state, not the agent's workspace")
+        # every sealed path must have a declared treatment
+        for rel in sealed:
+            assert controlplane.treatment(rel) in (
+                controlplane.SEALED, controlplane.PENDING_ONLY,
+                controlplane.DETECT), rel
+        assert controlplane.treatment("state.json") == controlplane.DETECT
+        # a goal's event ledger is SEALED, not "append-only": contract.replay
+        # rebuilds state purely from it and lets it overrule the snapshot, so
+        # an appended line is a verdict. Growth is exempt only when the
+        # harness itself declared the append.
+        assert controlplane.treatment("goals/g1/events.jsonl") == \
+            controlplane.SEALED
+        assert controlplane.treatment("approvals/ap-1.json") == \
+            controlplane.PENDING_ONLY
+        assert controlplane.treatment("settings.toml") == controlplane.SEALED
+        print(f"[control-plane] the seal is derived from fileauth's zone "
+              f"model: all {len(expected)} control shapes sealed, the "
+              f"workspace untouched, every path with a declared treatment")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def check_metering_call_sites():
+    """EVERY PROVIDER CALL SITE, not every purpose.
+
+    check_metering_purposes below is the test REFERENCE.md cites as proof that
+    "every provider call is metered" — and it enumerates the PURPOSES tuple
+    and writes nine synthetic rows itself. It never opens a socket and never
+    looks at a call site, so it passes whether or not a real provider call is
+    metered. Purposes are not call sites, and that substitution WAS the hole:
+    an audit walking the repository's outbound HTTP found five model-provider
+    call sites and exactly one of them metered.
+
+      ingest.transcribe_chunk   Groq Whisper       spent, recorded nowhere
+      ingest.vision             OpenRouter VLM     spent, recorded nowhere
+      loop._probe               chat/completions    one live call per role on
+                                                    `loop.py check`
+      loop.call_model                              metered
+      providers.catalog         GET /models         no tokens, declared
+
+    This is the same shape as check_execution_paths above: a rule that is only
+    asserted decays, so the rule is CHECKED against the source, and a new
+    bypass fails the suite the way a new raw subprocess does.
+    """
+    rep = modelgateway.audit_sources(AGENT_DIR)
+    assert rep["checked"] >= 50, f"only scanned {rep['checked']} modules"
+    if rep["violations"]:
+        lines = [f"{v['file']}:{v['line']} {v['function']}()"
+                 for v in rep["violations"]]
+        raise AssertionError(
+            "these functions call a model provider and do not meter it:\n  "
+            + "\n  ".join(lines)
+            + "\nRecord the call with modelgateway.record(...) (and charge() "
+              "it if it costs money), or declare it in "
+              "modelgateway.ALLOWED_UNMETERED with the reason it is free.")
+    # the declaration must stay honest too: an entry for a function that no
+    # longer exists is an exemption nobody is reading
+    import ast as _ast
+    for key in rep["allowed"]:
+        fn, _, func = key.partition(":")
+        src = io.open(os.path.join(AGENT_DIR, fn), encoding="utf-8").read()
+        names = {n.name for n in _ast.walk(_ast.parse(src))
+                 if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef))}
+        assert func in names, (
+            f"modelgateway.ALLOWED_UNMETERED exempts {key}, which does not "
+            f"exist — a stale exemption is a hole nobody is guarding")
+    print(f"[metering] {rep['checked']} modules scanned by AST; every "
+          f"function that reaches a model provider meters it "
+          f"({len(rep['allowed'])} declared free, each with a stated reason "
+          f"and each still present in the source)")
+
+
 def check_metering_purposes(sb):
     """Every purpose reaches the meter — including the ones that used to be
     invisible to the budget (compaction, replay, benchmark)."""
@@ -1098,7 +1263,10 @@ def main():
     check_filesystem_zones(sb)
     check_traversal_spellings(sb)
     check_credential_sources(sb)
+    check_metering_call_sites()
     check_metering_purposes(sb)
+    check_registry_keys_are_unique()
+    check_control_plane_zone_derivation()
     check_role_capabilities(sb)
     check_gate_catalogue()
     check_expert_birth_paths()

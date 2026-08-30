@@ -22,8 +22,33 @@ claim a level of the proof ladder it has not earned.
 
 So `run()` produces an exportable, hash-pinned training package and stops at
 the boundary, telling you exactly what an external trainer must do with it.
-`promote()` refuses a checkpoint that has not passed a held-out evaluation,
-and every promotion records a rollback target.
+`promote()` refuses a checkpoint whose DECLARED held-out score does not clear
+its declared bar, and every promotion records a rollback target.
+
+WHERE THE SCORE COMES FROM, SAID PLAINLY
+
+This module does not run the evaluation and cannot. The trainer is external —
+that is the whole boundary above — so the score arrives from outside, and the
+sentence here used to read "promote() refuses a checkpoint that has not passed
+a held-out evaluation", which describes a control this file does not have. An
+audit was right to call that out: what is governed is a DECLARED result.
+
+So the declaration is now BOUND to something a third party can re-check:
+
+  * `register` requires an EVIDENCE FILE — the evaluation's own output — and
+    stores its sha256 beside the score, the checkpoint, the verifier hash and
+    the holdout hash. The four travel together and any of them changing
+    invalidates the comparison.
+  * the record says `score_origin: "declared"` in as many words, so nobody
+    reading the registry later mistakes it for an observation this platform
+    made.
+  * `register`, `promote` and `rollback` refuse to run from inside an agent
+    task. A shell-capable worker could otherwise register itself a candidate
+    at 0.99 and promote it, which is the shortest path from "the model is
+    graded" to "the model grades itself".
+
+That is as far as a stdlib-only platform can honestly bind a number it did
+not compute. It is a chain of custody, not a proof of the evaluation.
 
 The invariants from the validation gate, all enforced here:
 
@@ -228,8 +253,20 @@ def _save_registry(root, rec):
 
 
 def register(root, run_id, checkpoint, eval_score, verifier_hash,
-             eval_detail="", seeds=1):
-    """A candidate checkpoint, with the evaluation that judged it."""
+             eval_detail="", seeds=1, evidence=None):
+    """A candidate checkpoint, with the evaluation that DECLARED it.
+
+    `evidence` is the path to the evaluation's own output — the file the
+    external trainer produced when it ran the holdout. It is required, it must
+    exist and be non-empty, and its sha256 is pinned into the record beside
+    the score.
+
+    This does not make the score true. It makes it CHECKABLE: the registry
+    now names a specific artifact that a third party can re-read, and a score
+    edited later no longer matches the evidence it claimed to come from. The
+    field `score_origin` says "declared" so the record cannot be mistaken for
+    an observation this platform made.
+    """
     d = _p(root, os.path.join(RUNS, run_id))
     try:
         with open(os.path.join(d, "manifest.json"), encoding="utf-8") as f:
@@ -241,10 +278,37 @@ def register(root, run_id, checkpoint, eval_score, verifier_hash,
             "this checkpoint was evaluated with a DIFFERENT verifier than the "
             "one that produced the data. Comparing those two numbers would "
             "measure the verifier, not the model.")
+    try:
+        score = float(eval_score)
+    except (TypeError, ValueError):
+        raise Refused(f"eval_score {eval_score!r} is not a number")
+    if not (0.0 <= score <= 1.0):
+        raise Refused(
+            f"eval_score {score} is outside 0..1. A score this registry "
+            f"cannot interpret is not a result — and the promotion gate "
+            f"compares it against a baseline on the same scale.")
+    if not evidence:
+        raise Refused(
+            "a candidate needs the EVALUATION'S OWN OUTPUT (--evidence "
+            "<file>). This platform does not run the evaluation, so the score "
+            "is a declaration; without an artifact to pin it to there is "
+            "nothing anyone can re-check, and the registry would be governing "
+            "a number rather than a result.")
+    try:
+        with open(evidence, "rb") as f:
+            blob = f.read()
+    except OSError as e:
+        raise Refused(f"the evidence file could not be read: {e}")
+    if not blob.strip():
+        raise Refused(f"the evidence file {evidence!r} is empty")
     reg = _registry(root)
     reg["candidates"].append({
         "run": run_id, "checkpoint": checkpoint,
-        "eval_score": float(eval_score), "eval_detail": str(eval_detail)[:400],
+        "eval_score": score, "eval_detail": str(eval_detail)[:400],
+        "score_origin": "declared",
+        "evidence": os.path.basename(str(evidence))[:120],
+        "evidence_sha256": hashlib.sha256(blob).hexdigest(),
+        "evidence_bytes": len(blob),
         "seeds": int(seeds), "verifier_hash": verifier_hash,
         "holdout_hash": man["holdout"]["hash"],
         "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "promoted": False,
@@ -255,7 +319,12 @@ def register(root, run_id, checkpoint, eval_score, verifier_hash,
 
 def promote(root, checkpoint, baseline_score, threshold=0.02, by="owner"):
     """The gate. §18: promote only if predefined thresholds pass, canary
-    first, and preserve rollback."""
+    first, and preserve rollback.
+
+    The number compared here was DECLARED by whoever registered the
+    candidate — see the module docstring. What this gate enforces is that the
+    declaration is complete, pinned to an evidence artifact, and clears a bar
+    fixed before the comparison."""
     reg = _registry(root)
     cand = next((c for c in reversed(reg["candidates"])
                  if c["checkpoint"] == checkpoint), None)
@@ -266,6 +335,11 @@ def promote(root, checkpoint, baseline_score, threshold=0.02, by="owner"):
             "§18 requires at least two independent seeds for a training "
             "experiment. One seed cannot distinguish an improvement from a "
             "lucky initialisation.")
+    if not cand.get("evidence_sha256"):
+        raise Refused(
+            f"{checkpoint!r} was registered without pinned evaluation "
+            f"evidence, so its score is a bare assertion with nothing behind "
+            f"it. Re-register it with --evidence <the evaluation's output>.")
     delta = cand["eval_score"] - float(baseline_score)
     if delta < threshold:
         raise Refused(
@@ -277,6 +351,10 @@ def promote(root, checkpoint, baseline_score, threshold=0.02, by="owner"):
     cand["promoted"] = True
     reg["promoted"] = {"checkpoint": checkpoint, "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
                        "by": by, "eval_score": cand["eval_score"],
+                       "score_origin": cand.get("score_origin", "declared"),
+                       "evidence_sha256": cand.get("evidence_sha256"),
+                       "verifier_hash": cand.get("verifier_hash"),
+                       "holdout_hash": cand.get("holdout_hash"),
                        "baseline": float(baseline_score),
                        "rollback_to": previous["checkpoint"] if previous else None}
     reg["history"].append(dict(reg["promoted"]))
@@ -298,6 +376,21 @@ def rollback(root, by="owner", why=""):
                            "to": target, "by": by, "why": why})
     _save_registry(root, reg)
     return reg["promoted"]
+
+
+def _owner_only(cmd):
+    """register/promote/rollback are OWNER actions.
+
+    Without this, a shell-capable worker could run `python training.py
+    register ... --eval-score 0.99 --seeds 2` followed by `promote ...
+    --baseline 0.0` and hand itself a promoted checkpoint — the shortest path
+    from "the model is graded" to "the model grades itself". The registry also
+    lives in training/, which the File Authority now zones CONTROL, so the
+    write would be reverted by the seal around any model-authored command;
+    this refuses first and says why. Two controls, neither depending on the
+    other."""
+    import controlplane
+    controlplane.owner_only(f"training {cmd}")
 
 
 def status(root):
@@ -327,6 +420,11 @@ def main():
     p.add_argument("--checkpoint", required=True)
     p.add_argument("--eval-score", type=float, required=True)
     p.add_argument("--verifier-hash", required=True)
+    p.add_argument("--evidence", required=True,
+                   help="the evaluation's OWN OUTPUT file. This platform does "
+                        "not run the evaluation, so the score is a "
+                        "declaration; the evidence is what makes it "
+                        "re-checkable, and its sha256 is pinned beside it")
     p.add_argument("--seeds", type=int, default=1)
     p.add_argument("--root", default=".")
     p = sub.add_parser("promote"); p.add_argument("checkpoint")
@@ -354,11 +452,15 @@ def main():
         print(f"\n{man['boundary']}\n\nNEXT: {man['next_step']}")
         return
     if a.cmd == "register":
+        _owner_only(a.cmd)
         c = register(root, a.run, a.checkpoint, a.eval_score, a.verifier_hash,
-                     seeds=a.seeds)
-        print(f"registered {c['checkpoint']} @ {c['eval_score']:.3f}")
+                     seeds=a.seeds, evidence=a.evidence)
+        print(f"registered {c['checkpoint']} @ {c['eval_score']:.3f} "
+              f"(DECLARED, evidence {c['evidence']} "
+              f"sha256:{c['evidence_sha256'][:16]})")
         return
     if a.cmd == "rollback":
+        _owner_only(a.cmd)
         try:
             back = rollback(root, a.by, a.why)
         except (Refused, ValueError) as e:
@@ -369,6 +471,7 @@ def main():
         print("  a promotion without a way back is a one-way door; this is "
               "the way back")
         return
+    _owner_only("promote")
     p = promote(root, a.checkpoint, a.baseline)
     print(f"promoted {p['checkpoint']} (rollback target: "
           f"{p['rollback_to'] or 'none'})")

@@ -44,6 +44,8 @@ The fix this file pins is the audit's, and it is NOT "demote everything":
 Run from the agent/ directory:  python tests/test_sources.py
 """
 
+import io
+import os
 import sys
 
 from common import AGENT_DIR
@@ -58,7 +60,68 @@ def main():
     check_no_false_review_claims_anywhere()
     check_discovery_still_feeds_learning()
     check_spoofing_still_refused()
+    check_the_modules_own_proof_runs()
+    check_a_stored_tier_is_not_an_authority()
     print("PASS test_sources")
+
+
+def check_a_stored_tier_is_not_an_authority():
+    """The ledger lives in the agent's workspace, so its numbers are DERIVED.
+
+    courses/ has to stay writable: the agent runs `ingest.py add-url` itself
+    and that records sources. So a worker could rewrite
+    courses/<c>/sources.json to rate a forum thread tier 1 and forge
+    `override: {"by": "owner"}` beside it — with the ordinary write_file tool,
+    no shell needed. tier feeds LEARN_MIN_TIER, which decides what may become
+    a CITED ATOM, and this module's own docstring calls false authority in
+    the learning pipeline the one contamination that compounds.
+
+    Zoning the file CONTROL would break ingestion, so the tier is recomputed
+    from classify() on read — the same answer record() stored in the honest
+    case, and not the answer a forger stored. A genuine owner override lives
+    in courses/<c>/source-overrides.json, which IS control-zoned.
+    """
+    import json
+    import tempfile
+    import fileauth
+    root = tempfile.mkdtemp(prefix="src-tier-")
+    os.makedirs(os.path.join(root, "courses", "c"), exist_ok=True)
+    ref = "https://www.reddit.com/r/x/comments/1/"
+    sources.record(root, "c", ref, "a forum thread")
+    assert sources.tier_of(root, "c", ref) == 4, "precondition"
+
+    # the forgery: rewrite the workspace ledger the way write_file could
+    p = sources.path(root, "c")
+    rows = json.load(io.open(p, encoding="utf-8"))
+    rows[0].update(tier=1, tier_name="normative", weight=1.0,
+                   why="owner override: trust me",
+                   override={"from": 4, "to": 1, "by": "owner", "why": "x"})
+    json.dump(rows, io.open(p, "w", encoding="utf-8"))
+
+    assert sources.tier_of(root, "c", ref) == 4, (
+        "a tier forged in the workspace ledger was believed — a forum thread "
+        "would enter the knowledge base wearing 'tier 1 (normative)'")
+    back = sources.load(root, "c")[0]
+    assert back["tier"] == 4 and back["override"] is None, back
+    assert not sources.learnable(ref)["ok"], "it must still not be citable"
+
+    # the real thing still works, and only through the control-zoned file
+    sources.set_tier(root, "c", ref, 2, why="my field cites these")
+    assert sources.tier_of(root, "c", ref) == 2
+    assert sources.load(root, "c")[0]["override"]["by"] == "owner"
+    try:
+        fileauth.resolve(root, "courses/c/source-overrides.json", "write",
+                         "agent")
+        raise AssertionError("the agent may write the override file — then "
+                             "the override is not the owner's either")
+    except fileauth.Denied:
+        pass
+    fileauth.resolve(root, "courses/c/sources.json", "write", "agent")
+    print("[derived] a tier and an owner override forged in the workspace "
+          "ledger are both ignored — the tier is recomputed from the URL — "
+          "while a genuine set_tier still overrules, recorded in a "
+          "control-zoned file the agent cannot write and the workspace "
+          "ledger stays writable so ingestion keeps working")
 
 
 def check_reviewed_hosts_stay_tier1_with_honest_reasons():
@@ -157,6 +220,38 @@ def check_discovery_still_feeds_learning():
     print(f"[fed] all {len(RAIL_HOSTS)} scholarly discovery rails still "
           f"produce results at or under the learn bar — the halo is gone, "
           f"the pipeline is not")
+
+
+def check_the_modules_own_proof_runs():
+    """sources.PROOF is the module's own self-test: thirty real URLs and the
+    tier each must get, evaluated with NO owner config so it proves what the
+    file decides on its own. Its docstring promises "a future edit that
+    quietly re-rates the web fails here, in one second, instead of six weeks
+    later inside an expert's citations".
+
+    Nothing ran it. Not this file, not run_all.py, not .github/workflows,
+    not doctor.py, not preflight.py — grep for `prove(` across the repo found
+    only its own definition and its own CLI flag. So when an audit corrected
+    arXiv from tier 1 to tier 2 in the REGISTRY, the proof table kept the old
+    expectation and sat red for weeks while the suite stayed green: the tier
+    was pinned in one place and contradicted in another, which is the exact
+    two-descriptions-of-one-truth defect this codebase keeps finding.
+
+    A self-test with no caller is a comment. This is the caller.
+    """
+    rows, bad = sources.prove()
+    assert rows, "sources.PROOF is empty — the self-test proves nothing"
+    assert not bad, (
+        "sources.py's own PROOF table disagrees with sources.py: "
+        + "; ".join(f"{ref} expected tier {want}, got {got}"
+                    for ref, want, got, _why in bad))
+    dupes = sources.duplicates()
+    assert not dupes, (
+        f"a domain is listed at two different tiers, so which comment "
+        f"explains it depends on line order: {dupes}")
+    print(f"[proof] the module's own {len(rows)}-reference proof table runs "
+          f"in the suite and agrees with the registry; no domain is rated "
+          f"twice")
 
 
 def check_spoofing_still_refused():

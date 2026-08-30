@@ -297,7 +297,11 @@ def check_path(target, thresholds=None):
     return check_file(target, thresholds)
 
 
-STRICTER = {"min_contrast": max, "max_type_sizes": min, "max_offscale": min,
+# A boolean requirement is monotone in the TRUE direction: a standards row
+# may turn a check ON, never off. Without an entry here `require_responsive`
+# fell through to a raw assignment — see thresholds_for.
+STRICTER = {
+    "require_responsive": lambda a, b: bool(a) or bool(b),"min_contrast": max, "max_type_sizes": min, "max_offscale": min,
             "max_center": min}
 
 
@@ -318,7 +322,19 @@ def thresholds_for(root, course):
             if key not in t or val is None:
                 continue
             pick = STRICTER.get(key)
-            t[key] = pick(t[key], val) if pick else val
+            if pick is None:
+                # NO COMBINER MEANT NO RULE. `t[key] = val` took whatever the
+                # standards row said, and standards.md lives in courses/ —
+                # the agent's own workspace — so a worker that kept failing
+                # the design gate could write `require_responsive: false`
+                # into its own course and the blocker stopped firing. This
+                # function's first line promises the opposite: "A course's
+                # standards can RAISE the bar, never lower it." An unknown
+                # key is now refused rather than trusted, which is the only
+                # answer that keeps that sentence true for keys nobody has
+                # written a combiner for yet.
+                continue
+            t[key] = pick(t[key], val)
     except Exception:
         pass
     return t

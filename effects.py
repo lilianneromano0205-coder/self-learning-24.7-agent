@@ -42,6 +42,23 @@ def _path(root):
     return os.path.join(root, LEDGER)
 
 
+def claim_path(root, key):
+    """The lock a caller holds while it decides whether this exact effect has
+    already happened AND claims it if not.
+
+    `begin` and `record` each lock their own append, which keeps the LEDGER
+    intact and does nothing for the guarantee the ledger exists to give:
+    lookup -> unfinished -> begin was three separate reads and a write, so two
+    processes retrying one task could both find nothing recorded and both hit
+    the world. Exactly-once has to be one critical section, and it has to be
+    keyed on the EFFECT rather than on the whole ledger, or every effect in
+    the fleet would serialise behind the slowest network call."""
+    d = os.path.join(root, "logs", "effect-claims")
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(
+        d, hashlib.sha256(str(key).encode("utf-8")).hexdigest()[:32])
+
+
 def lookup(root, key):
     """The recorded result for this key inside this lineage, or None."""
     try:

@@ -778,7 +778,7 @@ pair, the DIFFERENCE is a tested law rather than a naming accident:
 goal, mission, workflow, team and consult all enqueue into loop.py's single
 task queue; mastery drives the goal engine; everything sits on one authority
 stack and one memory. There is no duplicated machinery to deduplicate — a
-code merge would buy no power and would rewrite behaviour that 119 tests and
+code merge would buy no power and would rewrite behaviour that 120 tests and
 56 mutations currently pin.
 
 **Decision.** Merge the FRONT DOOR, not the machinery. Every system is

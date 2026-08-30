@@ -312,11 +312,62 @@ def _dir(root, task_id):
     return d
 
 
+# EVERY PATH IN THIS SECTION IS MODEL-INFLUENCED, and none of them went
+# through the File Authority.
+#
+# `written_paths` reads the artifact list out of the task own write_file
+# steps -- and a REFUSED write_file is still recorded as a step, so the list
+# could name any path the model ever typed. The stash directory itself
+# (candidates/) classified as ZONE_ROOT, which the file tool may write.
+# Together, a role holding ONLY write_file -- the Rule-of-Two roles that are
+# deliberately denied a shell -- could:
+#
+#   * write candidates/<id>/<n>/score.json declaring the artifact list
+#     ["prompts/constitution.md"] with a score of 1.0, write its own
+#     constitution beside it, and let the loop own _promote_best_attempt copy
+#     that over the FIRST block of every system prompt; and
+#   * name "../../../../OUT.txt" as an artifact and have promote() write it
+#     outside the expert root entirely.
+#
+# Both reproduced, and both need no shell at all. It is the defect class the
+# File Authority exists for -- "a control that lives at a call site protects
+# that call site and nothing else" -- reappearing in a module written after
+# it, because this module reached the filesystem with os.path.join.
+#
+# So every path crosses _contained(), which is fileauth.resolve with the
+# AGENT rights: an artifact the agent could not have written is not an
+# artifact it may have restored, and a traversal is refused rather than
+# normalised. The refusals are counted into score.json so a dropped artifact
+# is visible rather than silent.
+
+def _contained(root, rel, mode="write"):
+    """-> an absolute path inside `root` that the AGENT is allowed to touch,
+    or None. The zone rules are what make a model-supplied artifact list safe
+    to act on at all."""
+    try:
+        import fileauth
+        return fileauth.resolve(root, rel, mode, "agent")
+    except Exception:
+        return None
+
+
+def _stash_dst(d, rel):
+    """Where an artifact copy lives INSIDE the stash, contained against the
+    stash directory so `../..` cannot place it elsewhere."""
+    dst = os.path.abspath(os.path.join(d, str(rel).replace("/", os.sep)))
+    base = os.path.abspath(d)
+    if dst != base and not dst.startswith(base + os.sep):
+        return None
+    return dst
+
+
 def snapshot(root, paths):
     """The current bytes of `paths` (missing files recorded as absent)."""
     snap = {}
     for rel in paths:
-        full = os.path.join(root, rel.replace("/", os.sep))
+        full = _contained(root, rel, "read")
+        if full is None:
+            continue
         try:
             with open(full, "rb") as f:
                 snap[rel] = f.read()
@@ -328,7 +379,9 @@ def snapshot(root, paths):
 def restore(root, snap):
     """Put the world back exactly as `snapshot` found it."""
     for rel, data in snap.items():
-        full = os.path.join(root, rel.replace("/", os.sep))
+        full = _contained(root, rel)
+        if full is None:
+            continue
         if data is None:
             try:
                 os.remove(full)
@@ -341,27 +394,44 @@ def restore(root, snap):
 
 
 def stash(root, task_id, n, paths, result):
-    """Keep an attempt's artifacts so a later one can be compared and the
+    """Keep an attempt artifacts so a later one can be compared and the
     winner put back. Nothing is thrown away silently."""
     d = os.path.join(_dir(root, task_id), str(n))
     os.makedirs(d, exist_ok=True)
-    kept = []
+    kept, refused = [], []
     for rel in paths:
-        src = os.path.join(root, rel.replace("/", os.sep))
+        # WRITE rights, not read rights, even though this only copies. An
+        # artifact the agent could not have WRITTEN is not the agent's work,
+        # so keeping a copy of it as "an attempt's artifact" is wrong twice
+        # over: promote would refuse to put it back anyway, and until then
+        # the stash carries a copy of control state under a name the worker
+        # chose.
+        src = _contained(root, rel, "write")
+        dst = _stash_dst(d, rel)
+        if src is None or dst is None:
+            refused.append(rel)
+            continue
         if not os.path.isfile(src):
             continue
-        dst = os.path.join(d, rel.replace("/", os.sep))
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copyfile(src, dst)
         kept.append(rel)
+    rec = {"attempt": n, "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+           "artifacts": kept, **result}
+    if refused:
+        rec["refused_paths"] = refused[:20]
     with open(os.path.join(d, "score.json"), "w", encoding="utf-8") as f:
-        json.dump({"attempt": n, "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                   "artifacts": kept, **result}, f, indent=1)
+        json.dump(rec, f, indent=1)
     return d
 
 
 def promote(root, task_id, n):
-    """Copy a stashed attempt's artifacts back into place."""
+    """Copy a stashed attempt artifacts back into place.
+
+    Restoring is a WRITE, so every destination is checked with the AGENT own
+    rights. score.json lives under candidates/, which the agent can write, so
+    its artifact list is model-supplied data and never a licence.
+    """
     d = os.path.join(_dir(root, task_id), str(n))
     meta_path = os.path.join(d, "score.json")
     try:
@@ -371,9 +441,9 @@ def promote(root, task_id, n):
         return []
     restored = []
     for rel in meta.get("artifacts", []):
-        src = os.path.join(d, rel.replace("/", os.sep))
-        dst = os.path.join(root, rel.replace("/", os.sep))
-        if not os.path.isfile(src):
+        src = _stash_dst(d, rel)
+        dst = _contained(root, str(rel))
+        if src is None or dst is None or not os.path.isfile(src):
             continue
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copyfile(src, dst)

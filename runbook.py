@@ -37,9 +37,26 @@ TRUST IS EARNED, NEVER SELF-DECLARED — the same discipline as skills:
     model-free reconcile path.
   * the trust ledger (runbooks/trust.json) is CONTROL: the worker's file
     tools cannot touch it, and only the harness records outcomes. Three
-    wins — runs where every step's verification passed AND the caller's
-    own acceptance test passed after — promote it to PROVEN. Two
-    consecutive losses quarantine it.
+    ACCEPTED wins — runs where every step's verification passed AND the
+    caller's own acceptance test passed afterwards — promote it to PROVEN.
+    Two consecutive losses quarantine it.
+
+    That sentence was already written here and the code did not implement
+    it: `run()` recorded a win whenever every step's own `verify` exited 0,
+    and nothing ever consulted the caller. A runbook whose steps each prove
+    themselves while the artifact they produce is rejected by the graders
+    reached "proven" in three runs — tests/test_swarm.py builds exactly that
+    procedure to prove the CONTRACT is not verified, and its trust counter
+    went up on the same run. "Proven" has to mean proven to accomplish the
+    thing that was asked, or the word is doing no work.
+
+    So an outcome now carries two facts, the way skills.py's graph already
+    did: `wins` counts runs whose steps all verified, and `accepted_wins`
+    counts the subset where the CALLER'S OWN contract passed afterwards.
+    Only the second promotes. A caller that supplies no acceptance test can
+    still record an outcome — that is how a rehearsal or a manual run is
+    logged — but it earns no trust, which is the honest reading of a run
+    nobody independently checked.
   * a QUARANTINED runbook matches nothing until an owner clears it.
 
 WHAT A RUNBOOK IS NOT. It is not a script that runs unexamined: every `do`
@@ -216,10 +233,16 @@ def status(root, name):
     return rec.get("status", "candidate")
 
 
-def record(root, name, won, why=""):
+def record(root, name, won, why="", accepted=False):
     """The HARNESS records an outcome. Nothing else may — trust.json is
     CONTROL-zoned against the worker's file tools, and this function is the
     single writer the platform uses.
+
+    `accepted` is the caller's INDEPENDENT verdict — the goal contract's
+    frozen graders, run after the procedure finished. Only accepted wins
+    promote. A win with accepted=False is recorded and counted, and buys no
+    trust: the steps proved themselves, and nothing outside the procedure
+    agreed that the job was done.
 
     UNDER THE LOCK, because this is a read-modify-write on a shared ledger
     and locks.py's own docstring names that the platform's standing race.
@@ -231,17 +254,26 @@ def record(root, name, won, why=""):
     nobody is working."""
     import locks
     with locks.holding(os.path.join(root, TRUST), timeout=10.0, stale=8.0):
-        return _record_locked(root, name, won, why)
+        return _record_locked(root, name, won, why, accepted)
 
 
-def _record_locked(root, name, won, why=""):
+def _record_locked(root, name, won, why="", accepted=False):
     t = _trust(root)
-    rec = t.setdefault(name, {"status": "candidate", "wins": 0, "losses": 0,
+    rec = t.setdefault(name, {"status": "candidate", "wins": 0,
+                              "accepted_wins": 0, "losses": 0,
                               "streak_losses": 0, "history": []})
+    rec.setdefault("accepted_wins", 0)     # ledgers written before this field
     if won:
         rec["wins"] += 1
         rec["streak_losses"] = 0
-        if rec["status"] == "candidate" and rec["wins"] >= PROMOTE_WINS:
+        if accepted:
+            rec["accepted_wins"] += 1
+        # PROMOTION READS accepted_wins, not wins. A procedure whose steps
+        # verify while the caller's graders reject its output is a procedure
+        # that reliably does the wrong thing, and counting that as evidence
+        # is how "proven" stops meaning anything.
+        if rec["status"] == "candidate" and \
+                rec["accepted_wins"] >= PROMOTE_WINS:
             rec["status"] = "proven"
     else:
         rec["losses"] += 1
@@ -252,7 +284,8 @@ def _record_locked(root, name, won, why=""):
             rec["status"] = "quarantined"
     rec["history"] = (rec.get("history") or [])[-19:] + [{
         "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "won": bool(won), "why": str(why)[:200]}]
+        "won": bool(won), "accepted": bool(won and accepted),
+        "why": str(why)[:200]}]
     _write_trust(root, t)
     return rec["status"]
 
@@ -361,8 +394,16 @@ def _cfg(root):
 
 
 def run(root, name, allow_candidate=False, cfg=None, record_outcome=True,
-        _stack=None):
+        accept=None, _stack=None):
     """Execute one runbook, step by step, verifying each. ZERO model calls.
+
+    `accept` is the CALLER'S independent acceptance test: a zero-argument
+    callable, run after the last step, returning True when the caller's own
+    contract is satisfied. Only a run that both verified every step AND
+    passed `accept` earns trust — see the module docstring for why a run
+    graded solely by the procedure's own `verify` lines is not evidence that
+    the procedure does the job. A caller with no acceptance test passes None
+    and its runs are recorded but earn nothing.
 
     Returns {"ok", "steps": [...], "stopped_at", "why"}. Every `do` runs as
     a model_command (policy + sandbox + approval tier) and every `verify` as
@@ -397,16 +438,26 @@ def run(root, name, allow_candidate=False, cfg=None, record_outcome=True,
     if st == "candidate" and not allow_candidate:
         return {"ok": False, "steps": [], "stopped_at": 0,
                 "why": f"runbook {name!r} is a CANDIDATE ({PROMOTE_WINS} "
-                       f"verified wins promote it); pass allow_candidate "
-                       f"to run it supervised"}
+                       f"ACCEPTED wins promote it - steps verified AND the "
+                       f"caller's own acceptance test passed afterwards); "
+                       f"pass allow_candidate to run it supervised"}
     cfg = cfg or _cfg(root)
     done, why, stopped = [], "", 0
     ok = True
+    # A CHILD RUN IN PLACE IS FILED WITH THE PARENT'S VERDICT. Its outcome
+    # cannot be recorded when it finishes, because whether the work was
+    # ACCEPTED is not known until the parent's last step has run and the
+    # caller's test has spoken. So children are collected and recorded below,
+    # alongside the parent, with the same acceptance — which is the honest
+    # reading: a child earns trust for the job it helped complete.
+    subs = []
     for i, step in enumerate(rb["steps"], 1):
         sub = str(step.get("run") or "").strip()
         if sub:
             rr = run(root, sub, allow_candidate=allow_candidate, cfg=cfg,
-                     record_outcome=record_outcome, _stack=stack)
+                     record_outcome=False, _stack=stack)
+            subs.append((sub, bool(rr["ok"])))
+            subs.extend(rr.get("subs") or [])
             done.append({"n": i, "ran": sub, "ok": rr["ok"],
                          "why": (rr["why"] or "")[:200]})
             if not rr["ok"]:
@@ -443,9 +494,26 @@ def run(root, name, allow_candidate=False, cfg=None, record_outcome=True,
                    f"but its own proof failed — the run stops here rather "
                    f"than building on an unproved step")
             break
-    result = {"ok": ok, "steps": done, "stopped_at": stopped, "why": why}
+    accepted = False
+    if ok and accept is not None:
+        try:
+            accepted = bool(accept())
+        except Exception as e:                    # an acceptance test that
+            accepted = False                      # cannot run has not passed
+            why = why or f"acceptance test could not run: {e}"[:200]
+    result = {"ok": ok, "steps": done, "stopped_at": stopped, "why": why,
+              "accepted": accepted, "subs": subs}
     if record_outcome:
-        record(root, name, ok, why or "all steps verified")
+        for sname, sok in subs:
+            record(root, sname, sok, accepted=(accepted and sok),
+                   why=f"ran inside {name!r}"
+                       + ("" if accepted else
+                          "; the caller did not accept the result"))
+        record(root, name, ok, accepted=accepted,
+               why=why or ("all steps verified and the caller's acceptance "
+                           "test passed" if accepted else
+                           "all steps verified; no caller acceptance test, "
+                           "so this run earns no trust"))
     return result
 
 
@@ -495,8 +563,19 @@ def reconcile(root, gid, allow_candidates=False, max_rounds=3):
     """
     import contract
     rounds = []
+    # THE ACCEPTANCE TEST THAT DECIDES TRUST, and the observation that opens
+    # the next round, are the SAME run of the graders. A runbook's win is only
+    # a win if the contract it was applied to passes afterwards — and running
+    # the graders twice to learn that would double the cost of every round,
+    # so the verdict is carried forward instead.
+    carried = {}
+
+    def _accept():
+        carried["vr"] = contract.verify(root, gid)
+        return bool(carried["vr"].get("all"))
+
     for rnd in range(1, max_rounds + 1):
-        vr = contract.verify(root, gid)
+        vr = carried.pop("vr", None) or contract.verify(root, gid)
         if vr["tamper"]:
             return {"verified": False, "rounds": rounds,
                     "blocked": vr["why"]}
@@ -534,12 +613,13 @@ def reconcile(root, gid, allow_candidates=False, max_rounds=3):
                                f"but none is applicable here: "
                                f"{' | '.join(skipped)[:400]} — satisfy a "
                                f"precondition or take the frontier path"}
-        rr = run(root, chosen, allow_candidate=allow_candidates)
+        rr = run(root, chosen, allow_candidate=allow_candidates,
+                 accept=_accept)
         contract.event(root, gid, "runbook_applied", runbook=chosen,
-                       ok=rr["ok"], round=rnd,
+                       ok=rr["ok"], accepted=rr.get("accepted"), round=rnd,
                        failing_before=vr["failed"])
         rounds.append({"round": rnd, "runbook": chosen, "ok": rr["ok"],
-                       "why": rr["why"]})
+                       "accepted": rr.get("accepted"), "why": rr["why"]})
         if not rr["ok"]:
             return {"verified": False, "rounds": rounds,
                     "blocked": f"runbook {chosen!r} stopped: {rr['why']}"}
@@ -563,7 +643,9 @@ def record_demo(root, name, triggers, steps, rehearse=False):
     happens after the demo: the recording lands as a CANDIDATE with zero
     trust, `--rehearse` replays it immediately through the full authority
     stack so the demonstration proves itself before anyone relies on it,
-    and only three all-verified wins make it PROVEN. A demo you watched is
+    and only three ACCEPTED wins make it PROVEN -- a rehearsal has no
+    caller acceptance test, so it proves the recording RUNS and earns no
+    trust, which is exactly what watching a demo is worth. A demo you watched is
     a claim; a demo the graders re-ran is evidence.
 
     `steps` is [{"do": cmd, "verify": cmd, "timeout"?}] — same shape as
@@ -587,7 +669,10 @@ def record_demo(root, name, triggers, steps, rehearse=False):
         rr = run(root, name, allow_candidate=True)
         out["rehearsed"] = rr["ok"]
         out["rehearse_why"] = rr["why"]
-        out["status"] = status(root, name)   # a verified rehearsal is win #1
+        # a rehearsal is the procedure replaying its OWN verify lines,
+        # so it is recorded as a run and earns no trust: still a
+        # candidate, still needing three ACCEPTED wins
+        out["status"] = status(root, name)
     return out
 
 
@@ -664,7 +749,9 @@ def main():
         for n in names(a.root):
             t = _trust(a.root).get(n) or {}
             print(f"{n:32} {status(a.root, n):12} "
-                  f"wins={t.get('wins', 0)} losses={t.get('losses', 0)}")
+                  f"wins={t.get('wins', 0)} "
+                  f"(accepted {t.get('accepted_wins', 0)}) "
+                  f"losses={t.get('losses', 0)}")
     elif a.cmd == "validate":
         try:
             load(a.root, a.name)
@@ -712,7 +799,7 @@ def main():
               f"status {r['status'].upper()}"
               + (f", rehearsal {'VERIFIED' if r['rehearsed'] else 'FAILED — ' + (r.get('rehearse_why') or '')[:120]}"
                  if r["rehearsed"] is not None else
-                 " — rehearse it or let three verified wins promote it"))
+                 " - rehearse it, or let three ACCEPTED wins promote it"))
     elif a.cmd == "draft":
         out, rb = draft(a.root, a.gid)
         print(f"skeleton written to {out} — {len(rb['steps'])} step(s), "

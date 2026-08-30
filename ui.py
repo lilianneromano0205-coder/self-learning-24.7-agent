@@ -935,14 +935,28 @@ class Handler(BaseHTTPRequestHandler):
             import org
         except ImportError:                      # pragma: no cover
             return True
+        actor = getattr(self, "actor", OWNER_ACTOR)
         try:
-            org.check(self.home, getattr(self, "actor", OWNER_ACTOR),
-                      permission, obj)
-            return True
+            org.check(self.home, actor, permission, obj)
         except Exception as e:
             self._fail({"error": str(e), "permission": permission,
-                        "actor": getattr(self, "actor", OWNER_ACTOR)}, 403)
+                        "actor": actor}, 403)
             return False
+        # AND RECORD IT. org.py opens with "every mutation attributable" and
+        # ships an append-only audit trail — which the panel never wrote to.
+        # `org.check` answers *may this actor* and returns; nothing after it
+        # said *this actor did*. So in a shared fleet a named member could
+        # mint an expert, queue work and change settings through the panel,
+        # with the panel knowing exactly who they were, and org/audit.jsonl
+        # gained zero rows: `python org.py trail` showed user management and
+        # nothing else. The permission check is the natural place, because it
+        # is already the ONE question every mutating route asks.
+        try:
+            org.audit(self.home, actor, permission, "panel", obj or "-",
+                      detail="via the control panel")
+        except Exception:
+            pass                    # an audit that breaks the panel is worse
+        return True
 
     def _events(self, q):
         """AG-UI-style live stream: the panel stops polling and simply WATCHES.

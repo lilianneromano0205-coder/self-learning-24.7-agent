@@ -61,7 +61,7 @@ Six systems, each with its own module set:
 | 5 | **Improvement & governance** — variants with predictions, approvals, replay, benchmark | `variants.py` `approvals.py` `replay.py` `benchmark.py` |
 | 6 | **Control plane & interop** — panel, chief, doctor, providers, toolbox, MCP, A2A, traces, cards | `ui.py` `ui.html` `chief.py` `doctor.py` `providers.py` `toolbox.py` `mcp.py` `federation.py` `trace.py` `uicards.py` `modelrouter.py` |
 
-Underneath all six sit the **five authorities** — one mandatory gateway per
+Underneath all six sit the **six authorities** — one mandatory gateway per
 kind of power, so a control cannot defend only the path its author happened to
 be thinking about:
 
@@ -72,6 +72,19 @@ be thinking about:
 | Credential | `credentials.py` | resolve a secret |
 | Model gateway | `modelgateway.py` | make a provider call |
 | Effect | `effects.py` | do something with an outside consequence |
+| Control plane | `controlplane.py` | change what the agent is allowed to do |
+
+The last one exists because an external audit found the invariant that spans
+two of the others owned by neither. `fileauth` refuses the `write_file` tool
+on control state and `policy` screens a command string — so a role that
+legitimately holds `run_command` could rewrite `settings.toml`, `prompts/`
+and `approvals/` by running a program, untouched by either gate. Measured on
+the shipped default, through a real practitioner task. `controlplane.py`
+brackets every model-authored execution: on `sandbox = "docker"` the control
+paths are bound read-only and the write is *prevented* by the kernel; on the
+default `host` backend, where there is no filesystem boundary to prevent
+with, the change is *reverted*, the command is reported failed whatever it
+exited with, and the attempt lands in `logs/controlplane.jsonl`.
 
 …plus the systems that decide whether any of it can be believed: `proof.py`
 (capability levels 0–5, derived from evidence bound to a code hash),

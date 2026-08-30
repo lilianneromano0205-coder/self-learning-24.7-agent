@@ -84,6 +84,46 @@ DEFAULT_VISION_MODEL = os.environ.get("VISION_MODEL") \
     or os.environ.get("OPENROUTER_VISION_MODEL") or _VISION_DEFAULT
 
 
+# --------------------------------------------------------------- metering
+#
+# THESE TWO RAILS SPEND REAL MONEY, and until now they spent it outside every
+# ledger the platform keeps. modelgateway.py opens with "every provider call
+# is metered, attributed and bounded" and its proof boundary listed
+# modelgateway.py and modelrouter.py — neither of which is a call site — so a
+# whole hour of Whisper transcription and a hundred vision calls appeared
+# nowhere in `spend`, nowhere in the per-purpose breakdown, and nowhere in the
+# daily budget breaker. Found by walking every outbound HTTP call in the
+# repository rather than by reading the claim.
+#
+# Ingestion is a CLI, so it has no Agent instance to ask. The root comes from
+# AGENT_ROOT — which sandbox.py already puts in the environment of every
+# model-authored command, and which the docker backend already rewrites to the
+# container's view — falling back to the working directory, which is the
+# expert root when the agent runs `python ingest.py ...` itself.
+
+def _meter_root():
+    root = os.environ.get("AGENT_ROOT") or os.getcwd()
+    return root if os.path.isdir(os.path.join(root, "logs")) \
+        or os.path.isfile(os.path.join(root, "settings.toml")) else os.getcwd()
+
+
+def _meter(purpose, provider, model, usage=None, cost=0.0, ms=0, ok=True,
+           note=""):
+    """Record one ingestion provider call. Never raises: metering must not be
+    able to break the ingestion it is measuring."""
+    try:
+        import modelgateway
+        root = _meter_root()
+        modelgateway.record(root, purpose=purpose, role="ingest",
+                            provider=provider, model=model, usage=usage or {},
+                            cost=cost, task=os.environ.get("AGENT_TASK_ID"),
+                            ms=int(ms), ok=ok, note=note)
+        if cost:
+            modelgateway.charge(root, cost)
+    except Exception:
+        pass
+
+
 def classify(path):
     return TYPE_BY_EXT.get(os.path.splitext(path)[1].lower(), "unknown")
 
@@ -315,15 +355,66 @@ def transcribe_chunk(path, api_key):
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": ctype},
         method="POST")
     for attempt in range(5):
+        t0 = time.time()
         try:
             with urllib.request.urlopen(req, timeout=600) as r:
-                return json.loads(r.read().decode("utf-8"))
+                out = json.loads(r.read().decode("utf-8"))
+            # Whisper is billed per SECOND OF AUDIO, not per token, so there
+            # is no token count to record and inventing one would be worse
+            # than recording none. The duration is what the bill is computed
+            # from, so that is what the ledger carries; `whisper_per_hour_usd`
+            # under [agent] prices it if the owner sets it, and 0 means the
+            # call is counted and attributed but not charged.
+            secs = float(out.get("duration") or 0.0)
+            _meter("transcription", "groq", GROQ_WHISPER_MODEL,
+                   cost=_audio_cost(secs), ms=(time.time() - t0) * 1000,
+                   note=f"{secs:.1f}s of audio ({os.path.basename(path)})")
+            return out
         except urllib.error.HTTPError as e:
+            _meter("transcription", "groq", GROQ_WHISPER_MODEL,
+                   ms=(time.time() - t0) * 1000, ok=False,
+                   note=f"HTTP {e.code} (attempt {attempt + 1})")
             if e.code in (429, 500, 502, 503) and attempt < 4:
                 time.sleep(2 ** attempt * 2)
                 continue
             raise
     raise RuntimeError("unreachable")
+
+
+def _vision_cost(usage):
+    """Priced from the SAME settings.toml table the loop prices its calls
+    from, looked up by the vision rail's provider name, so a vision call and a
+    step call on the same provider cannot be billed at two different rates.
+    A provider with no declared price records $0 — and the ledger row still
+    exists, which is the difference between 'free' and 'invisible'."""
+    usage = usage or {}
+    try:
+        import tomllib
+        with open(os.path.join(_meter_root(), "settings.toml"), "rb") as f:
+            cfg = tomllib.loads(f.read().decode("utf-8-sig"))
+        prov = ((cfg.get("providers") or {}).get(VISION_PROVIDER) or {})
+        return round(
+            (float(usage.get("prompt_tokens") or 0) / 1e6)
+            * float(prov.get("input_per_mtok") or 0)
+            + (float(usage.get("completion_tokens") or 0) / 1e6)
+            * float(prov.get("output_per_mtok") or 0), 6)
+    except (OSError, ValueError, KeyError):
+        return 0.0
+
+
+def _audio_cost(seconds):
+    """Whisper's price is per hour of audio and varies by provider and model,
+    so it is READ, never guessed: [agent] whisper_per_hour_usd in the expert's
+    settings.toml. Unset means 0 — the call is still counted and attributed,
+    and the ledger says plainly that it was not priced."""
+    try:
+        import tomllib
+        with open(os.path.join(_meter_root(), "settings.toml"), "rb") as f:
+            cfg = tomllib.loads(f.read().decode("utf-8-sig"))
+        rate = float((cfg.get("agent") or {}).get("whisper_per_hour_usd") or 0)
+    except (OSError, ValueError, KeyError):
+        rate = 0.0
+    return round(rate * (float(seconds or 0) / 3600.0), 6)
 
 
 def transcribe(src, dst):
@@ -422,8 +513,19 @@ def vision(image, dst, prompt=None):
         headers={"Authorization": f"Bearer {api_key}",
                  "Content-Type": "application/json"},
         method="POST")
-    with urllib.request.urlopen(req, timeout=300) as r:
-        resp = json.loads(r.read().decode("utf-8"))
+    t0 = time.time()
+    try:
+        with urllib.request.urlopen(req, timeout=300) as r:
+            resp = json.loads(r.read().decode("utf-8"))
+    except Exception as e:
+        _meter("vision", VISION_PROVIDER, DEFAULT_VISION_MODEL,
+               ms=(time.time() - t0) * 1000, ok=False,
+               note=f"{type(e).__name__}: {e}"[:180])
+        raise
+    _meter("vision", VISION_PROVIDER, DEFAULT_VISION_MODEL,
+           usage=resp.get("usage") or {}, cost=_vision_cost(resp.get("usage")),
+           ms=(time.time() - t0) * 1000,
+           note=f"1 image ({os.path.basename(image)})")
     text = resp["choices"][0]["message"]["content"]
     os.makedirs(os.path.dirname(dst) or ".", exist_ok=True)
     with open(dst, "w", encoding="utf-8") as f:
@@ -484,8 +586,25 @@ def is_video_url(url):
     """True for any known video/course-video host (yt-dlp handles far more;
     the Ripper can still be pointed at anything by hand)."""
     p = urllib.parse.urlsplit(url)
-    hostpath = (p.netloc + p.path).lower().replace("www.", "")
-    return any(h in hostpath for h in VIDEO_HOSTS)
+    # THE HOST DECIDES. Matching netloc+PATH meant an ordinary article whose
+    # slug happened to name a video host — "why-tiktok.com-is-dying" — was
+    # routed to the video downloader and never fetched as a page. A host is
+    # matched exactly or as a parent domain, so `youtube.com` still matches
+    # `www.youtube.com` and `m.youtube.com` and no longer matches
+    # `youtube.com.example.org`.
+    host = (p.netloc.lower().split("@")[-1].split(":")[0])
+    path = p.path.lower()
+    for h in VIDEO_HOSTS:
+        h = h.lower()
+        if "/" in h:                       # entries like "linkedin.com/learning"
+            dom, _, seg = h.partition("/")
+            if (host == dom or host.endswith("." + dom)) and \
+                    path.startswith("/" + seg):
+                return True
+            continue
+        if host == h or host.endswith("." + h):
+            return True
+    return False
 
 
 def is_playlist_url(url):
@@ -636,21 +755,66 @@ def _ip_int(dotted):
 
 
 def _blocked_ip(ip):
-    """-> reason, or "" when the address is a normal public one."""
-    if ":" in ip:                                  # IPv6
-        low = ip.lower()
-        if low in ("::1", "::") or low.startswith(("fe80", "fc", "fd")):
-            return "loopback/link-local/unique-local IPv6"
-        return ""
+    """-> reason, or "" when the address is a normal public one.
+
+    THE IPv6 BRANCH WAS A STRING PREFIX TEST, and an IPv4 address has more
+    than one IPv6 spelling. `::ffff:169.254.169.254` and
+    `0:0:0:0:0:ffff:a9fe:a9fe` are both the cloud metadata endpoint, and both
+    passed: they contain a colon, so the IPv4 table was never consulted, and
+    they start with neither `fe80` nor `fc`/`fd`. Ingestion is the LOWEST
+    privilege input in the platform — a .url file dropped in inbox/ is
+    auto-scanned and every line reaches fetch_url — so that was one line of
+    text away from reading instance credentials.
+
+    `ipaddress` knows all of this, for both families, including the mapped
+    and 6to4 forms that carry an IPv4 address inside an IPv6 one. The
+    hand-written table is gone rather than extended, because the next
+    spelling would have been missed the same way.
+    """
+    import ipaddress
     try:
-        v = _ip_int(ip)
-    except (ValueError, IndexError):
+        a = ipaddress.ip_address(str(ip).strip())
+    except ValueError:
         return ""
-    for net, bits, why in BLOCKED_NETS:
-        mask = (0xFFFFFFFF << (32 - bits)) & 0xFFFFFFFF
-        if (v & mask) == (_ip_int(net) & mask):
-            return why
+    # an IPv4 address wearing an IPv6 spelling is an IPv4 address
+    embedded = getattr(a, "ipv4_mapped", None) or getattr(a, "sixtofour", None)
+    if embedded is not None:
+        a = embedded
+    if a.is_loopback:
+        return "loopback"
+    if a.is_link_local:
+        return "link-local — cloud instance metadata lives here"
+    if a.is_private:
+        return "a private network"
+    if a.is_reserved or a.is_multicast or a.is_unspecified:
+        return "a reserved, multicast or unspecified address"
     return ""
+
+
+def _host_as_ip(host):
+    """A host that IS an address, in any spelling a resolver accepts.
+
+    `http://2130706433/` is 127.0.0.1 written as a 32-bit integer, and
+    `http://0x7f000001/` is the same in hex. Both reach the loopback through
+    the ordinary resolver and neither looks like an address to
+    `getaddrinfo`-then-check, because the check only ever saw what came back.
+    """
+    import ipaddress
+    h = str(host or "").strip().strip("[]")
+    try:
+        return ipaddress.ip_address(h)
+    except ValueError:
+        pass
+    try:
+        n = int(h, 0) if h.lower().startswith("0x") else int(h)
+    except ValueError:
+        return None
+    if 0 <= n <= 0xFFFFFFFF:
+        try:
+            return ipaddress.ip_address(n)
+        except ValueError:
+            return None
+    return None
 
 
 def _check_host(url, root=None):
@@ -682,6 +846,21 @@ def _check_host(url, root=None):
     host = urllib.parse.urlsplit(str(url)).hostname or ""
     if not host:
         raise ValueError(f"no host in {url!r}")
+    # A HOST THAT IS ALREADY AN ADDRESS is checked as one, before any
+    # resolution: an integer or hex spelling of 127.0.0.1 is not a name the
+    # resolver has to agree about, and on a stack where getaddrinfo refuses
+    # it the old code took the "unresolvable, the fetch will fail anyway"
+    # exit while urllib went on to connect.
+    literal = _host_as_ip(host)
+    if literal is not None:
+        why = _blocked_ip(str(literal))
+        if why:
+            raise ValueError(
+                f"refusing to fetch {host} — that is {literal} ({why}). "
+                f"Ingestion reads the public web; internal addresses are a "
+                f"server-side request forgery target. Set "
+                f"ALLOW_PRIVATE_INGEST=1 to override deliberately.")
+        return
     import socket
     try:
         infos = socket.getaddrinfo(host, None)

@@ -1,5 +1,190 @@
 # Changelog
 
+## v9 — an outside reader found the gap between two authorities (2026-08-29)
+
+An external audit read the implementation rather than the README and made
+eleven specific claims. **Every one was reproduced before it was fixed**, and
+the reproduction is what decided the priority — two of the eleven turned out
+to be worse than described, and one turned out not to be a defect at all.
+
+The headline is the one that made the rest matter.
+
+### The control plane had two doors and one lock
+
+`fileauth.py` puts containment in a typed ZONE, and the `write_file` tool has
+refused to touch control state ever since. `policy.py` screens what a model
+may run, and says in its own docstring that it reads a STRING and cannot
+follow the program that string starts. Both are correct. Between them was an
+invariant neither owned:
+
+```
+write_file("settings.toml", ...)                        -> REFUSED
+run_command('python -c "open(\'settings.toml\',\'w\')..."')  -> exit 0, WROTE IT
+```
+
+Measured on the shipped default (`sandbox = "host"`) through a real
+practitioner task: `settings.toml`, `prompts/constitution.md` and
+`approvals/*.json` were all rewritten by a model-written command while the
+file tool was being refused three lines earlier in the same transcript. The
+roles that hold `run_command` are practitioner, examiner, ripper and the
+default role — `settings.toml` gives them no `tools` list, so `allowed_tools`
+grants them everything. Not a corner case; the shipping configuration.
+
+Switching to `sandbox = "docker"` did not fix it either. The container
+bind-mounted the whole expert root **read-write** at `/work`, so the container
+improved host isolation and left the agent's own authority inside the mount.
+
+**`controlplane.py`, the sixth authority.** It brackets every model-authored
+execution and is honest about the difference between its backends: on docker
+each control path is bound **read-only** and the write is *prevented* by the
+kernel; on `host`, where there is no boundary to prevent with, the zone is
+sealed before the command and verified after — a change is *reverted*, the
+command is reported `exit=3` whatever it returned (so no gate can pass on a
+run that edited the gate), and the attempt lands in
+`logs/controlplane.jsonl`. The sealed set is **derived from `fileauth`'s
+zones**, never listed a second time.
+
+Two things the audit did not reach, found while fixing what it did:
+
+* **`identity.md` was agent-writable through the ordinary file tool.** It is a
+  system-prompt source — `system_sources()` puts it in every window, right
+  after the constitution — and the panel writes it *for the owner*, with a
+  backup and a `"by": "owner"` history line. It classified as ZONE_ROOT, so
+  even the Rule-of-Two roles that hold no shell could rewrite their own
+  charter. `acquisitions.json` (the ledger whose own docstring says "the OWNER
+  grants trust. Never the agent") and `training/` were in the same position.
+* **`goals/*/events.jsonl` cannot be treated as append-only.** The first
+  version of the seal allowed ledgers to grow. But `contract.replay` rebuilds
+  a contract's state purely from that ledger and lets it overrule the
+  snapshot — so an appended line is a verdict, not a note, and "it only
+  appended" would have let a worker append `{"kind":"state","to":"verified"}`.
+  Growth is now exempt only when the harness itself declared the append.
+
+`tests/test_controlplane.py` is the regression the audit asked for: every
+control path `fileauth` declares, crossed with every way a shell changes a
+file, driven through a real loop task by a role that really holds
+`run_command`. **100 attacks, zero durable changes.** With the seal disabled it
+fails on every control path, so it is a test of the fix rather than of the intent.
+
+And it stays cheap. The first seal re-read every control file on every
+command: on a fleet with three thousand approvals that measured **27 seconds
+per command**, and a runbook issues one per step. Stat-gated caches took the
+same fleet to **373 ms**, a new expert to 5.5 ms — with an asserted ceiling in
+the test, because a safety control that gets slower every month is one
+somebody eventually turns off.
+
+### The other ten
+
+| # | Defect | Measured |
+|---|---|---|
+| 1 | **The course lock was not part of the claim.** `can_lock` ran outside the mutex that claimed the task, and `next_task`'s resume branch never consulted it at all. | Two loops on one course: the queued-vs-queued race needed a ~0.5 ms window; the **resume** path needed no luck and was reproduced end-to-end with two ordinary `loop.py run --drain` processes. |
+| 2 | **`step_failed` matched `"exit=1"` with `startswith`.** | Exit 2, 3, 5, 7, 42 and 255 all read as SUCCESS; 13, 124 and 127 were caught by accident of their first digit. So a visibly failed command never moved the escalation counter, and gotcha retirement could take a failed step as proof the gotcha was gone. |
+| 3 | **A re-exam was marked done when the task was QUEUED.** | scheduled → queued → permanently done, whether the examination succeeded, failed, or never ran. `schedule.json` came out byte-identical in the success case and the total-failure case, which is why the existing test could not see it. |
+| 4 | **`memory.search`'s expert filter was `pass` where it needed `continue`.** | An alpha-scoped query returned the fleet home's own courses — *and stamped them with alpha's name*, so the obvious assertion ("every hit is expert X") passed while it leaked. |
+| 5 | **"Every provider call is metered" was false.** | Five model-provider call sites in the tree; one metered. Groq Whisper transcription and the OpenRouter vision rail spent real money outside every ledger, and `loop.py check` billed a live token per role. The `model-gateway` proof boundary listed `modelgateway.py` and `modelrouter.py` — neither of which calls a provider. |
+| 6 | **`sources.PROOF` expected arXiv at tier 1** while the registry had been corrected to tier 2. | The self-test whose stated job is "a future edit that quietly re-rates the web fails here, in one second" had **no caller** — not in tests, CI, `doctor.py` or `preflight.py`. A self-test nobody runs is a comment. |
+| 7 | **Charter trials shared a root.** Base always first, nothing reset between arms. | A battery gated on `test -f out/thing` is satisfied for the variant by the file the *base* wrote. The confound was systematic, not noisy, so it pointed the same way every time and read as a result. |
+| 8 | **The training registry governed a bare number.** | A caller-supplied `eval_score` with nothing behind it; `promote` compared it to a baseline and called that a held-out gate. |
+| 9 | **A runbook earned trust from its own `verify` lines.** The docstring already promised "AND the caller's own acceptance test passed after". | `test_swarm.py` builds exactly the failing case — a procedure that verifies its own step and produces the artifact the graders reject — asserts the contract is not verified, and never looked at the trust counter, which went up on the same run. |
+| 10 | *(not a defect)* The held-out suite's tasks are in source. | `evalsuite.py` says so itself: "This module cannot stop you peeking; it can refuse to let you forget that you did." No overclaim to fix. |
+
+Fixes, in the same order: the course lock is taken inside the state mutex that
+claims the task, and `adopt_task` consults it too; `step_failed` parses the
+exit code and a run_command result is judged by that code alone; a re-exam
+entry closes on the task's terminal status and a failure re-queues, bounded,
+then records `outcome: "failed"` — *unexamined* being a different and more
+honest thing than *passed*; the filter continues; every provider call site is
+metered and `modelgateway.audit_sources()` makes the invariant checkable the
+way `execution.audit_sources()` already did for the shell, with the two
+genuinely free sites declared by name; the proof table is corrected **and
+wired into the suite**; each trial arm runs in its own clone of the expert, so
+arm order can no longer explain a result; `training.register` requires the
+evaluation's own output and pins its sha256 beside the score, records
+`score_origin: "declared"` in as many words, and refuses from inside an agent
+task along with every other owner-level CLI; and a runbook win counts toward
+`proven` only when the CALLER'S acceptance test passed afterwards, with the
+swarm's reducer — not its workers — filing the outcome.
+
+### The second wave: what the fix pass itself turned up
+
+Closing the eleven above meant reading the neighbourhood around each one, and
+that found **eighteen more**, every one reproduced before it was fixed. Two
+were worse than anything the external audit reached.
+
+**A second control-plane bypass, needing no shell at all.** `candidates.py`
+is the best-of-N engine: it stashes each attempt's artifacts and restores the
+winner. It reached the filesystem with `os.path.join` and never asked the File
+Authority — and the artifact list comes from the task's own `write_file`
+STEPS, where a *refused* write is still recorded. `candidates/` classified as
+ZONE_ROOT, so a worker could write
+`candidates/<id>/<n>/score.json` declaring `artifacts:
+["prompts/constitution.md"]`, drop its own constitution beside it, and let the
+loop's own `_promote_best_attempt` copy that over **the first block of every
+system prompt**. Naming `../../../../OUT.txt` as an artifact made `promote()`
+write outside the expert root entirely — the reproduction created a file in
+the user's home directory. Both reachable with `write_file` alone, so the
+Rule-of-Two roles that are deliberately denied a shell could do it. Every path
+in that module now crosses `fileauth.resolve` with the agent's own rights.
+
+**A duplicate dict key deleted a capability — one this pass had just added.**
+`proof.REGISTRY` already used `"control-plane"` for the panel. The new
+worker-authority entry took the same name ninety lines above it, and Python
+keeps the last of two identical keys and says nothing: both read fine in the
+source, one did not exist at runtime. `check_registry_keys_are_unique` now
+parses every dict literal in the platform's AST, because `in REGISTRY` cannot
+catch a collision that has already resolved.
+
+**Seven more paths were read into a prompt or a decision while the agent could
+write them.** The same walk that found `identity.md`: `commons-digest.md` (the
+fleet-lessons block of the agent's own context), `missions/*/mission.json` (the
+objective `context.compile` recompiles into every window "so it cannot
+drift"), `mastery/*/events.jsonl` (what `verdict` computes MASTERED from),
+`commons/quarantine.md` (a fleet-attributed "this claim was withdrawn" the
+premise checker tells the next window to obey), `capabilities/` (the isolated
+install the capability probe imports from), `identity.history.jsonl` and the
+`identity.md.bak-*` rollback copies. All CONTROL now.
+
+`courses/*/sources.json` could not be zoned — the agent runs `ingest.py
+add-url` itself and that records sources — so the **tier is derived instead of
+trusted**: recomputed from `classify()` on read, which is the answer
+`record()` stored honestly and not the one a forger stored. A genuine owner
+override moved to `courses/*/source-overrides.json`, which is control-zoned.
+Before: a worker could rate a forum thread tier 1 and forge `override: {"by":
+"owner"}`, and this module's own docstring calls false authority in the
+learning pipeline "the one contamination that compounds".
+
+**Exactly-once was three steps with nothing between them.** `mcp.guarded_call`
+did `lookup` → `unfinished` → `begin`, each locking only its own read or
+append — so the ledger was never corrupt and the guarantee was never there.
+Two processes retrying one task could both find nothing recorded and both hit
+the world: a second wire transfer, a second email. Now one per-effect lock
+spans the whole claim, released before the call so a sibling arriving mid-call
+sees the `started` row and stops.
+
+| # | Defect | What it cost |
+|---|---|---|
+| S1 | **The community-skill script guard was a substring test.** | Four ordinary spellings ran the untrusted script: `cd skills/x/scripts && python run.py`, `python -m skills.x.scripts.run`, a doubled separator, and `sh -c`. All measured. Now normalised and matched at a path boundary. |
+| S2 | **The SSRF guard judged IPv6 by string prefix.** | `::ffff:169.254.169.254` and `0:0:0:0:0:ffff:a9fe:a9fe` — both the cloud metadata endpoint — passed, as did `http://2130706433/` and `http://0x7f000001/`. Ingestion is the lowest-privilege input here: one line in a `.url` file dropped in `inbox/`. `ipaddress` replaced the hand-written table. |
+| S3 | `is_video_url` matched VIDEO_HOSTS against netloc **and path**. | An article titled "why-tiktok.com-is-dying" was routed to the video downloader and never fetched as a page. |
+| S4 | `_probe`'s malformed-response check raises `IndexError`; its handler tuple listed `KeyError`. | One provider answering 200 with an empty `choices` killed the whole `loop.py check` sweep, from a function whose docstring says it "reports reality". |
+| S9 | `designcheck.thresholds_for` had **no monotone combiner for `require_responsive`**, so it fell through to a raw assignment. | Its first line promises "a course's standards can RAISE the bar, never lower it" — and a worker failing the design gate could write `require_responsive: false` into its own `standards.md`, which lives in the workspace. An unknown key is now refused rather than trusted. |
+| S10 | `context._Source.add_text` truncated with a bare slice and recorded `"trimmed": False`. | The Context Window Viewer reported a block as fully included while the model got it cut mid-sentence with no pointer to the rest — and a gotchas block is a BINDING instruction. |
+| S11 | **The panel never wrote to the org audit trail.** `ui._may` called `org.check` and nothing recorded that the actor then did it. | `org.py` opens with "every mutation attributable". In a shared fleet a named member could mint experts and queue work through the panel and `org/audit.jsonl` gained zero rows. |
+| S12 | `evalsuite.py` documented a two-arm bare-vs-harness comparison. | There is no bare arm; `run_split` hardcodes `arm: "harness"`. The docstring now says so and points at `benchmark.py`, which really does run both. |
+| S21/S24 | `contract.transition` was an unlocked read-modify-write over a **shared `.tmp`**. | Measured with two threads on one contract: the losing transition died on `PermissionError` — a legitimate move failing with a rights error instead of a contract rule — and on a kernel without delete-pending semantics both could have written, recording a jump out of a terminal state that `TRANSITIONS` exists to refuse. The acceptance **seal** append was unlocked too, and a lost seal row makes a goal permanently unverifiable. |
+| S23/S26 | `blocked.md` and the whole gotcha ledger were unlocked appends, and `gotchas.py` was the one ledger with **neither a lock nor a unique temp**. | A lost `ask_human` append is an escalation lost: the task is marked blocked unconditionally, so it waits forever on a question the owner was never asked. |
+| S27 | `_exam_tick` recorded an exam as dispatched **on the same beat as `add_task`** — the defect just fixed for re-exams, in its sibling function. | A Student task that died terminally left the exam recorded with a matching content hash and the tick skipped it forever: a course that quietly stopped being examined while the panel kept showing the last score. |
+| S28 | The swarm's RULE-4 lease was keyed by **group**; the thing that must not run twice is the **runbook**. | The fan-out gate requires two distinct runbooks across the plan, not per pair — so three groups served by two procedures could run one procedure twice at once, with real `do` commands and real side effects. |
+| S8 | Three proof capabilities' `code` boundaries excluded the file that enforces their invariant. | Delete `CONTROL_PATHS` from `fileauth` and an agent marks its own skill proven while `skills-provenance` stays green. Same shape as the model-gateway boundary above. |
+
+Refuted, and worth recording as refuted: `sources.classify` does **not** tier a
+lookalike host (all four spellings came back tier 3); `memory.retire` has no
+prefix-matching handler loop; `prospective.py check` does **not** consume an
+armed intention when it runs without an agent — it returns 0 and changes
+nothing.
+
+**The suite: 120 executed, 116 passed, 4 skipped, 0 failed.**
+
 ## v8 — three runs on computers we do not own (2026-08-23)
 
 v7 shipped with a green suite and an honest limits list whose twelfth entry

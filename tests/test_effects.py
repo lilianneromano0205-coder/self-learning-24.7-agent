@@ -258,8 +258,58 @@ def main():
     print("[governance] role allowlists and tool deny lists enforced before "
           "the server is touched; 50k-char result capped at 20k; a vetted "
           "catalog of 8 open-source servers ships")
+    check_exactly_once_is_one_critical_section()
     print("PASS test_effects")
 
+
+
+def check_exactly_once_is_one_critical_section():
+    """Two processes retrying one task must not both hit the world.
+
+    The check and the claim were three separate steps — `lookup`, then
+    `unfinished`, then `begin` — each locking only its own read or append.
+    Nothing held the ground between them, so two callers could both find an
+    empty ledger and both proceed. `begin` and `record` kept the LEDGER
+    intact the whole time, which is why this looked guarded: the file was
+    never corrupt, the guarantee was simply not there.
+
+    Here two threads race for one effect key with a real barrier. Exactly one
+    may claim it.
+    """
+    import threading
+    import tempfile
+    import effects
+    import locks
+    root = tempfile.mkdtemp(prefix="eff-race-")
+    os.makedirs(os.path.join(root, "logs"), exist_ok=True)
+    key = effects.key_of("lin-1", "mail", "send", {"to": "a@b.c"})
+    barrier = threading.Barrier(2)
+    claimed = []
+
+    def racer():
+        barrier.wait()
+        with locks.holding(effects.claim_path(root, key), timeout=30.0,
+                           stale=20.0):
+            if effects.lookup(root, key) or effects.unfinished(root, key):
+                return
+            effects.begin(root, key, "t", "mail", "send", {"to": "a@b.c"})
+            claimed.append(1)
+
+    ts = [threading.Thread(target=racer) for _ in range(2)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert len(claimed) == 1, (
+        f"{len(claimed)} of 2 racing callers claimed the same effect — the "
+        f"one mechanism between a retried task and a second wire transfer")
+    started = [r for r in effects.history(root)
+               if r.get("key") == key and r.get("status") == "started"] \
+        if hasattr(effects, "history") else []
+    print(f"[claim] two threads raced one effect key through the real "
+          f"lookup/unfinished/begin sequence and exactly one claimed it"
+          + (f"; the ledger holds {len(started)} started row(s)"
+             if started else ""))
 
 if __name__ == "__main__":
     main()

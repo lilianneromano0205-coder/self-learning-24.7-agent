@@ -185,6 +185,26 @@ def check_the_probe_is_cheap(home, slug, srv):
           f"{len(srv.requests)} probe request(s): the check caches by "
           f"provider/model pair rather than charging once per role")
 
+    # CHEAP IS NOT FREE, AND FREE IS NOT INVISIBLE. Each of those requests is
+    # a real chat/completions call against a real key. They were metered
+    # nowhere, while modelgateway.py opened with "every provider call is
+    # metered, attributed and bounded" — the docstring of the one module that
+    # would have had to record them. The test above asserts the COUNT of
+    # requests and could never have noticed, because a request that is never
+    # recorded produces no row to contradict.
+    import sys as _sys
+    _sys.path.insert(0, AGENT_DIR)
+    import modelgateway
+    rows = [c for c in modelgateway.calls(root) if c["purpose"] == "probe"]
+    assert len(rows) >= len(srv.requests), (
+        f"{len(srv.requests)} live probe request(s) were made and "
+        f"{len(rows)} reached the ledger — an unmetered provider path is "
+        f"how the daily budget breaker stops seeing spend")
+    assert all(r["provider"] and r["model"] for r in rows), rows[:2]
+    print(f"[metered] all {len(rows)} probe call(s) landed in the model-call "
+          f"ledger with their provider and model — `loop.py check` is a real "
+          f"provider call and is now attributed like any other")
+
 
 def check_the_first_task_completes(home, slug, srv):
     """After the probe passes, the thing the operator actually wants."""

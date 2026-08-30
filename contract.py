@@ -78,6 +78,7 @@ import hashlib
 import json
 import os
 import sys
+import threading
 import time
 
 HOME = os.path.dirname(os.path.abspath(__file__))
@@ -155,6 +156,19 @@ def event(root, gid, kind, **data):
     row.update(data)
     import locks
     with locks.holding(p, timeout=10.0, stale=8.0):
+        # Declare the append to the Control Plane Authority BEFORE making it.
+        # This ledger is CONTROL state, and it grows while model-authored
+        # commands are in flight (swarm.py runs its workers as threads), so
+        # the seal around those commands has to be able to tell the
+        # platform's own append apart from a worker appending
+        # `{"kind": "state", "to": "verified"}` to grade itself — replay()
+        # below lets this ledger overrule the snapshot, so that line would
+        # not be a note, it would be the verdict.
+        try:
+            import controlplane
+            controlplane.harness_wrote(p)
+        except Exception:                    # pragma: no cover — defensive
+            pass
         _append(p, row)
     return row
 
@@ -261,7 +275,13 @@ def create(root, gid, goal, criteria="", accept=None, non_goals="",
 def _write(root, gid, c):
     p = path(root, gid)
     os.makedirs(os.path.dirname(p), exist_ok=True)
-    tmp = p + ".tmp"
+    # UNIQUE temp, not the shared `p + ".tmp"`. Two writers sharing one
+    # scratch name is a lost update on POSIX and, on Windows, an os.replace
+    # that raises PermissionError into whichever caller lost — so a
+    # legitimate transition failed with a rights error instead of a contract
+    # rule. Measured with two threads on one contract: one transition was
+    # accepted and the other died on the shared name.
+    tmp = f"{p}.{os.getpid()}.{threading.get_ident()}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(c, f, indent=1, ensure_ascii=False)
     os.replace(tmp, p)
@@ -281,11 +301,19 @@ def freeze(root, gid):
         raise ContractError(f"cannot freeze from state {c['state']!r}")
     h = _accept_hash(c["acceptance"])
     sp, kind = seal_path(root)
+    import locks
     os.makedirs(os.path.dirname(sp), exist_ok=True)
     row = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "gid": c["gid"],
            "accept_hash": h, "n": len(c["acceptance"]), "where": kind}
-    with open(sp, "a", encoding="utf-8") as f:
-        f.write(json.dumps(row) + "\n")
+    # UNDER THE LOCK, for the same reason event() is: a lost seal row is not
+    # a lost note. `verify` treats a contract with no seal as never frozen and
+    # refuses it, so a row clobbered by a concurrent freeze makes that goal
+    # permanently unverifiable — the one terminal state this platform treats
+    # as honest completion, unreachable no matter how well the work goes. The
+    # sibling seal ledger in frontier.py has always locked its append.
+    with locks.holding(sp, timeout=10.0, stale=8.0):
+        with open(sp, "a", encoding="utf-8") as f:
+            f.write(json.dumps(row) + "\n")
     c["accept_hash"] = h
     c["sealed"] = {"where": kind, "at": row["at"]}
     c["state"] = "ready"
@@ -317,19 +345,30 @@ def _sealed_hash(root, gid):
 
 def transition(root, gid, new_state, why=""):
     """The ONLY way state changes. Illegal jumps are refused by the machine,
-    not by the caller's discipline."""
-    c = load(root, gid)
-    cur = c["state"]
-    if new_state not in STATES:
-        raise ContractError(f"no such state {new_state!r}")
-    if new_state not in TRANSITIONS.get(cur, ()):
-        raise ContractError(
-            f"illegal transition {cur} -> {new_state}: a contract cannot "
-            f"{'leave a terminal state' if not TRANSITIONS.get(cur) else 'jump there'}"
-            + (f" ({why})" if why else ""))
-    c["state"] = new_state
-    c["state_why"] = str(why or "")
-    _write(root, gid, c)
+    not by the caller's discipline.
+
+    UNDER THE LOCK, because "the only way" has to mean the only way even when
+    two things ask at once. read -> check TRANSITIONS -> write was three
+    steps with nothing between them: a pursuit settling to `verified` and a
+    repair pass moving to `blocked` could both read `running`, both find
+    their move legal, and both write — and TRANSITIONS says a terminal state
+    has no exits, so the ledger would record a jump the machine exists to
+    refuse. The lock makes the check and the write one decision, which is
+    what the state machine was always claiming to be."""
+    import locks
+    with locks.holding(path(root, gid), timeout=10.0, stale=8.0):
+        c = load(root, gid)
+        cur = c["state"]
+        if new_state not in STATES:
+            raise ContractError(f"no such state {new_state!r}")
+        if new_state not in TRANSITIONS.get(cur, ()):
+            raise ContractError(
+                f"illegal transition {cur} -> {new_state}: a contract cannot "
+                f"{'leave a terminal state' if not TRANSITIONS.get(cur) else 'jump there'}"
+                + (f" ({why})" if why else ""))
+        c["state"] = new_state
+        c["state_why"] = str(why or "")
+        _write(root, gid, c)
     event(root, gid, "state", to=new_state, why=str(why or "")[:300])
     return c
 

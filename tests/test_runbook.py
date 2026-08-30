@@ -163,12 +163,54 @@ def check_trust_is_earned_not_declared(root):
     assert runbook.status(root, "earner") == "candidate", (
         "a status field inside the runbook file was believed — the author "
         "does not get a vote on whether the author is trusted")
-    # three verified wins promote
+    # A RUN THE CALLER NEVER ACCEPTED EARNS NOTHING. This loop used to be
+    # the whole proof of "trust is earned": three bare runs, no contract, no
+    # grader, and the printout called them "verified wins". But a runbook's
+    # own `verify` lines are written by whoever wrote the runbook, so three
+    # of them prove that the procedure does what its author said it does —
+    # not that it does what was asked. The module docstring already promised
+    # the stronger rule ("AND the caller's own acceptance test passed
+    # after"); the code did not implement it and this test enshrined the
+    # weaker one.
+    for i in range(runbook.PROMOTE_WINS + 2):
+        r = runbook.run(root, "earner", allow_candidate=True)
+        assert r["ok"] and r["accepted"] is False, r
+    assert runbook.status(root, "earner") == "candidate", (
+        f"{runbook.PROMOTE_WINS + 2} runs whose steps verified promoted a "
+        f"runbook that no caller ever accepted — 'proven' then means "
+        f"'its own checks passed', which is a claim about the author")
+
+    # ...and an ACCEPTED win does promote. `accept` is the caller's own
+    # verdict, supplied from outside the procedure.
+    accepted_runs = {"n": 0}
+
+    def caller_accepts():
+        accepted_runs["n"] += 1
+        return True
+
     for i in range(runbook.PROMOTE_WINS):
         assert runbook.status(root, "earner") == "candidate", i
-        r = runbook.run(root, "earner", allow_candidate=True)
-        assert r["ok"], r
+        r = runbook.run(root, "earner", allow_candidate=True,
+                        accept=caller_accepts)
+        assert r["ok"] and r["accepted"], r
     assert runbook.status(root, "earner") == "proven"
+    assert accepted_runs["n"] == runbook.PROMOTE_WINS
+
+    # a run whose steps verify but whose CALLER rejects it is not a win
+    _write_rb(root, {
+        "name": "wrong-thing", "triggers": ["wrong"],
+        "steps": [{"do": _touch_cmd(os.path.join(root, "out", "w.txt")),
+                   "verify": _exists(os.path.join(root, "out", "w.txt"))}]})
+    for _ in range(runbook.PROMOTE_WINS + 1):
+        r = runbook.run(root, "wrong-thing", allow_candidate=True,
+                        accept=lambda: False)
+        assert r["ok"] and not r["accepted"], r
+    assert runbook.status(root, "wrong-thing") == "candidate", (
+        "a procedure whose every step proves itself while the caller's "
+        "graders reject the result reached 'proven' — that is a procedure "
+        "that reliably does the WRONG thing, promoted for reliability")
+    t = runbook._trust(root)["wrong-thing"]
+    assert t["wins"] == runbook.PROMOTE_WINS + 1 and t["accepted_wins"] == 0, t
     # the trust ledger is CONTROL: the worker's file tools are refused
     try:
         fileauth.resolve(root, "runbooks/trust.json", mode="write",
@@ -190,11 +232,15 @@ def check_trust_is_earned_not_declared(root):
     assert runbook.status(root, "loser") == "quarantined"
     r = runbook.run(root, "loser", allow_candidate=True)
     assert not r["ok"] and "QUARANTINED" in r["why"], r
-    print(f"[earned] {runbook.PROMOTE_WINS} verified wins promoted a "
+    print(f"[earned] {runbook.PROMOTE_WINS} ACCEPTED wins promoted a "
           f"candidate to proven, recorded by the harness in a ledger the "
-          f"worker cannot write; a self-declared 'proven' inside the file "
-          f"was ignored; {runbook.QUARANTINE_LOSSES} consecutive losses "
-          f"quarantined, and a quarantined runbook refuses to run")
+          f"worker cannot write; {runbook.PROMOTE_WINS + 2} self-verified "
+          f"runs with no caller acceptance promoted nothing, and a procedure "
+          f"the caller's graders rejected stayed a candidate after "
+          f"{runbook.PROMOTE_WINS + 1} of its own clean runs; a "
+          f"self-declared 'proven' inside the file was ignored; "
+          f"{runbook.QUARANTINE_LOSSES} consecutive losses quarantined, and "
+          f"a quarantined runbook refuses to run")
 
 
 def check_matching_respects_trust(root):
@@ -224,8 +270,14 @@ def check_reconcile_without_a_model(home, root):
     _write_rb(root, {
         "name": "make-report", "triggers": ["machinist", "report"],
         "steps": [{"do": _touch_cmd(art), "verify": _exists(art)}]})
+    # ACCEPTED wins: the caller checks the artifact itself, from outside the
+    # procedure. A bare run proves the runbook's own verify lines and earns
+    # nothing — see check_trust_is_earned_not_declared.
     for _ in range(runbook.PROMOTE_WINS):
-        assert runbook.run(root, "make-report", allow_candidate=True)["ok"]
+        r = runbook.run(root, "make-report", allow_candidate=True,
+                        accept=lambda: os.path.exists(art))
+        assert r["ok"] and r["accepted"], r
+    assert runbook.status(root, "make-report") == "proven"
     os.remove(art)                       # so reconcile has real work to do
 
     before = os.path.getmtime(os.path.join(root, "state.json")) \
@@ -279,8 +331,10 @@ def check_pursue_prefers_the_machine(home):
         "name": "weekly-artifact", "triggers": ["weekly", "artifact"],
         "steps": [{"do": _touch_cmd(art), "verify": _exists(art)}]})
     for _ in range(runbook.PROMOTE_WINS):
-        assert runbook.run(root, "weekly-artifact",
-                           allow_candidate=True)["ok"]
+        r = runbook.run(root, "weekly-artifact", allow_candidate=True,
+                        accept=lambda: os.path.exists(art))
+        assert r["ok"] and r["accepted"], r
+    assert runbook.status(root, "weekly-artifact") == "proven"
     os.remove(art)
 
     # timeout=30, deliberately tight: on the machine path this pursuit never
@@ -351,7 +405,11 @@ def check_applicability_is_probed(root):
         "steps": [{"do": _touch_cmd(art), "verify": _exists(art)}]})
     for _ in range(runbook.PROMOTE_WINS):
         open(marker, "w").close()
-        assert runbook.run(root, "gated-maker", allow_candidate=True)["ok"]
+        # accept=: the caller's own check, from outside the procedure. Only
+        # an accepted win promotes (check_trust_is_earned_not_declared).
+        r = runbook.run(root, "gated-maker", allow_candidate=True,
+                        accept=lambda: os.path.exists(art))
+        assert r["ok"] and r["accepted"], r
     os.remove(art)
     assert runbook.match(root, "make the applic artifact manually") == [], (
         "a negative trigger fired and the runbook still volunteered")
@@ -407,7 +465,9 @@ def check_composition_keeps_every_gate(root):
     rr = runbook.run(root, "comp-parent", allow_candidate=False)
     assert not rr["ok"], "a candidate child ran inside a parent unsupervised"
     for _ in range(runbook.PROMOTE_WINS):
-        assert runbook.run(root, "comp-parent", allow_candidate=True)["ok"]
+        r = runbook.run(root, "comp-parent", allow_candidate=True,
+                        accept=lambda: os.path.exists(a1) and os.path.exists(a2))
+        assert r["ok"] and r["accepted"], r
     assert os.path.exists(a1) and os.path.exists(a2)
     assert runbook.status(root, "comp-child") == "proven", (
         "the child's own outcomes were not recorded through composition")
@@ -418,7 +478,8 @@ def check_composition_keeps_every_gate(root):
         "name": "loop-b", "triggers": ["lb"], "steps": [{"run": "loop-a"}]})
     for n in ("loop-a", "loop-b"):
         for _ in range(runbook.PROMOTE_WINS):
-            runbook.record(root, n, True, "seeded for the cycle check")
+            runbook.record(root, n, True, "seeded for the cycle check",
+                           accepted=True)
     rc = runbook.run(root, "loop-a")
     assert not rc["ok"] and "cycle" in rc["why"] and "loop-a" in rc["why"], rc
     print("[compose] a parent runbook ran its child in place with the "
@@ -432,8 +493,9 @@ def check_recording_earns_nothing(root):
     """Teach-by-demonstration, the honest version: a recorded procedure is
     a CANDIDATE (a demo you watched is a claim), a step with no verify is
     refused (recording does not relax the law), and a --rehearse replay
-    through the full authority stack is win #1 of the three that earn
-    PROVEN."""
+    through the full authority stack proves the recording RUNS — and earns
+    no trust, because a rehearsal is the procedure checking itself. Trust
+    still needs three ACCEPTED wins, and nobody accepted a rehearsal."""
     art = os.path.join(root, "out", "recorded.txt")
     if os.path.exists(art):
         os.remove(art)
@@ -453,13 +515,19 @@ def check_recording_earns_nothing(root):
                         [{"do": _touch_cmd(art), "verify": _exists(art)}],
                         rehearse=True)
     assert r2["rehearsed"] is True, r2
-    assert runbook._trust(root).get("demoed2", {}).get("wins") == 1, (
-        "a verified rehearsal must be recorded as win #1")
+    t2 = runbook._trust(root).get("demoed2", {})
+    assert t2.get("wins") == 1, "a verified rehearsal must be recorded"
+    assert t2.get("accepted_wins") == 0, (
+        "a rehearsal earned an ACCEPTED win — nobody accepted it. The demo "
+        "replayed its own verify lines; that proves the recording runs, not "
+        "that it does the job somebody asked for")
+    assert r2["status"] == "candidate", r2
     assert runbook.load(root, "demoed")["provenance"]["recorded"] is True
     print("[record] a demonstrated procedure landed as a CANDIDATE with "
           "recorded provenance; a step without verify was refused; the "
-          "rehearsal replayed the demo through the authority stack and "
-          "counted as the first of three wins toward PROVEN")
+          "rehearsal replayed the demo through the authority stack, was "
+          "recorded as a run, and earned NO trust — a procedure grading its "
+          "own replay is still the procedure grading itself")
 
 
 if __name__ == "__main__":

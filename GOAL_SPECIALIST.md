@@ -276,7 +276,7 @@ this discipline; the runner now says the same numbers.
 
 ### The security policy (audit gap #81)
 
-`SECURITY.md`: trust boundaries with their mediators, the five authorities,
+`SECURITY.md`: trust boundaries with their mediators, the six authorities,
 the contract's anti-reward-hacking role, and — the part that makes it worth
 trusting — the seven things deliberately NOT defended, each with the reason
 and the compensating control.

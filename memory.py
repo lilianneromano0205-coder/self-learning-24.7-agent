@@ -410,8 +410,16 @@ def search(home, query, kind=None, expert=None, category=None, limit=25):
     if kind in (None, "knowledge"):
         import recall
         for s, loc, snippet in recall.search(home, query, limit=limit * 2):
+            # `continue`, not `pass`. The filter was written and then defeated
+            # by the wrong statement, so an expert-scoped query returned the
+            # fleet home's own courses/ and skills/ — and, worse, STAMPED them
+            # with the requested expert's name two lines below, so the leak
+            # was invisible to the obvious assertion ("every hit is expert X").
+            # This branch searches the HOME root, whose paths carry no expert
+            # segment at all; the per-expert branch below is what answers a
+            # scoped query, and it always filtered correctly.
             if expert and f"/{expert}/" not in loc.replace(os.sep, "/"):
-                pass
+                continue
             hits.append({"kind": "knowledge", "score": s, "expert": expert or "",
                          "text": snippet, "ref": loc})
         # also search each expert's own mind unless one was named

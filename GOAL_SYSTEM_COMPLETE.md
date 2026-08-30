@@ -369,7 +369,7 @@ becomes a cited atom — a wrong belief with a real citation attached).
 decide done; retries, escalation between model tiers, cost brakes per task
 and per day, Retry-After honored with jitter, graceful SIGTERM drain,
 context compiled fresh every task (measured flat at ~1083 tokens while
-fleet history grows). **The five authorities**: Execution (every subprocess
+fleet history grows). **The six authorities**: Execution (every subprocess
 in 85 modules flows through one gateway — audited, 0 violations), File
 (zones: workspace/control/runtime), Credential (4 sources, excluded from
 packaging/backups/model-visible env), Model Gateway (every call metered and

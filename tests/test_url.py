@@ -134,8 +134,85 @@ def main():
           "runs ahead of the wall clock, and a real window still holds a "
           "file back until it stops changing")
     stop_site()
+    check_the_ssrf_guard_reads_addresses_not_strings()
+    check_a_video_host_is_a_HOST()
     print("PASS test_url")
 
+
+
+def check_the_ssrf_guard_reads_addresses_not_strings():
+    """An IPv4 address has more than one spelling, and the guard knew one.
+
+    `_blocked_ip` judged IPv6 by string prefix — `::1`, `fe80`, `fc`, `fd` —
+    so `::ffff:169.254.169.254` and `0:0:0:0:0:ffff:a9fe:a9fe`, which are both
+    the cloud metadata endpoint, passed: they contain a colon so the IPv4
+    table was never consulted, and they start with none of those prefixes.
+    Numeric hosts were worse: `http://2130706433/` is 127.0.0.1 as a 32-bit
+    integer, and the check only ever looked at what getaddrinfo returned — on
+    a stack that refuses that name the code took its "unresolvable, the fetch
+    will fail anyway" exit while urllib went on to connect.
+
+    Ingestion is the LOWEST-privilege input here: a .url file dropped in
+    inbox/ is auto-scanned and every line reaches fetch_url. One line of text
+    is the whole attack.
+    """
+    import ingest
+    BLOCKED = [
+        ("http://169.254.169.254/latest/meta-data/", "cloud metadata, v4"),
+        ("http://[::ffff:169.254.169.254]/", "the same, IPv4-mapped IPv6"),
+        ("http://[0:0:0:0:0:ffff:a9fe:a9fe]/", "the same, written long"),
+        ("http://2130706433/", "127.0.0.1 as a decimal integer"),
+        ("http://0x7f000001/", "127.0.0.1 in hex"),
+        ("http://[::1]/", "IPv6 loopback"),
+        ("http://127.0.0.1/", "IPv4 loopback"),
+        ("http://10.0.0.1/", "a private network"),
+        ("http://[fd00::1]/", "unique-local IPv6"),
+    ]
+    # this file's own fixtures serve on 127.0.0.1 and therefore set
+    # ALLOW_PRIVATE_INGEST — the operator's deliberate override. Clear it, or
+    # the guard is being asked a question it has been told not to answer.
+    saved = os.environ.pop("ALLOW_PRIVATE_INGEST", None)
+    try:
+        allowed = []
+        for url, why in BLOCKED:
+            try:
+                ingest._check_host(url)
+                allowed.append(f"{url} ({why})")
+            except ValueError:
+                pass
+        assert not allowed, (
+            "these resolve inside the network and were not refused:\n  "
+            + "\n  ".join(allowed))
+        ingest._check_host("http://example.com/")  # a public host still works
+        # ...and the override still overrides, or an operator who needs an
+        # intranet page has no way in
+        os.environ["ALLOW_PRIVATE_INGEST"] = "1"
+        ingest._check_host("http://127.0.0.1/")
+    finally:
+        os.environ.pop("ALLOW_PRIVATE_INGEST", None)
+        if saved is not None:
+            os.environ["ALLOW_PRIVATE_INGEST"] = saved
+    print(f"[ssrf] all {len(BLOCKED)} internal-address spellings refused — "
+          f"IPv4-mapped and long-form IPv6, decimal and hex integer hosts "
+          f"included — and an ordinary public host still fetches")
+
+
+def check_a_video_host_is_a_HOST():
+    """VIDEO_HOSTS was matched against netloc+PATH, so an ordinary article
+    whose slug named a video site was routed to the downloader and never
+    fetched as a page."""
+    import ingest
+    for u in ("https://blog.example.com/why-tiktok.com-is-dying",
+              "https://en.wikipedia.org/wiki/YouTube",
+              "https://youtube.com.evil.example/watch"):
+        assert not ingest.is_video_url(u), u
+    for u in ("https://www.youtube.com/watch?v=a", "https://youtu.be/a",
+              "https://m.youtube.com/watch?v=a",
+              "https://www.linkedin.com/learning/course"):
+        assert ingest.is_video_url(u), u
+    print("[video-host] a host is matched exactly or as a parent domain: an "
+          "article about YouTube is fetched as a page, a lookalike domain "
+          "buys nothing, and real video hosts still route to the downloader")
 
 if __name__ == "__main__":
     main()

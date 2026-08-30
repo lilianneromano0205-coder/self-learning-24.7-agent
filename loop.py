@@ -166,6 +166,11 @@ CLEAR_TOOL_RESULT_CHARS = 1_500
 # how long a capability-routing decision may be reused inside one process
 ROUTE_TTL_SECONDS = 600
 STEP_TRUNC = 300  # per-step record truncation in state.json
+# A due re-exam that FAILS is re-queued rather than filed as taken. Bounded,
+# because a course whose material can no longer be examined must eventually
+# stop consuming the idle tick — and be recorded as unexamined, which is a
+# different and more honest thing than recorded as passed.
+REEXAM_MAX_ATTEMPTS = 3
 
 
 # ---------------------------------------------------------------- utilities
@@ -306,9 +311,27 @@ def step_failed(result):
     depending on who asks.
 
     So it lives here, and every caller reads the same answer.
+
+    THE EXIT CODE IS THE VERDICT, and it used to be the string "exit=1".
+    `startswith("exit=1")` is a PREFIX test, so it answered yes to 1, 13, 124
+    and 127 by accident of their first digit and no to 2, 3, 5, 42 and 255 —
+    which are the codes real tools return: pytest 2 for a usage error, git 128,
+    grep 1-vs-2, a python traceback 1 but argparse 2. A command that visibly
+    failed was filed as a step that passed, so the consecutive-error counter
+    never escalated, and gotcha retirement could take a failed step as proof
+    that the gotcha was gone. Measured across eleven codes before the change:
+    2, 3, 5, 7, 42 and 255 all read as SUCCESS.
+
+    A result carrying the run_command shape is judged by its exit code ALONE.
+    That also removes a second inconsistency: "ERROR:" appearing in the first
+    forty characters of a command's own STDOUT used to fail a command that
+    exited 0 — the tool's output is not the harness's verdict.
     """
     s = str(result)
-    return (s.startswith(("ERROR", "PARSE ERROR", "exit=1", "TASK FAILED"))
+    m = re.match(r"exit=(\d+)\b", s)
+    if m:
+        return m.group(1) != "0"
+    return (s.startswith(("ERROR", "PARSE ERROR", "TASK FAILED"))
             or "ERROR:" in s[:40])
 
 
@@ -663,6 +686,30 @@ class Agent:
         # the lease is the only thing that can ever free the task.
         return (time.time() - float(r.get("ts") or 0)) > self.runner_lease_seconds
 
+    # THE COURSE LOCK IS PART OF THE CLAIM, not a step after it.
+    #
+    # Both of these used to flip the status under the mutex and let the caller
+    # write the course lock afterwards, outside it. Two failures came out of
+    # that, and only the first needed luck:
+    #
+    #   queued vs queued — two loops select two DIFFERENT queued tasks on one
+    #   course while no lock file exists yet. Neither claim collides (the ids
+    #   differ), both then write the same lock, and two writers are inside a
+    #   course whose whole design is single-writer. Reproduced with a barrier
+    #   at the unguarded window; measured at ~0.5 ms wide, which is small and
+    #   is not zero on a fleet running for months.
+    #
+    #   resume — worse, and needing no luck at all: next_task's resume branch
+    #   returns a running task WITHOUT consulting can_lock, and adopt_task did
+    #   not consult it either. So a loop adopting an abandoned task took the
+    #   course lock straight out from under a live sibling. Reproduced
+    #   end-to-end with two ordinary `loop.py run --drain` processes.
+    #
+    # Now the lock is checked and taken inside the SAME critical section that
+    # claims the task, so "I own this task" and "I own its course" become one
+    # decision. next_task's filter stays as a cheap pre-check; the mutex is
+    # what makes it true.
+
     def adopt_task(self, task_id):
         """The running-path twin of claim_task: take over an abandoned task
         atomically. Without the re-check under the mutex, two loops could
@@ -672,21 +719,30 @@ class Agent:
             t = next((x for x in state["tasks"] if x["id"] == task_id), None)
             if t is None or t["status"] != "running" or not self._may_resume(t):
                 return None
+            if not self.can_lock(state, t):
+                return None      # its course belongs to a live sibling
             t["runner"] = self._runner_stamp()
             self.save_state(state)
+            self.acquire_lock(t)
             return t
 
     def claim_task(self, task_id):
         """Atomically flip one queued task to running. Returns the fresh task,
-        or None if another loop claimed it first."""
+        or None if another loop claimed it first — or if its course is being
+        written by a sibling."""
         with self._state_lock():
             state = self.load_state()
             t = next((x for x in state["tasks"] if x["id"] == task_id), None)
             if t is None or t["status"] != "queued":
                 return None
+            if not self.can_lock(state, t):
+                return None      # re-checked HERE, under the mutex that
+                                 # decides the claim; next_task's check was a
+                                 # read outside any lock and could not bind
             t["status"] = "running"
             t["runner"] = self._runner_stamp()
             self.save_state(state)
+            self.acquire_lock(t)
             return t
 
     def add_task(self, role, goal, memory_files=None, course=None,
@@ -1567,7 +1623,16 @@ class Agent:
                 f"[subquery over {args['path']} lines {a}-{b} — UNTRUSTED, "
                 f"derived from the material]\n{answer}")
         if name == "ask_human":
-            with open(os.path.join(self.root, "blocked.md"), "a", encoding="utf-8") as f:
+            # UNDER THE LOCK. contract.event documents this exact hazard one
+            # module away and locks its append; blocked.md did not. An append
+            # lost here is an escalation lost: the task is marked blocked
+            # unconditionally two frames up, so it waits forever on a question
+            # the owner was never asked, and chief.py reports "N agents
+            # blocked on you" while the question itself is gone.
+            import locks as _locks
+            _bm = os.path.join(self.root, "blocked.md")
+            with _locks.holding(_bm, timeout=10.0, stale=8.0), \
+                    open(_bm, "a", encoding="utf-8") as f:
                 f.write(
                     f"\n## {time.strftime('%Y-%m-%d %H:%M')} — task {task['id']} ({task['role']}"
                     f"{', course ' + task['course'] if task.get('course') else ''})\n"
@@ -2034,9 +2099,14 @@ class Agent:
     # inner one — a daily dollar ceiling enforced in the loop itself.
 
     def _spend_path(self):
-        return os.path.join(self.logs_dir, f"spend-{time.strftime('%Y%m%d')}.json")
+        # ONE name for this file, defined in modelgateway, because two
+        # spenders now write it and two spellings of one path is how they
+        # would come to disagree
+        import modelgateway
+        return modelgateway.spend_file(self.root)
 
-    def _meter(self, purpose, role, provider, model, usage, cost, task_id, t0):
+    def _meter(self, purpose, role, provider, model, usage, cost, task_id, t0,
+               ok=True):
         """Manual §19 Model Gateway: EVERY provider call is attributed to a
         purpose and a model, per call. Task-level attribution credited a whole
         task to whichever provider served its last step, which mis-credits any
@@ -2046,17 +2116,35 @@ class Agent:
             modelgateway.record(
                 self.root, purpose=purpose, role=role, provider=provider,
                 model=model, usage=usage, cost=cost, task=task_id,
-                ms=int((time.time() - t0) * 1000))
+                ms=int((time.time() - t0) * 1000), ok=ok)
         except Exception:
             pass
 
     def _record_spend(self, usd):
+        """The day's total, against which the breaker compares.
+
+        ONE WRITER, in modelgateway, because the loop is no longer the only
+        spender: ingestion's transcription and vision rails call providers
+        too, and a ceiling that only counts the loop's calls is not a ceiling.
+        The lock also moved off the state mutex and onto the spend file
+        itself — the state mutex was never protecting this file from the one
+        other writer it actually had (`notified`, set with no lock at all)."""
         if usd <= 0:
             return
-        with self._state_lock():   # two loops must not lose each other's dollars
-            s = load_json(self._spend_path(), {"usd": 0.0, "notified": False})
-            s["usd"] = round(s["usd"] + usd, 6)
-            atomic_write_json(self._spend_path(), s)
+        try:
+            import modelgateway
+            modelgateway.charge(self.root, usd)
+        except Exception as e:
+            # LOUD, not swallowed. Every other ledger in this file may fail
+            # quietly because losing a record is worse than stopping work —
+            # this one is different: the number it maintains is what the
+            # daily breaker compares against, so spend that goes unrecorded
+            # is a ceiling that silently stops binding.
+            self.log.error(json.dumps({
+                "event": "spend_record_failed", "usd": round(float(usd), 6),
+                "error": f"{type(e).__name__}: {e}",
+                "why": "today's spend total did not move, so the daily "
+                       "budget breaker is under-counting until this is fixed"}))
 
     def _org_spend_ceiling(self):
         """The organization's `require_approval_over_usd`, or 0 for none.
@@ -2116,11 +2204,17 @@ class Agent:
                        f"(${s['usd']} spent today). The agent is paused until "
                        f"tomorrow. Raise daily_budget_usd in settings.toml to "
                        f"resume sooner.")
-            with open(os.path.join(self.root, "blocked.md"), "a",
-                      encoding="utf-8") as f:
+            import locks as _locks
+            _bm = os.path.join(self.root, "blocked.md")
+            with _locks.holding(_bm, timeout=10.0, stale=8.0), \
+                    open(_bm, "a", encoding="utf-8") as f:
                 f.write(f"\n## {time.strftime('%Y-%m-%d %H:%M')} — {why}\n")
-            s["notified"] = True
-            atomic_write_json(self._spend_path(), s)
+            try:
+                import modelgateway
+                modelgateway.mark_notified(self.root)   # same lock as charge()
+            except Exception:
+                s["notified"] = True
+                atomic_write_json(self._spend_path(), s)
             self.log.error(json.dumps({"event": "budget_exceeded",
                                        "spent_usd": s["usd"],
                                        "budget_usd": cap,
@@ -2133,7 +2227,14 @@ class Agent:
 
     def _probe(self, prov_name, model):
         """One cheap live request to a provider/model pair. No retries — this
-        reports reality, it doesn't paper over it."""
+        reports reality, it doesn't paper over it.
+
+        CHEAP IS NOT FREE, and this used to be unmetered. It is a real
+        chat/completions call against a real key, so `python loop.py check`
+        on a fleet with nine roles billed nine live requests that appeared in
+        no ledger — while the module next door claimed "every provider call is
+        metered". The tokens are tiny; the invariant is not, and an unmetered
+        path is exactly how the next one gets added."""
         try:
             prov = self.provider_cfg(prov_name)
         except RuntimeError as e:
@@ -2153,17 +2254,33 @@ class Agent:
             prov["base_url"].rstrip("/") + "/chat/completions",
             data=json.dumps(payload).encode("utf-8"), headers=headers,
             method="POST")
+        t0 = time.time()
+        usage, verdict, ok = {}, "OK", True
         try:
             with urllib.request.urlopen(req, timeout=20) as r:
                 resp = json.loads(r.read().decode("utf-8"))
+            # A MALFORMED 200 IS A PROVIDER VERDICT, NOT AN EXCEPTION. This
+            # subscript raises IndexError on an empty `choices` array and
+            # TypeError when `choices` is not a list, and the handler below
+            # listed neither — so one provider answering 200 with `{}` killed
+            # the whole `loop.py check` sweep instead of reporting FAIL for
+            # that one role. The function's own docstring says it "reports
+            # reality"; it cannot do that from a traceback.
             resp["choices"][0]["message"]
-            return "OK"
+            usage = resp.get("usage") or {}
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8", errors="replace")[:160]
-            return f"FAIL: HTTP {e.code} {body}"
+            verdict, ok = f"FAIL: HTTP {e.code} {body}", False
         except (urllib.error.URLError, TimeoutError, OSError, KeyError,
-                json.JSONDecodeError) as e:
-            return f"FAIL: {e}"
+                IndexError, TypeError, json.JSONDecodeError) as e:
+            verdict, ok = f"FAIL: {type(e).__name__}: {e}", False
+        # priced on the provider that actually served, with no role fallback:
+        # "probe" is not a role and must not resolve through role_cfg
+        cost = self._cost(prov_name, usage, None) if usage else 0.0
+        self._meter("probe", "probe", prov_name, model, usage, cost, None, t0,
+                    ok=ok)
+        self._record_spend(cost)
+        return verdict
 
     def check_providers(self):
         """Probe every role's provider (and fallback). Returns (rows, all_ok)."""
@@ -2239,7 +2356,7 @@ class Agent:
                     "completed": today.isoformat(),
                     "entries": [
                         {"due": (today + datetime.timedelta(days=d)).isoformat(),
-                         "done": False, "task": None}
+                         "done": False, "task": None, "attempts": 0}
                         for d in self.reexam_days
                     ],
                 }
@@ -2252,20 +2369,56 @@ class Agent:
                 continue
             changed = False
             for entry in sched["entries"]:
-                if not entry["done"] and entry["due"] <= today.isoformat():
-                    tid = self.add_task(
-                        "examiner",
-                        f"Spaced re-exam for course {c}: generate NEW hidden exam "
-                        f"questions from the notes (past exams are in exam/ — do not "
-                        f"reuse questions), grade strictly, update the SCORE line in "
-                        f"exam-results.md, and write every miss to gaps.md.",
-                        course=c,
-                    )
-                    entry["done"] = True
-                    entry["task"] = tid
-                    changed = queued = True
-                    self.log.info(json.dumps({"event": "reexam_queued",
-                                              "course": c, "task": tid}))
+                if entry["done"] or entry["due"] > today.isoformat():
+                    continue
+                # DONE MEANS THE RE-EXAM HAPPENED, not that one was ordered.
+                # `done` used to be set on the same line that created the
+                # task, so scheduled -> queued -> permanently done was reached
+                # whether the examination succeeded, failed, or never ran at
+                # all. That is the whole longitudinal-learning guarantee — "the
+                # expert was re-tested at 7, 30 and 90 days" — resting on a
+                # flag that only ever meant "a task was added to a queue".
+                # The task's own terminal status decides now, and a failed
+                # re-exam is retried rather than filed as a pass.
+                if entry.get("task"):
+                    t = self.find_task(entry["task"])
+                    status = (t or {}).get("status")
+                    if status in (None, "done"):
+                        # None: the task left the hot queue AND the archive,
+                        # which only a deletion does — there is nothing left
+                        # to wait for, so record it and move on rather than
+                        # re-queueing forever.
+                        entry["done"] = True
+                        entry["outcome"] = "done" if status else "gone"
+                        changed = True
+                    elif status == "failed":
+                        entry["attempts"] = int(entry.get("attempts") or 0) + 1
+                        if entry["attempts"] >= REEXAM_MAX_ATTEMPTS:
+                            entry["done"] = True
+                            entry["outcome"] = "failed"
+                            self.log.info(json.dumps({
+                                "event": "reexam_abandoned", "course": c,
+                                "task": entry["task"],
+                                "attempts": entry["attempts"]}))
+                        else:
+                            entry["task"] = None      # re-queued below
+                        changed = True
+                    # queued / running: it is in flight; leave it alone
+                    if entry.get("task") or entry["done"]:
+                        continue
+                tid = self.add_task(
+                    "examiner",
+                    f"Spaced re-exam for course {c}: generate NEW hidden exam "
+                    f"questions from the notes (past exams are in exam/ — do not "
+                    f"reuse questions), grade strictly, update the SCORE line in "
+                    f"exam-results.md, and write every miss to gaps.md.",
+                    course=c,
+                )
+                entry["task"] = tid
+                changed = queued = True
+                self.log.info(json.dumps({
+                    "event": "reexam_queued", "course": c, "task": tid,
+                    "attempt": int(entry.get("attempts") or 0) + 1}))
             if changed:
                 atomic_write_json(sched_path, sched)
         return queued
@@ -2382,6 +2535,52 @@ class Agent:
                     est["dispatched"][fn] = digest
                     changed = True
                     continue
+                # DISPATCHED IS NOT SAT — the same defect the spaced
+                # re-exam scheduler carried, in its sibling function. The
+                # content hash was written on the same beat as add_task, so a
+                # Student task that died terminally (provider outage, retries
+                # exhausted, a loop killed between the two) left the exam
+                # recorded as dispatched with a matching hash, and the tick
+                # skipped it forever. An exam nobody sat is not an exam that
+                # was skipped once; it is a course that quietly stopped being
+                # examined. The record now carries the task id and closes on
+                # that task's terminal status.
+                prev = est.get("tasks", {}).get(fn)
+                # ...but only for THIS exam. A replaced question file under
+                # the same name is a NEW exam — that is what the content hash
+                # is for — so a record about the previous one must not be
+                # read as progress on this one, which skipped the fresh
+                # sitting entirely.
+                if prev and prev.get("digest") != digest:
+                    prev = None
+                attempts = int((prev or {}).get("attempts") or 0)
+                if prev:
+                    t = self.find_task(prev.get("task") or "")
+                    status = (t or {}).get("status")
+                    if status in ("queued", "running", "blocked"):
+                        continue                      # in flight; leave it
+                    if status in (None, "done"):
+                        # None: the task left both the hot queue and the
+                        # archive, which only a deletion does — there is
+                        # nothing left to wait for.
+                        est["dispatched"][fn] = digest
+                        est.setdefault("tasks", {})[fn] = {
+                            **prev, "outcome": "done" if status else "gone"}
+                        changed = True
+                        continue
+                    if attempts >= REEXAM_MAX_ATTEMPTS:
+                        # A course whose exam can no longer be sat must stop
+                        # consuming the idle tick — and be recorded as
+                        # UNEXAMINED, which is a different and more honest
+                        # thing than recorded as sat.
+                        est["dispatched"][fn] = digest
+                        est.setdefault("tasks", {})[fn] = {
+                            **prev, "outcome": "failed"}
+                        changed = True
+                        self.log.info(json.dumps({
+                            "event": "exam_abandoned", "course": c,
+                            "exam": fn, "attempts": attempts}))
+                        continue
                 exam_rel = f"courses/{c}/exam/pending/{fn}"
                 tid = self.add_task(
                     "student",
@@ -2392,10 +2591,12 @@ class Agent:
                     f"answer the atom IDs (C-/P-nnnn) you believe support it. If "
                     f"you cannot answer, say so explicitly.",
                     memory_files=[exam_rel], course=c)
-                est["dispatched"][fn] = digest
+                est.setdefault("tasks", {})[fn] = {
+                    "task": tid, "digest": digest, "attempts": attempts + 1}
                 changed = queued = True
-                self.log.info(json.dumps({"event": "exam_dispatched", "course": c,
-                                          "exam": fn, "task": tid}))
+                self.log.info(json.dumps({
+                    "event": "exam_dispatched", "course": c, "exam": fn,
+                    "task": tid, "attempt": attempts + 1}))
             if changed:
                 atomic_write_json(state_path, est)
         return queued
@@ -2814,8 +3015,7 @@ class Agent:
                 claimed = self.claim_task(task["id"])
                 if claimed is None:
                     continue      # another loop claimed it between read and now
-                task = claimed
-                self.acquire_lock(task)
+                task = claimed          # claim_task took the course lock
                 self.log.info(json.dumps({
                     "event": "task_start", "task": task["id"],
                     "role": task["role"], "course": task.get("course"),
@@ -2828,8 +3028,7 @@ class Agent:
                 adopted = self.adopt_task(task["id"])
                 if adopted is None:
                     continue
-                task = adopted
-                self.acquire_lock(task)
+                task = adopted          # adopt_task took the course lock
                 self.log.info(json.dumps({
                     "event": "task_resumed", "task": task["id"],
                     "role": task["role"], "steps": n_steps(task),
