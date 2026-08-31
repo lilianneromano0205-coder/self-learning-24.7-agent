@@ -560,7 +560,16 @@ def check_bytecode_is_cleansed_never_convicted():
         before = controlplane.seal(root)
         pyc_dir = os.path.join(pkg, "__pycache__")
         os.makedirs(pyc_dir)
-        pyc = os.path.join(pyc_dir, "__init__.cpython-314.pyc")
+        # NAMED FOR THE RUNNING INTERPRETER, not for the one this file was
+        # written on. A hardcoded `cpython-314` plants an artifact no other
+        # Python would ever produce, so the check drifts out of reality
+        # every release — and when it failed on a 3.13 runner the message
+        # named a file that interpreter could not have written.
+        import importlib.util
+        pyc = importlib.util.cache_from_source(
+            os.path.join(pkg, "__init__.py"))
+        pyc_dir = os.path.dirname(pyc)
+        os.makedirs(pyc_dir, exist_ok=True)
         io.open(pyc, "wb").write(b"\x00planted")
         clean, msg = controlplane.enforce(root, before, op="model_command",
                                           command="import cap", role="t")
@@ -578,7 +587,11 @@ def check_bytecode_is_cleansed_never_convicted():
                                           command="poison", role="t")
         assert not clean and "TAMPER" in msg, msg
         assert io.open(src).read() == "VERSION='1'\n", "source must revert"
-        assert not os.path.exists(pyc), "the .pyc reverts in the same pass"
+        left = ([os.path.basename(x) for x in os.listdir(pyc_dir)]
+                if os.path.isdir(pyc_dir) else [])
+        assert not os.path.exists(pyc), (
+            f"the .pyc reverts in the same pass; __pycache__ still holds "
+            f"{left} (planted {os.path.basename(pyc)!r})")
         print("[bytecode] an import's __pycache__ under capabilities/ is "
               "reverted without failing the command; a planted .pyc never "
               "survives the bracket; a source edit beside it still convicts")
