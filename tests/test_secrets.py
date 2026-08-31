@@ -107,7 +107,7 @@ def main():
     rc, out, err = sandbox.run(
         f'"{PY}" -c "import sys,time;print(\'partial work\');'
         f'sys.stdout.flush();time.sleep(9)"',
-        sb, {}, 2, {"agent": {"sandbox": "host"}})
+        sb, {}, 2, {"agent": {"sandbox": "host", "allow_unsafe_host": True}})
     assert rc == sandbox.TIMEOUT_RC, rc
     assert "TIMED OUT after 2s" in err and "no exit code" in err, err
     assert "partial work" in out, \

@@ -169,14 +169,35 @@ def scars(root):
     return out
 
 
+def _cfg_for(root, cfg):
+    """The expert's OWN configuration when the caller did not supply one.
+
+    `sandbox.describe({})` answers for an empty config, not for this expert,
+    so a caller that passed nothing was told the DEFAULT backend regardless of
+    what the expert actually runs — the panel (ui.py) does exactly that, and
+    the self-model block the agent reads on every task inherited the same
+    mistake. A default is not an observation, and this block's whole claim is
+    that everything in it was measured.
+    """
+    if cfg:
+        return cfg
+    try:
+        import tomllib
+        with open(os.path.join(root, "settings.toml"), "rb") as f:
+            return tomllib.loads(f.read().decode("utf-8-sig"))
+    except (OSError, ValueError, ImportError):
+        return {}
+
+
 def now(root, role=None, task=None, cfg=None):
     """The constraints of THIS run — the part that changes every task."""
     state = {}
+    cfg = _cfg_for(root, cfg)
     try:
         import sandbox
-        state["sandbox"] = sandbox.describe(cfg or {})["backend"]
+        state["sandbox"] = sandbox.describe(cfg)["backend"]
     except Exception:
-        state["sandbox"] = "host"
+        state["sandbox"] = None
     state["role"] = role or (task or {}).get("role")
     if task:
         state["task"] = task.get("id")

@@ -47,6 +47,13 @@ sys.path.insert(0, HERE)
 SECTION_RE = re.compile(r"^\[([a-z0-9_-]+)\]\s+(.*)$", re.I)
 TEST_RE = re.compile(r"^=== (test_\w+\.py) ===$")
 PASS_RE = re.compile(r"^PASS (\S+)")
+# A unittest file ends with a bare "OK" (or "OK (skipped=1)"), never "PASS
+# <name>". This parser knew only the hand-rolled convention, so the ~18
+# unittest-style files the verified-learning layer added were read as
+# FAILURES: EVIDENCE.md announced "118/136 tests passed" and marked five
+# systems FAILING off a suite that had just reported 0 failed. A document
+# whose job is to say why we believe this works cannot invent red.
+UNITTEST_OK_RE = re.compile(r"^OK(\s*\(.*\))?$")
 # A test may decline to run and SAY SO — test_shutdown does exactly this on
 # Windows, where Popen.terminate() is TerminateProcess and no handler can
 # intercept it, so there is no SIGTERM to catch and asserting anything would
@@ -83,7 +90,8 @@ SYSTEMS = {
                   "test_secrets.py", "test_chaos.py", "test_blocked.py",
                   "test_hardening.py",
                   "test_candidates.py",
-                  "test_retention.py", "test_context.py"],
+                  "test_retention.py", "test_context.py",
+                  "test_loop_learning_controls.py"],
         "blind": "every model call in these tests is the scripted mock "
                  "provider. They prove the harness holds around a model; they "
                  "prove nothing about any real provider's behaviour.",
@@ -109,7 +117,8 @@ SYSTEMS = {
                   "test_course.py", "test_exam.py", "test_verify.py",
                   "test_inbox.py", "test_material.py", "test_url.py",
                   "test_curriculum.py",
-                  "test_e2e.py"],
+                  "test_e2e.py",
+                  "test_research_discovery.py"],
         "blind": "schedules are tested with tiny intervals inside one run. "
                  "Nothing here proves a month of unattended drift, clock "
                  "changes across daylight saving, or a real cron environment.",
@@ -126,7 +135,8 @@ SYSTEMS = {
                   "test_awareness.py", "test_audit.py",
                   "test_cases.py", "test_gotcha_retire.py", "test_discover.py",
                   "test_sources.py",
-                  "test_reflector.py"],
+                  "test_reflector.py",
+                  "test_memory_hybrid.py", "test_memory_policy.py", "test_memory_benchmarks.py", "test_skill_attribution.py"],
         "blind": "conflict detection is text-based and conservative by "
                  "design: it finds polarity flips and numeric disagreements "
                  "between claims about the same subject, and has no semantic "
@@ -150,7 +160,8 @@ SYSTEMS = {
                 "benchmark, promotion gates, the design gate",
         "tests": ["test_variants.py", "test_decisions.py", "test_approvals.py",
                   "test_replay.py", "test_benchmark.py", "test_governance.py",
-                  "test_design.py", "test_modelrouter.py"],
+                  "test_design.py", "test_modelrouter.py",
+                  "test_procedural_learning.py", "test_scheduler_verifier.py", "test_advanced_learning.py"],
         "blind": "promotion and routing decisions are proven against seeded "
                  "outcome ledgers, not against months of real measured "
                  "performance. The design gate checks mechanics and the known "
@@ -165,7 +176,8 @@ SYSTEMS = {
                   "test_chief.py", "test_doctor.py", "test_mcp.py",
                   "test_federation.py", "test_providers.py", "test_check.py",
                   "test_trace.py", "test_bootstrap.py", "test_backup.py",
-                  "test_preflight.py", "test_ecosystem.py"],
+                  "test_preflight.py", "test_ecosystem.py",
+                  "test_mcp_hardening.py", "test_ui_auth_hardening.py"],
         "blind": "the panel is driven through its HTTP API and its HTML is "
                  "parsed, but no test renders it in a browser. Layout, "
                  "contrast and touch targets are verified by eye, not by CI.",
@@ -174,7 +186,8 @@ SYSTEMS = {
         "what": "one mandatory gateway per kind of power — execution, file, "
                 "credential, model gateway, effect, control plane — plus the "
                 "invariant tests that enumerate every caller of each",
-        "tests": ["test_invariants.py", "test_controlplane.py"],
+        "tests": ["test_invariants.py", "test_controlplane.py",
+                  "test_execution_containment.py"],
         "blind": "these tests enumerate every path in THIS tree. They cannot "
                  "see a path added by a plugin, an MCP server or a future "
                  "module that does not exist yet — which is why the execution "
@@ -193,7 +206,8 @@ SYSTEMS = {
                 "the mission contract that survives context resets, restarts "
                 "and model swaps",
         "tests": ["test_proof.py", "test_mission.py", "test_metrics.py",
-                  "test_evalsuite.py"],
+                  "test_evalsuite.py",
+                  "test_measurement_integrity.py"],
         "blind": "no mission here has run longer than a test. The contract is "
                  "proven to survive a simulated reset, not a week of real "
                  "drift, and no capability has ever been observed above level "
@@ -208,7 +222,8 @@ SYSTEMS = {
                 "capability is acquired without gaining authority; who may do "
                 "what, and the trail that records it",
         "tests": ["test_workers.py", "test_acquire.py", "test_org.py",
-                  "test_rbac.py", "test_frontier.py", "test_frontier_live.py"],
+                  "test_rbac.py", "test_frontier.py", "test_frontier_live.py",
+                  "test_acquisition_arena.py", "test_capability_graph.py"],
         "blind": "every worker is a RECORD. Nothing here has started a "
                  "container, installed a package, or measured a real start-up "
                  "time — the acquisition ladder is proven to refuse correctly, "
@@ -237,7 +252,8 @@ SYSTEMS = {
                 "each driven against a real server and a real container",
         "tests": ["test_live_provider.py", "test_docker_live.py",
                   "test_hosted_sandbox.py", "test_first_day.py",
-                  "test_endurance.py"],
+                  "test_endurance.py",
+                  "test_release_checks.py"],
         "blind": "the provider tests run against a LOOPBACK SERVER that "
                  "implements the documented OpenAI-compatible shape. They "
                  "prove this platform's HTTP client is correct against that "
@@ -364,7 +380,7 @@ def parse(output):
         if m:
             per[current]["sections"].append((m.group(1), m.group(2).strip()))
             continue
-        if PASS_RE.match(line):
+        if PASS_RE.match(line) or UNITTEST_OK_RE.match(line):
             per[current]["passed"] = True
             continue
         m = SKIP_RE.match(line)

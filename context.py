@@ -179,6 +179,94 @@ def est_tokens(text):
     return len(text) // 4
 
 
+class ContextBudgetError(ValueError):
+    """The immutable assignment plus reservations cannot fit this model."""
+
+
+def token_upper_bound(text):
+    """Conservative UTF-8 byte bound for text, NOT a tokenizer measurement.
+
+    Non-text/vision payloads need a provider-specific accounting adapter and
+    are rejected by assert_request_budget rather than counted as ordinary text.
+    """
+    return len(str(text).encode('utf-8'))
+
+
+def request_budget(cfg, provider, model, completion_tokens=None, tools=None):
+    ag = (cfg or {}).get('agent', {}) or {}
+    prov = ((cfg or {}).get('providers', {}) or {}).get(provider, {}) or {}
+    limits = prov.get('context_limits', {}) or {}
+    limit = int(limits.get(model, prov.get('context_limit', ag.get('context_limit', 131072))))
+    completion = int(completion_tokens if completion_tokens is not None else
+                     ag.get('context_completion_reserve', 4096))
+    safety = int(ag.get('context_safety_margin', 1024))
+    schemas = (token_upper_bound(json.dumps(tools, ensure_ascii=False)) + 32
+               if tools else 0)
+    tool_reserve = max(schemas, int(ag.get('context_tool_schema_budget', 2048)) if tools is None else 0)
+    if min(limit, completion, safety, tool_reserve) < 0 or limit <= 0:
+        raise ContextBudgetError('invalid context limit or negative reservation')
+    maximum = limit - completion - tool_reserve - safety
+    if maximum <= 0:
+        raise ContextBudgetError('completion, tool and safety reservations exhaust context limit')
+    return {'provider': provider, 'model': model, 'provider_context_limit': limit,
+            'limit_source': 'provider' if model in limits or 'context_limit' in prov else 'owner_or_conservative_default',
+            'reserved_completion_tokens': completion, 'tool_schema_budget': tool_reserve,
+            'safety_margin': safety, 'maximum_compiled_context': maximum,
+            'accounting': 'utf8_byte_upper_bound_plus_message_overhead'}
+
+
+def assert_request_budget(cfg, provider, model, messages, max_tokens, tools=None):
+    """Gate EVERY provider attempt, including fallback and compaction calls.
+
+    No automatic truncation of conversations or tool call/result pairs here.
+    The caller must recompile/compact, or stop before making an over-limit call.
+    """
+    rep = request_budget(cfg, provider, model, max_tokens, tools or [])
+    for msg in messages:
+        if isinstance(msg.get('content'), list):
+            if any(part.get('type') != 'text' for part in msg['content']):
+                raise ContextBudgetError('multimodal context needs provider-specific accounting')
+    used = token_upper_bound(json.dumps(messages, ensure_ascii=False)) + 32 * len(messages)
+    rep['used_upper_bound'] = used
+    if used > rep['maximum_compiled_context']:
+        raise ContextBudgetError(f"request requires <= {used} tokens by conservative bound; "
+                                 f"only {rep['maximum_compiled_context']} remain for {provider}:{model}")
+    return rep
+
+
+def fit_request(cfg, provider, model, system, assignment, blocks):
+    """Allocate globally in source priority order. Mission/assignment stay whole.
+
+    Drop complete fenced blocks, not half a delimiter or instruction. Manifest
+    records every omission; on-demand file reads remain available subject to
+    the same provider request gate.
+    """
+    rep = request_budget(cfg, provider, model)
+    kept = list(blocks.get('mission', []))
+    rep.update(dropped=[], trimmed=[], included={n: [] for n in ORDER})
+    rep['included']['mission'] = list(kept)
+    def assemble(parts):
+        return '\n\n'.join([*parts, assignment])
+    def measure(parts):
+        return token_upper_bound(json.dumps([{'role': 'system', 'content': system},
+                                            {'role': 'user', 'content': assemble(parts)}],
+                                           ensure_ascii=False)) + 64
+    if measure(kept) > rep['maximum_compiled_context']:
+        raise ContextBudgetError('system, mission contract and task exceed available context; none may be removed')
+    for name in EMIT_ORDER:
+        if name == 'mission':
+            continue
+        for index, block in enumerate(blocks.get(name, [])):
+            if measure(kept + [block]) <= rep['maximum_compiled_context']:
+                kept.append(block)
+                rep['included'][name].append(block)
+            else:
+                rep['dropped'].append({'source': name, 'block': index,
+                                       'upper_bound': token_upper_bound(block), 'why': 'global context limit'})
+    rep['used_upper_bound'] = measure(kept)
+    return assemble(kept), rep
+
+
 def budgets(cfg):
     """[agent.context_budget] in settings.toml overrides any default."""
     out = dict(DEFAULT_BUDGETS)
@@ -295,6 +383,14 @@ def compile(agent, task):
               {"rule": "all", "kinds": list(ORDER), "excluded": [],
                "why": "no memory router installed"})
     kinds = set(router.get("kinds") or ORDER)
+    try:
+        from evaluation_policy import disabled
+        if disabled(getattr(agent, 'cfg', {}), 'memory'):
+            kinds -= {'self', 'commons', 'course', 'cases', 'gotchas', 'premise', 'memory_files'}
+        if disabled(getattr(agent, 'cfg', {}), 'skills'):
+            kinds.discard('skills')
+    except ImportError:
+        pass
     # The mission contract is NOT a memory kind and is never routed away. It
     # is the assignment itself — what this task is FOR — so a role that may
     # see less MEMORY (the Student sits closed-book) must still see what it
@@ -318,6 +414,7 @@ def compile(agent, task):
                 block += ("\nTHIS TASK serves criterion "
                           f"{task['criterion']}. If what you are about to do "
                           f"does not advance it, stop and say so.")
+            src["mission"].budget = max(src["mission"].budget, len(block))
             src["mission"].add_text("mission", block)
         except Exception:
             pass
@@ -508,6 +605,31 @@ def compile(agent, task):
         user += f"\nSTOP CONDITION: {_loop.stop_text(task['stop'])}"
 
     system = agent.system_prompt(role)
+    assignment = f"Task: {goal}"
+    if course:
+        assignment += f"\nCourse: {course}"
+    if task.get('stop'):
+        import loop as _loop
+        assignment += f"\nSTOP CONDITION: {_loop.stop_text(task['stop'])}"
+    cfg = getattr(agent, 'cfg', {})
+    # Previews also compile roles that are not provider-configured yet. Their
+    # manifest uses the conservative global fallback; execution still requires
+    # a configured provider and its own request gate.
+    role_settings = cfg.get('roles', {}) or {}
+    rc = role_settings.get(role, role_settings.get('default', {})) or {}
+    route = task.get('scheduler_decision', {}).get('strategy', {})
+    user, global_budget = fit_request(cfg, route.get('provider', rc.get('provider')),
+                                      route.get('model', rc.get('model')), system,
+                                      assignment, {n: src[n].blocks for n in ORDER})
+    retained_skill_blocks = global_budget['included'].get('skills', [])
+    retrieved_skills = list(loaded)
+    loaded = [rel for rel in loaded if any(f'<<<FILE-CONTENT {rel}>>>' in b for b in retained_skill_blocks)]
+    task['skills_used'] = list(loaded)
+    if _skills and hasattr(_skills, 'trace_event'):
+        _skills.trace_event(task, 'retrieved', retrieved_skills)
+        _skills.trace_event(task, 'injected', loaded)
+    # Full content belongs in the actual messages, not duplicated in receipts.
+    global_budget['included'] = {n: len(b) for n, b in global_budget['included'].items()}
     sys_files, variant = agent.system_sources(role)
     messages = [{"role": "system", "content": system},
                 {"role": "user", "content": user}]
@@ -524,6 +646,7 @@ def compile(agent, task):
         "skills_activated": loaded,
         "user_chars": len(user), "user_tokens": est_tokens(user),
         "total_tokens": est_tokens(system) + est_tokens(user),
+        "global_budget": global_budget,
         "compactions": [],
     }
     if task.get("id"):        # ad-hoc compiles (previews, tests) leave no file

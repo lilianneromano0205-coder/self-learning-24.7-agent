@@ -449,11 +449,19 @@ def check_the_installers_are_shippable(zpath):
         assert not re.search(r"sk-[A-Za-z0-9]{20}", text), (
             f"{name} contains something shaped like a key")
     bash = shutil.which("bash")
-    parsed = []
+    parsed, unparsed = [], []
     if bash:
         for name in [n for n in INSTALLERS if n.endswith(".sh")]:
             r = subprocess.run([bash, "-n", os.path.join(AGENT_DIR, name)],
                                capture_output=True, text=True, timeout=60)
+            if r.returncode != 0 and "execvpe" in (r.stderr or ""):
+                # Windows resolves `bash` to the WSL launcher even with no
+                # distro installed; an interpreter that cannot START is an
+                # absent interpreter, not a parse failure in install.sh.
+                # `continue`, not `break`: the reason is recorded so the
+                # print below cannot report "4 parsed" when it checked none.
+                unparsed.append(f"{name} (no usable bash: WSL shim only)")
+                continue
             assert r.returncode == 0, f"{name} does not parse: {r.stderr}"
             parsed.append(name)
     ps = shutil.which("powershell") or shutil.which("pwsh")
@@ -472,7 +480,8 @@ def check_the_installers_are_shippable(zpath):
     print(f"[install] {len(INSTALLERS)} installers ship in the archive, "
           f"every GitHub reference names {REPO_SLUG}, the shell scripts are "
           f"CRLF-free, and {len(parsed)} parsed clean with the interpreters "
-          f"present here ({', '.join(parsed) or 'none available'})")
+          f"present here ({', '.join(parsed) or 'none available'})"
+          + (f"; NOT CHECKED: {'; '.join(unparsed)}" if unparsed else ""))
 
 
 def check_a_git_clone_lands_every_working_directory(_work):

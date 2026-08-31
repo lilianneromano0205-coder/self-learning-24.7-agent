@@ -93,6 +93,11 @@ SCRIPTS = {
 }
 
 SETTINGS = """[agent]
+# The demo is a trusted keyless fixture on the operator's own machine; its
+# spec CHECK lines and examiner gate carry this host's python path, which no
+# container can resolve (tests/common.py documents the same choice).
+sandbox = "host"
+allow_unsafe_host = true
 max_steps = 50
 command_timeout_seconds = 60
 poll_interval_seconds = 1

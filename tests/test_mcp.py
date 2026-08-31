@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plug ANY MCP tool server into the fleet — proven against a faithful
+"""Plug compatible legacy MCP tool servers into the fleet — proven against a faithful
 legacy-era stdio server (the installed base), plus the A2A discovery card.
 
 1. Handshake: initialize -> initialized notification -> tools/list, over
@@ -12,7 +12,7 @@ legacy-era stdio server (the installed base), plus the A2A discovery card.
    refused with the configured list.
 4. The toolbox capability note advertises configured MCP servers with the
    exact commands, so agents discover them without guessing.
-5. Federation serves an A2A v1.0 agent card at the standard well-known
+5. Federation serves an A2A-discoverable custom agent card at the standard well-known
    path: exposed experts as skills, the signed transport as the security
    scheme, and no secret material anywhere in it.
 
@@ -100,7 +100,7 @@ def main():
     print("[toolbox] the capability note advertises the server with the "
           "exact commands")
 
-    # --- 5. A2A v1.0 discovery card at the well-known path
+    # --- 5. A2A-discoverable custom discovery card at the well-known path
     homeB = make_sandbox("mcp_a2a", providers={"m": {"script": "s.json"}},
                          roles={"tester": "m"}, scripts={"s.json": []})
     import fleet
@@ -116,8 +116,9 @@ def main():
                 f"http://127.0.0.1:{port}/.well-known/agent-card.json",
                 timeout=10) as r:
             card = json.loads(r.read().decode("utf-8"))
-        assert card["protocolVersion"] == "1.0"
-        assert card["preferredTransport"] == "JSONRPC"
+        assert "protocolVersion" not in card, "custom federation must not claim A2A compliance"
+        assert card["preferredTransport"] == "CUSTOM_FEDERATION"
+        assert card["interoperability"]["a2a_task_api"] is False
         assert [sk["id"] for sk in card["skills"]] == ["alloy-expert"]
         assert "citation-gated" in card["skills"][0]["tags"]
         assert "fleetSignature" in card["securitySchemes"]
@@ -125,7 +126,7 @@ def main():
         ident = F.identity(homeB)
         assert ident["secret"] not in raw and ident["fingerprint"] not in raw, \
             "discovery must leak no key material"
-        print("[a2a] A2A v1.0 card served at the standard well-known path: "
+        print("[a2a] A2A-discoverable custom card served at the standard well-known path: "
               "exposed experts as skills, signed transport declared, zero "
               "secret material")
     finally:

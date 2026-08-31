@@ -32,11 +32,11 @@ SENTINEL = "sandbox-was-here.txt"
 def main():
     sb = make_sandbox("sandbox", providers={"m": {"script": "s.json"}},
                       roles={"tester": "m"}, scripts={"s.json": []})
-    cfg_host = {"agent": {"sandbox": "host"}}
+    cfg_host = {"agent": {"sandbox": "host", "allow_unsafe_host": True}}
 
     # --- 1. host
     ok, why = sandbox.available(cfg_host)
-    assert ok and "policy" in why, why
+    assert ok and "UNSAFE developer host" in why, why
     rc, out, err = sandbox.run(
         f'"{PY}" -c "import os;print(os.environ.get(\'AGENT_TASK_ID\'));'
         f'print(os.getcwd())"',
@@ -45,13 +45,13 @@ def main():
     lines = out.strip().splitlines()
     assert lines[0] == "t-42", out
     assert os.path.realpath(lines[1]) == os.path.realpath(sb), out
-    print("[host] the default backend runs in the expert's own root with the "
-          "AGENT_* environment the harness promises")
+    print("[host] explicit developer-only host mode runs in the expert's own "
+          "root with the AGENT_* environment the harness promises")
 
     # --- 2. fail closed
     for bad, needle in (({"agent": {"sandbox": "wat"}}, "unknown sandbox backend"),
-                        ({"agent": {"sandbox": "e2b"}}, "E2B_API_KEY"),
-                        ({"agent": {"sandbox": "daytona"}}, "DAYTONA_API_KEY")):
+                        ({"agent": {"sandbox": "e2b", "sandbox_workload": "stateless"}}, "E2B_API_KEY"),
+                        ({"agent": {"sandbox": "daytona", "sandbox_workload": "stateless"}}, "DAYTONA_API_KEY")):
         os.environ.pop("E2B_API_KEY", None)
         os.environ.pop("DAYTONA_API_KEY", None)
         rc, out, err = sandbox.run(
@@ -72,6 +72,7 @@ def main():
                            {"tool": "run_command", "args": {"cmd": "echo hello"}},
                            {"tool": "finish_task", "args": {"summary": "ran"}}]})
     agent_setting(sb2, 'sandbox = "e2b"')
+    agent_setting(sb2, 'sandbox_workload = "stateless"')
     a = loop.Agent(sb2)
     tid = a.add_task("tester", "run a command in the sandbox")
     assert run_drain(sb2) == 0

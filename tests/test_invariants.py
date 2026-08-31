@@ -758,14 +758,23 @@ def check_documented_cli_exists():
     for mod in sorted(modules):
         r = subprocess.run([sys.executable, os.path.join(AGENT_DIR, mod),
                             "--help"], capture_output=True, text=True,
-                           timeout=60, env=env, cwd=AGENT_DIR)
+                           errors="replace", timeout=60, env=env,
+                           cwd=AGENT_DIR)
         if "UnicodeEncodeError" in (r.stderr or ""):
             crashed.append(mod)
     for mod, sub in sorted(pairs):
+        # errors="replace": the child is deliberately run on a non-UTF-8
+        # console, so its help text comes back as cp1252 bytes. Decoding
+        # those strictly made the READER fail — subprocess hands back None
+        # for stdout and the line below died with a TypeError instead of
+        # reporting anything. Whether that happened depended on the encoding
+        # of the console the SUITE was launched from, which is the worst
+        # kind of test: one whose verdict is a property of the terminal.
         r = subprocess.run([sys.executable, os.path.join(AGENT_DIR, mod), sub,
                             "--help"], capture_output=True, text=True,
-                           timeout=60, env=env, cwd=AGENT_DIR)
-        if "invalid choice" in (r.stdout + r.stderr):
+                           errors="replace", timeout=60, env=env,
+                           cwd=AGENT_DIR)
+        if "invalid choice" in ((r.stdout or "") + (r.stderr or "")):
             refused.append(f"python {mod} {sub}")
 
     assert not crashed, (
@@ -1250,8 +1259,16 @@ def check_health_checks_can_fail():
     assert ok is False, (
         "sandbox.available cannot report an unavailable sandbox — the "
         "harness health check is decorative")
-    ok2, _ = sandbox.available({"agent": {"sandbox": "host"}})
-    assert ok2 is True, "the host backend must stay available"
+    ok2, why2 = sandbox.available({"agent": {"sandbox": "host"}})
+    assert ok2 is False, (
+        "host was reported available without allow_unsafe_host — autonomous "
+        "shell work would run uncontained on the owner's machine")
+    assert "allow_unsafe_host" in why2, why2
+    ok3, why3 = sandbox.available(
+        {"agent": {"sandbox": "host", "allow_unsafe_host": True}})
+    assert ok3 is True, (
+        "an owner who explicitly declared the developer host was still "
+        f"refused, so trusted fixtures have no way to run: {why3}")
 
     # A REACHABLE daemon is not a USABLE one. Docker Desktop in
     # Windows-container mode answers `docker info` perfectly and rejects
@@ -1288,8 +1305,8 @@ def check_health_checks_can_fail():
         if not usable:
             assert "linux containers" in why.lower(), why
     print("[health] the sandbox health check can actually FAIL: a configured "
-          "backend that does not exist is reported, and `host` still passes "
-          "— it was reading agent.agent.sandbox and defaulting to OK forever")
+          "backend that does not exist is reported, and `host` is refused "
+          "unless the owner explicitly declares allow_unsafe_host")
 
 
 def main():

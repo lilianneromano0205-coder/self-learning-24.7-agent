@@ -197,6 +197,13 @@ dialogs, 40 px targets.
 | `python harness.py [--json] [--check]` | the harness manifest: tools, gates, policies, budgets, versions |
 | `python loop.py run [--drain] --root <expert>` | run an agent's loop (drain = until the queue is empty) |
 | `python loop.py add --role R --goal G [--done-check CMD] [--stop-criteria ...]` | queue a task |
+| `python procedure.py seal-judge --root R --id j1 --checks '[...]'` | freeze a mechanical judge, so a task can be captured as a judged trajectory (owner) |
+| `python procedure.py seal-suite --root R --id s1 --suite s.json` | freeze fresh evaluation cases a compiled procedure must pass (owner) |
+| `python procedure.py trajectories --root R --family F` | what has been captured, and whether it is enough to induce from |
+| `python procedure.py compile --root R --name N --family F` | induce a candidate procedure from the accepted trajectories |
+| `python procedure.py evaluate --root R --name N --suite s1` | run the sealed suite; three accepted wins on distinct fresh instances make it PROVEN |
+| `python capability_graph.py --root R [--for "goal"] [--gaps]` | what this expert can actually do, joined from every ledger |
+| `python memory_benchmarks.py --help` | run memory-retrieval benchmarks over supplied datasets (none ship; missing data is reported NOT_RUN, never scored) |
 | `python fleet.py create "Name" --identity "..."` | new expert |
 | `python quick.py spin "Name" --goal "..."` | ⚡ lane: an agent, briefed and working in one step (`quick.py templates` lists archetypes) |
 | `python team.py run "goal" --experts a,b,c` | 🤝 lane: specialists with handoffs as files |
@@ -370,7 +377,7 @@ its own gated task directly (`tests/test_wake.py`).
 
 | method | path | purpose |
 |---|---|---|
-| GET | `/api/events` | **live SSE stream** (`?token=` for EventSource) |
+| GET | `/api/events` | **live stream** (bearer header; a token in the URL is refused) |
 | GET | `/api/system` `/api/feed` `/api/briefing` `/api/doctor` | fleet state, feed, chief briefing, doctor |
 | GET | `/api/harness` `/api/readiness` | manifest + contracts, readiness list |
 | GET | `/api/experts` · POST | list / create |
@@ -380,7 +387,7 @@ its own gated task directly (`tests/test_wake.py`).
 | GET | `/api/team[?run=<id>&files=1]` · POST | team runs, and one run as a thread |
 | POST | `/api/shutdown` | stop the panel and its children |
 
-Everything under `/api` honours `--token` (header or `?token=`).
+Everything under `/api` honours `--token` as an `Authorization: Bearer` header. A token in the QUERY STRING is no longer accepted: URLs reach browser history, referrers and logs, which is the wrong place for a credential that grants everything.
 
 ---
 
@@ -425,9 +432,55 @@ is what it has earned (`tests/test_skillmd.py`).
 
 ---
 
+## 11b. Turning verified work into a procedure
+
+The loop can convert work it has already done into something it can re-run
+without a model. Nothing is automatic: capture is opt-in per task, and the
+judge that decides whether a trajectory counts is sealed by you.
+
+```bash
+# 1. you seal a mechanical judge — the thing that decides "this worked"
+python procedure.py seal-judge --root <expert> --id invoice-judge   --checks '[{"predicate":"file_equals","path":"out/inv.txt","value":"paid"}]'
+
+# 2. queue work that cites it, with the values that make this instance
+python loop.py add --role practitioner --goal "settle the invoice"   --root <expert> --judge-id invoice-judge --family invoices   --inputs '{"path":"out/inv.txt","text":"paid"}' --done-check "..."
+```
+
+When two accepted trajectories in one family have **different inputs and
+different judges**, the loop compiles them into a candidate procedure and
+says so in the log (`procedure_compiled`). Identical evidence is refused —
+the same job done twice is one piece of evidence, not two.
+
+A candidate is not trusted. It becomes PROVEN only by passing a suite of
+fresh instances you sealed, including at least one edge case:
+
+```bash
+python procedure.py seal-suite --root <expert> --id invoice-suite --suite suite.json
+python procedure.py evaluate --root <expert> --name proc-invoices --suite invoice-suite
+```
+
+After that, a matching task with typed inputs runs the procedure directly:
+no model call, the task's own gate still decides, and the log records
+`procedure_route` with `model_calls: 0`. If the gate refuses the result, the
+procedure is recorded as having lost and the task falls through to the
+ordinary model path — a procedure never grades itself.
+
+`python metrics.py` reports **Amortization**: earlier versus later model
+steps per verified success, per task family, plus the share of verified
+successes that took no model step at all. That number is the whole point,
+and it is measured rather than asserted.
+
 ## 12. Where commands run
 
-`[agent] sandbox = "host" | "docker" | "e2b" | "daytona"`.
+`[agent] sandbox = "docker" | "host" | "e2b" | "daytona"`.
+
+**`docker` is the default, and `host` is refused unless you say so.** The
+host backend is not isolation: a model-authored process can reach the whole
+machine, and a detached child outlives the check that would have caught it.
+An owner who genuinely wants it — a trusted development fixture — must write
+`allow_unsafe_host = true` beside it, and every refusal names that key. The
+shipped `settings.toml` chooses containment; the test fixtures that opt out
+each say why in a comment.
 
 `docker` runs each command in a throwaway container at `/work` with
 `--network none` by default. If a configured backend is unavailable the

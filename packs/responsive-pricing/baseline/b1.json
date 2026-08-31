@@ -1,0 +1,27 @@
+{
+  "id": "b1",
+  "goal": "Create a community library membership comparison at out/b1/pricing.html. Include four priced tiers, distinct calls to action, semantic HTML landmarks and headings, accessible controls, and a responsive phone-first layout.",
+  "competencies": [
+    "semantic-structure",
+    "accessibility",
+    "pricing-ux"
+  ],
+  "accept": [
+    {
+      "id": "A1",
+      "what": "semantic structure floor",
+      "check": "python \"{PACK}/validators/check_semantics.py\" out/b1/pricing.html"
+    },
+    {
+      "id": "A2",
+      "what": "accessibility floor",
+      "check": "python \"{PACK}/validators/check_a11y.py\" out/b1/pricing.html"
+    },
+    {
+      "id": "A3",
+      "what": "4 priced tiers with CTAs",
+      "check": "python \"{PACK}/validators/check_pricing.py\" out/b1/pricing.html 4"
+    }
+  ],
+  "instance_id": "baseline-1"
+}

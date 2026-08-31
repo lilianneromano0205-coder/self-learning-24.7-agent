@@ -18,13 +18,10 @@ harness — never by the model's own opinion of itself:
 
   CANDIDATE     written by the Reflector after one execution. Injected with
                 an explicit hypothesis banner: use, but verify every step.
-  PROVEN        promoted mechanically after >= 3 DISTINCT tasks succeeded
-                with this skill loaded, at least one of them gate-verified,
-                and wins > losses. Injected first, labelled with its record.
-  QUARANTINED   >= 3 losses and more losses than wins. Never auto-injected
-                again (still on disk, still searchable — quarantine is a
-                verdict, not a deletion). One later verified win redeems it
-                back to candidate.
+  PROVEN        matched held-out mechanical ablations show positive effect,
+                pinned to these exact skill bytes. Co-occurrence is telemetry.
+  QUARANTINED   matched ablations demonstrate harm. Evidence is retained;
+                a later contradictory result returns the skill to candidate.
 
 Composition: a skill file may declare "USES: other-skill, another" (or link
 [[other-skill]] inline). When it loads, its sub-skills load with it — one
@@ -41,6 +38,11 @@ import os
 import re
 import sys
 import time
+import copy
+import hashlib
+import math
+import tempfile
+import random
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import locks
@@ -99,14 +101,31 @@ def entry(g, stem):
         "created": time.strftime("%Y-%m-%dT%H:%M:%S"), "updated": None})
 
 
+def _skill_hash(root, rel):
+    stem = _stem(rel)
+    for path in (os.path.join(_dir(root), stem + ".md"), os.path.join(_dir(root), stem, "SKILL.md")):
+        if os.path.isfile(path):
+            if os.path.commonpath([os.path.realpath(root), os.path.realpath(path)]) != os.path.realpath(root):
+                raise ValueError("skill escapes root")
+            with open(path, "rb") as f:
+                return hashlib.sha256(f.read()).hexdigest()
+    return None
+
+
+def _earned_status(root, rel, e):
+    if e.get("evidence_basis") != "matched_heldout_ablation":
+        return "candidate"             # historical co-occurrence is not causal proof
+    if not e.get("skill_sha256") or e["skill_sha256"] != _skill_hash(root, rel):
+        return "candidate"
+    return e.get("status", "candidate")
+
+
 def status_of(root, rel):
-    return load_graph(root).get(_stem(rel), {}).get("status", "candidate")
+    return _earned_status(root, rel, load_graph(root).get(_stem(rel), {}))
 
 
-def record_use(root, rels, task_id, success, verified=False):
-    """File the outcome of every task a skill was loaded into. Called by the
-    harness at terminal outcomes only (a retry is not a separate verdict).
-    Transitions are mechanical — see the module docstring."""
+def record_use(root, rels, task_id, success, verified=False, trace=None):
+    """Co-occurrence telemetry ONLY; even a verified win does not imply cause."""
     if not rels:
         return {}
     # two loops finishing tasks simultaneously must not lose each other's
@@ -114,40 +133,146 @@ def record_use(root, rels, task_id, success, verified=False):
     # NOTE: on timeout this used to do the read-modify-write anyway, which
     # abandons the lock exactly when contention proves it was needed. Wait
     # longer instead; losing a skill's evidence is worse than a slow tick.
+    os.makedirs(_dir(root), exist_ok=True)
     try:
         with locks.holding(_graph_path(root), timeout=20.0):
-            return _record_locked(root, rels, task_id, success, verified)
+            return _record_locked(root, rels, task_id, success, verified, trace)
     except TimeoutError:
         return {}
 
 
-def _record_locked(root, rels, task_id, success, verified):
+def _record_locked(root, rels, task_id, success, verified, trace=None):
     g = load_graph(root)
     changed = {}
-    for rel in rels:
+    for rel in dict.fromkeys(rels):
         st = _stem(rel)
         e = entry(g, st)
+        outcomes = e.setdefault("outcomes", {})
+        if not task_id or str(task_id) in outcomes:
+            continue
+        outcomes[str(task_id)] = {"success": bool(success), "verified": bool(verified),
+                                  "trace": copy.deepcopy(trace or []), "basis": "cooccurrence"}
         if success:
             if task_id and task_id not in e["win_tasks"]:
-                e["win_tasks"] = (e["win_tasks"] + [task_id])[-50:]
+                e["win_tasks"] = e["win_tasks"] + [task_id]
             e["wins"] += 1
             if verified:
                 e["verified_wins"] += 1
         else:
             e["losses"] += 1
         old = e["status"]
-        if old == "quarantined" and success and verified:
-            e["status"] = "candidate"      # redemption needs verified proof
-        elif (e["losses"] >= QUARANTINE_LOSSES and e["losses"] > e["wins"]):
-            e["status"] = "quarantined"
-        elif (len(e["win_tasks"]) >= PROMOTE_WINS and e["verified_wins"] >= 1
-                and e["wins"] > e["losses"]):
-            e["status"] = "proven"
+        e["status"] = _earned_status(root, rel, e)
         e["updated"] = time.strftime("%Y-%m-%dT%H:%M:%S")
         if e["status"] != old:
             changed[st] = (old, e["status"])
     save_graph(root, g)
     return changed
+
+
+def trace_event(task, event, rels, step=None, evidence=None):
+    """Trace facts, not inferred causation. Harness-owned task instrumentation."""
+    if event not in ("retrieved", "injected", "referenced", "influenced"):
+        raise ValueError("unknown skill trace event")
+    rels = list(dict.fromkeys(str(r).replace("\\", "/") for r in rels))
+    trace = task.setdefault("skill_trace", [])
+    if event == "influenced":
+        injected = {r for e in trace if e["event"] == "injected" for r in e["skills"]}
+        referenced = {r for e in trace if e["event"] == "referenced" for r in e["skills"]}
+        if not evidence or step is None or not set(rels) <= injected & referenced:
+            raise ValueError("influence requires injection, explicit reference and step evidence")
+    rec = dict(event=event, skills=rels, step=step, evidence=evidence,
+               attribution="observed_not_causal")
+    trace.append(rec)
+    return rec
+
+
+def run_ablation(root, rel, cases, runner, grader, *, seed=0):
+    """Trusted harness API, never exposed as an actor tool.
+
+    The runner gets only input, an empty disposable workspace, fixed seed and
+    exact injected skill text. The independent grader alone sees expected data.
+    Both callables must be trusted harness implementations; model-authored code
+    must execute through the existing execution authority, not inside callbacks.
+    Preregistration and receipts live in the existing CONTROL graph. No model,
+    remote judge or provider is implicitly called. No claim beyond these cases.
+    """
+    cases = copy.deepcopy(list(cases))
+    ids = [str(c.get("id", "")) for c in cases]
+    if not cases or not all(ids) or len(set(ids)) != len(ids):
+        raise ValueError("distinct held-out case ids required")
+    skill_hash = _skill_hash(root, rel)
+    if not skill_hash:
+        raise ValueError("skill not found")
+    skill = read_skill(root, rel)
+    if not skill:
+        raise ValueError("skill not readable")
+    spec = dict(skill_sha256=skill_hash, cases=cases, seed=seed,
+                minimum_discordant=6, alpha=0.05, hypothesis="paired_skill_effect")
+    digest = hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest()
+    with locks.holding(_graph_path(root), timeout=20):
+        graph = load_graph(root)
+        e = entry(graph, _stem(rel))
+        seen = set(e.get("outcomes", {})) | set(e.get("win_tasks", []))
+        for experiment in e.get("ablations", []):
+            seen.update(experiment["case_ids"])
+        if seen.intersection(ids):
+            raise ValueError("held-out cases overlap training or previously exposed evaluation")
+        rec = dict(id=digest, skill_sha256=skill_hash, case_ids=ids, seed=seed,
+                   case_sha256=hashlib.sha256(json.dumps(cases, sort_keys=True).encode()).hexdigest(),
+                   status="PREREGISTERED", pairs=0, receipts=[], alpha=0.05,
+                   minimum_discordant=6, evidence_tier="offline_controlled_execution")
+        e.setdefault("ablations", []).append(copy.deepcopy(rec))
+        save_graph(root, graph)
+    start = time.monotonic()
+    try:
+        with tempfile.TemporaryDirectory(prefix="skill-ablation-") as arena:
+            for n, case in enumerate(cases):
+                receipt = dict(case_id=case["id"], seed=seed + n)
+                arms = ["with", "without"]
+                random.Random(seed + n).shuffle(arms)
+                for arm in arms:
+                    workdir = os.path.join(arena, f"{n}-{arm}")
+                    os.mkdir(workdir)
+                    public = {"id": case["id"], "input": copy.deepcopy(case.get("input", {}))}
+                    arm_start = time.monotonic()
+                    output = runner(public, workdir, skill["body"] if arm == "with" else None, seed + n)
+                    accepted = grader(copy.deepcopy(case), output)
+                    if type(accepted) is not bool:
+                        raise ValueError("grader must return a boolean, never actor-reported success")
+                    receipt[arm] = accepted
+                    receipt[arm + "_seconds"] = time.monotonic() - arm_start
+                    receipt[arm + "_output_sha256"] = hashlib.sha256(
+                        json.dumps(output, sort_keys=True, default=str).encode()).hexdigest()
+                rec["receipts"].append(receipt)
+        if _skill_hash(root, rel) != skill_hash:
+            raise ValueError("skill changed during ablation")
+        wins = sum(r["with"] and not r["without"] for r in rec["receipts"])
+        harms = sum(r["without"] and not r["with"] for r in rec["receipts"])
+        discordant = wins + harms
+        p = min(1.0, 2 * sum(math.comb(discordant, k) for k in range(min(wins, harms) + 1))
+                / 2 ** discordant) if discordant else 1.0
+        rec.update(status="COMPLETE", pairs=len(cases), wins=wins, harms=harms,
+                   delta=(wins - harms) / len(cases), sign_test_p=p,
+                   causal_scope="these matched held-out tasks only")
+    except Exception as exc:
+        rec.update(status="FAILED", error=type(exc).__name__, reason=str(exc)[:200])
+    rec["seconds"] = time.monotonic() - start
+    with locks.holding(_graph_path(root), timeout=20):
+        graph = load_graph(root)
+        e = entry(graph, _stem(rel))
+        e["ablations"] = [copy.deepcopy(rec) if x["id"] == digest else x for x in e["ablations"]]
+        if rec["status"] == "COMPLETE":
+            significant = rec["sign_test_p"] <= rec["alpha"] and rec["wins"] + rec["harms"] >= 6
+            e["status"] = ("proven" if significant and rec["wins"] > 0 and rec["harms"] == 0 else
+                           "quarantined" if significant and rec["harms"] > rec["wins"] else "candidate")
+            # `updated` is the freshness field chief.briefing filters on; an
+            # ablation verdict that never stamped it was invisible to the
+            # briefing forever (entry() initialises it to None)
+            e.update(evidence_basis="matched_heldout_ablation",
+                     skill_sha256=skill_hash,
+                     updated=time.strftime("%Y-%m-%dT%H:%M:%S"))
+        save_graph(root, graph)
+    return rec
 
 
 _USES_RE = re.compile(r"^USES:\s*(.+)$", re.M)
@@ -179,6 +304,41 @@ def links_of(root, rel):
     return out
 
 
+def matching(root, goal, cap=3):
+    """Which skills this goal summons, and what actually loads.
+
+    THE ONE IMPLEMENTATION of the procedural-memory fetch rule: a playbook
+    matches when every token of its filename appears in the goal, or when any
+    declared KEYWORD/TRIGGER phrase does. It lived only inside
+    loop.Agent.matching_skills, so anything else that wanted to ask "what do I
+    have for this goal?" — the capability graph, the panel, a planner — had to
+    re-implement the rule, and this codebase has already been bitten three
+    times by two readers of one thing drifting apart. One rule, one place.
+    """
+    goal_words = set(re.findall(r"[a-z0-9]+", str(goal or "").lower()))
+    out = []
+    # both shapes count: the flat skills/x.md the Reflector writes and the
+    # Agent Skills folder skills/x/SKILL.md the owner imports
+    for s in discover(root):
+        stem_tokens = set(re.findall(r"[a-z0-9]+", s["stem"].lower()))
+        # KEYWORDS: what the skill is about; TRIGGER: the situation that
+        # should summon it (ReasoningBank-style applicability)
+        keywords = {k.strip().lower()
+                    for k in (s["keywords"] + s["trigger"]) if k.strip()}
+        # a keyword or TRIGGER may be a PHRASE ("load more"): it matches when
+        # every word of the phrase appears in the goal
+        hit = any(set(re.findall(r"[a-z0-9]+", k)) <= goal_words
+                  for k in keywords if k.strip())
+        if (stem_tokens and stem_tokens <= goal_words) or hit:
+            out.append(s["rel"])
+        if len(out) >= cap * 2:
+            break
+    # the skill GRAPH decides what actually loads: quarantined skills are
+    # excluded, proven ones outrank candidates, and each selected skill pulls
+    # its declared sub-skills (one hop) so procedures compose
+    return select(root, out, cap)
+
+
 def select(root, matched_rels, cap=3):
     """Choose what actually loads: quarantined skills never auto-inject,
     PROVEN outranks candidate, and each selected skill pulls its declared
@@ -187,13 +347,12 @@ def select(root, matched_rels, cap=3):
     matched_rels = [r.replace("\\", "/") for r in matched_rels]
 
     def alive(rel):
-        return g.get(_stem(rel), {}).get("status", "candidate") != "quarantined"
+        return _earned_status(root, rel, g.get(_stem(rel), {})) != "quarantined"
 
     def rank(rel):
         e = g.get(_stem(rel), {})
-        proven = e.get("status") == "proven"
-        return (0 if proven else 1, -e.get("verified_wins", 0),
-                -e.get("wins", 0), rel)
+        proven = _earned_status(root, rel, e) == "proven"
+        return (0 if proven else 1, rel)
 
     picked = []
     for rel in sorted((r for r in matched_rels if alive(r)), key=rank):
@@ -213,15 +372,13 @@ def annotate(root, rel, block):
     e = load_graph(root).get(_stem(rel))
     if not e:
         label = "CANDIDATE — unvalidated hypothesis; verify each step"
-    elif e["status"] == "proven":
-        label = (f"PROVEN — won {len(e['win_tasks'])} distinct tasks, "
-                 f"{e['verified_wins']} gate-verified")
-    elif e["status"] == "quarantined":
-        label = "QUARANTINED — failed more than it worked; do not rely on it"
+    elif _earned_status(root, rel, e) == "proven":
+        label = "PROVEN — positive matched held-out ablation; scope is evaluated tasks"
+    elif _earned_status(root, rel, e) == "quarantined":
+        label = "QUARANTINED — harm in matched held-out ablation; do not rely on it"
     else:
-        need = PROMOTE_WINS - len(e.get("win_tasks", []))
-        label = (f"CANDIDATE — validated on {len(e.get('win_tasks', []))} task(s), "
-                 f"{max(0, need)} more distinct win(s) needed; verify each step")
+        label = (f"CANDIDATE — {len(e.get('win_tasks', []))} co-occurring win(s), "
+                 "causal benefit unproven; verify each step")
     first, nl, rest = block.partition("\n")
     if first.startswith("===") and first.endswith("==="):
         return f"{first[:-3].rstrip()} ({label}) ===" + nl + rest

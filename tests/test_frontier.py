@@ -541,6 +541,11 @@ def main():
         test."""
         r = os.path.join(home, "experts", f"probe{n}")
         os.makedirs(r, exist_ok=True)
+        # probes in this file carry this host's executable names; a root with
+        # no settings now defaults to the docker backend, where they exit 127
+        # and every stage lands "red" for the wrong reason (common.py:21)
+        with open(os.path.join(r, "settings.toml"), "w", encoding="utf-8") as f:
+            f.write('[agent]\nsandbox = "host"\nallow_unsafe_host = true\n')
         return r
 
     try:

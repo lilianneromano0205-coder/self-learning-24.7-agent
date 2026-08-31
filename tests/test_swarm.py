@@ -350,7 +350,7 @@ def check_pursue_end_to_end_zero_model(home):
     root = fleet.create(home, "Parallel Rider", "grouped goals for pennies")
     with open(os.path.join(root, "settings.toml"), "w",
               encoding="utf-8") as f:
-        f.write('[agent]\npoll_interval_seconds = 1\nmax_task_usd = 0\n'
+        f.write('[agent]\nsandbox = "host"\nallow_unsafe_host = true\npoll_interval_seconds = 1\nmax_task_usd = 0\n'
                 'reflect_after = []\nmax_done_rejects = 1\n\n'
                 '[providers.m]\ntype = "mock"\nscript = "scripts/w.json"\n\n'
                 '[roles.default]\nprovider = "m"\nmodel = "mock"\n')

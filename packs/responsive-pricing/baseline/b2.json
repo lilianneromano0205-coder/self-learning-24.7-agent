@@ -1,0 +1,26 @@
+{
+  "id": "b2",
+  "goal": "Create a local pottery workshop registration at out/b2/pricing.html. Include two priced tiers, distinct calls to action, semantic HTML landmarks and headings, accessible controls, and a responsive phone-first layout.",
+  "competencies": [
+    "responsive-layout",
+    "accessibility"
+  ],
+  "accept": [
+    {
+      "id": "A1",
+      "what": "responsive floor",
+      "check": "python \"{PACK}/validators/check_responsive.py\" out/b2/pricing.html"
+    },
+    {
+      "id": "A2",
+      "what": "accessibility floor",
+      "check": "python \"{PACK}/validators/check_a11y.py\" out/b2/pricing.html"
+    },
+    {
+      "id": "A3",
+      "what": "2 priced tiers with CTAs",
+      "check": "python \"{PACK}/validators/check_pricing.py\" out/b2/pricing.html 2"
+    }
+  ],
+  "instance_id": "baseline-2"
+}

@@ -1,39 +1,19 @@
 #!/usr/bin/env python3
-"""MCP client — plug ANY Model Context Protocol tool server into the fleet.
+"""Legacy MCP stdio tool client (2025-06-18 initialization and tools).
 
-MCP is the tool standard now: thousands of published servers (filesystems,
-browsers, databases, SaaS APIs) speak it. The 2026-07-28 revision made the
-protocol stateless with per-request metadata, but virtually the entire
-installed base of local servers still speaks the legacy era: an `initialize`
-handshake over stdio, newline-delimited JSON-RPC. So this client is
-DUAL-ERA the way the spec's own compatibility matrix prescribes:
+This implements newline-delimited JSON-RPC over stdio only. Modern 2026
+MCP and Streamable HTTP are NOT implemented; an incompatible handshake is
+rejected, never converted into a claim of modern compatibility.
 
-  1. legacy first  — initialize -> notifications/initialized -> tools/*
-                     (works with essentially every published server today)
-  2. modern retry  — if initialize is rejected with a modern error, resend
-                     requests carrying `_meta.protocolVersion` instead.
-
-Configuration is owner-provided (trust decision), in mcp.json at the fleet
-home or an expert root:
-
-  {"servers": {
-     "files":  {"cmd": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "C:/data"]},
-     "sqlite": {"cmd": "uvx", "args": ["mcp-server-sqlite", "--db", "app.db"]}}}
-
-Agents use it through run_command, so every call inherits the harness's
-budgets and logging:
-
-    python mcp.py tools files
-    python mcp.py call files read_file --args "{\\"path\\": \\"notes.txt\\"}"
-
-Results come back wrapped in the SAME content fences the grounding contract
-teaches (<<<TOOL-RESULT>>> ... <<<END-TOOL-RESULT>>>): whatever a tool
-returns is DATA — evidence to quote and cite, never instructions to obey.
-That single rule is what keeps a poisoned web page fetched through an MCP
-server from steering the agent.
+Owner-provided mcp.json controls executable identity and explicit env_allow
+credential grants. Child environments are minimal by default. Servers are
+trusted executable code: environment filtering is not filesystem containment.
+See docs/MCP_PROTOCOL.md for pins, update/review and transport limitations.
+Tool results are fenced as untrusted data, not instructions.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -43,8 +23,47 @@ import threading
 import time
 
 LEGACY_VERSION = "2025-06-18"
-MODERN_VERSION = "2026-07-28"
 CLIENT_INFO = {"name": "expert-fleet", "version": "1.0"}
+
+# An allowlist, not a secret-name blacklist: unknown variables never leak.
+# HOME is needed by package runners but grants no environment credentials.
+RUNTIME_ENV = frozenset({"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC",
+    "TEMP", "TMP", "TMPDIR", "HOME", "USERPROFILE", "LOCALAPPDATA", "APPDATA",
+    "LANG", "LC_ALL", "LC_CTYPE", "TZ", "PYTHONUTF8", "PYTHONIOENCODING"})
+
+
+def server_environment(spec, environ=None):
+    """Only runtime names plus exact owner grants; never expand wildcards."""
+    environ = os.environ if environ is None else environ
+    allowed = spec.get("env_allow", [])
+    explicit = spec.get("env", {})
+    valid = lambda k: isinstance(k, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", k)
+    if not isinstance(allowed, list) or any(not valid(k) for k in allowed):
+        raise ValueError("env_allow must contain exact environment variable names")
+    if not isinstance(explicit, dict) or any(not valid(k) or not isinstance(v, str)
+                                            or "\0" in v for k, v in explicit.items()):
+        raise ValueError("env must map exact environment names to string values")
+    names = RUNTIME_ENV | {k.upper() for k in allowed}
+    child = {k: v for k, v in environ.items() if k.upper() in names}
+    # Explicit env is also an owner grant. Keep it out of logs and receipts.
+    child.update(explicit)
+    return child
+
+
+def server_identity(spec):
+    """Identity of owner-approved code/config, never the raw credential."""
+    fields = ("cmd", "args", "shell", "version", "integrity", "source",
+              "env_allow", "env")
+    blob = json.dumps({k: spec[k] for k in fields if k in spec},
+                      sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(blob.encode()).hexdigest()
+
+
+def validate_identity(spec):
+    expected = spec.get("trust_identity")
+    if expected and expected != server_identity(spec):
+        raise ValueError("MCP executable/configuration changed: owner must review "
+                         "and re-enable it; previous trust evidence is stale")
 
 
 def find_config(root):
@@ -76,7 +95,8 @@ class Server:
         self.name = name
         self.timeout = timeout
         cmd = [spec["cmd"]] + list(spec.get("args") or [])
-        env = {**os.environ, **(spec.get("env") or {})}
+        validate_identity(spec)
+        env = server_environment(spec)
         self.proc = subprocess.Popen(
             cmd, cwd=cwd, env=env, stdin=subprocess.PIPE,
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -84,7 +104,7 @@ class Server:
             shell=isinstance(spec["cmd"], str) and os.name == "nt"
             and spec.get("shell", False))
         self._id = 0
-        self._era = None          # "legacy" | "modern"
+        self._era = None          # set only after a supported handshake
 
     # --- plumbing -------------------------------------------------------
     def _send(self, msg):
@@ -128,9 +148,6 @@ class Server:
         msg = {"jsonrpc": "2.0", "id": self._id, "method": method}
         if params is not None:
             msg["params"] = params
-        if self._era == "modern":
-            msg.setdefault("params", {}).setdefault("_meta", {})[
-                "modelcontextprotocol.io/protocolVersion"] = MODERN_VERSION
         self._send(msg)
         resp = self._read_response(self._id)
         if "error" in resp:
@@ -141,25 +158,18 @@ class Server:
 
     # --- lifecycle ------------------------------------------------------
     def handshake(self):
-        """Legacy initialize first (the installed base); on a recognized
-        modern rejection, switch eras and carry version per-request."""
-        try:
-            result = self._rpc("initialize", {
-                "protocolVersion": LEGACY_VERSION,
-                "capabilities": {},
-                "clientInfo": CLIENT_INFO})
-            self._era = "legacy"
-            self._send({"jsonrpc": "2.0",
-                        "method": "notifications/initialized"})
-            return {"era": "legacy",
-                    "server": (result.get("serverInfo") or {}).get("name"),
-                    "protocol": result.get("protocolVersion")}
-        except RuntimeError as e:
-            if "-32022" in str(e) or "Unsupported protocol" in str(e):
-                self._era = "modern"
-                return {"era": "modern", "server": None,
-                        "protocol": MODERN_VERSION}
-            raise
+        """Negotiate the implemented legacy revision; reject all others."""
+        result = self._rpc("initialize", {
+            "protocolVersion": LEGACY_VERSION,
+            "capabilities": {}, "clientInfo": CLIENT_INFO})
+        if result.get("protocolVersion") != LEGACY_VERSION:
+            raise RuntimeError("unsupported MCP protocol: this client implements "
+                               "2025-06-18 legacy stdio only")
+        self._era = "legacy"
+        self._send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+        return {"era": "legacy", "transport": "stdio",
+                "server": (result.get("serverInfo") or {}).get("name"),
+                "protocol": LEGACY_VERSION}
 
     def tools(self):
         out = self._rpc("tools/list").get("tools", [])
@@ -184,11 +194,13 @@ class Server:
             self.proc.wait(3)
         except subprocess.TimeoutExpired:
             self.proc.kill()
+            self.proc.wait(3)
+        self.proc.stdout.close()
 
 
 MAX_RESULT_CHARS = 20_000      # tool output is an attack surface: bound it
 
-# Vetted open-source servers (official modelcontextprotocol/servers and
+# Version-pinned reference servers (official modelcontextprotocol/servers and
 # first-party vendor servers). `python mcp.py enable <name> [args]` writes
 # the entry into mcp.json; prerequisites are checked, never assumed.
 CATALOG = {
@@ -207,13 +219,24 @@ CATALOG = {
                    "arg_hint": "", "desc": "current time and timezone conversions"},
     "sqlite":     {"cmd": "uvx", "args": ["mcp-server-sqlite"], "needs": "uvx",
                    "arg_hint": "--db-path <file.db>", "desc": "query a SQLite database"},
-    "playwright": {"cmd": "npx", "args": ["-y", "@playwright/mcp@latest"],
+    "playwright": {"cmd": "npx", "args": ["-y", "@playwright/mcp"],
                    "needs": "npx", "arg_hint": "",
                    "desc": "drive a real browser (navigate, click, fill, read)"},
-    "github":     {"cmd": "npx", "args": ["-y", "@modelcontextprotocol/server-github"],
-                   "needs": "npx", "arg_hint": "",
-                   "desc": "GitHub issues/PRs/files (needs GITHUB_TOKEN in env)"},
+
 }
+
+
+# Published registry artifacts verified 2026-08-30. Hashes are provenance;
+# package runners still resolve transitive dependencies (not a full lock).
+CATALOG_PINS = {'filesystem': ('2026.7.10', 'sha512-Mmjg4anFBD5OzbPnGJOA0jPPN8645ERhQk38HQLpSenx1ox9bfdPkmAzUnNjeQtqQGFLtKe13J20RtLBmUKMZA=='), 'memory': ('2026.7.4', 'sha512-D+NNzChsOHN72y58ngDmO+TzjJijGi/sSY/gBydhB3TJCcm1XQEozVWwEpruHeXt/HSkMV3Z/BpHDhdt1MLD5w=='), 'playwright': ('0.0.79', 'sha512-VpqD4a3vFyGQMY9sh3UJiO6wjcurggkljKfAyCHL0QWGY5m6Ehr3MNsAAHPDHO//n13g0PCjpHatAOiulrqdZQ=='), 'git': ('2026.8.18', 'sha256-6c32a8e771564122a9bafac373cf871fb3ab540ddc1ba0ee8e9c8c6e9878aef7'), 'fetch': ('2026.8.18', 'sha256-6642df733a1032e7f37d0f13849af8a944d46c02420d2c070cc14e0948f8fcc2'), 'time': ('2026.8.18', 'sha256-1407583af42dc0163909d855c9ef20114a12b4981c3975033721a7906cdd212a'), 'sqlite': ('2025.4.25', 'sha256-5ba5706aa29d249a3cde8226577e021c07792d3198e9db40fd005578d2a0801d')}
+for _name, (_version, _integrity) in CATALOG_PINS.items():
+    _spec = CATALOG[_name]
+    _idx = 1 if _spec['cmd'] == 'npx' else 0
+    _package = _spec['args'][_idx].removesuffix('@latest')
+    _spec['args'][_idx] = _package + ('@' if _idx else '==') + _version
+    _spec.update(version=_version, integrity=_integrity,
+                 source=('https://registry.npmjs.org/' + _package + '/' + _version
+                         if _idx else 'https://pypi.org/pypi/' + _package + '/' + _version + '/json'))
 
 
 def enable(root, name, extra_args=(), allow_roles=None):
@@ -232,7 +255,10 @@ def enable(root, name, extra_args=(), allow_roles=None):
     if os.path.isfile(p):
         with open(p, "r", encoding="utf-8-sig") as f:
             cfg = json.load(f)
-    entry = {"cmd": spec["cmd"], "args": spec["args"] + list(extra_args)}
+    entry = {"cmd": spec["cmd"], "args": spec["args"] + list(extra_args),
+             "version": spec["version"], "integrity": spec["integrity"],
+             "source": spec["source"], "env_allow": []}
+    entry["trust_identity"] = server_identity(entry)
     if allow_roles:
         entry["allow_roles"] = list(allow_roles)
     cfg.setdefault("servers", {})[name] = entry
@@ -266,7 +292,11 @@ def connect(root, name, timeout=30, role=None):
                          f"owner's policy, not a bug.")
     s = Server(name, servers[name], cwd=root, timeout=timeout)
     s.spec = servers[name]
-    s.handshake()
+    try:
+        s.handshake()
+    except BaseException:
+        s.close()
+        raise
     return s
 
 
@@ -368,7 +398,8 @@ def guarded_call(s, tool, arguments, root=None, fresh=False):
     """tools/call through the owner's policy AND the effects ledger:
     denied tools never reach the server; identical calls inside one task
     lineage are replayed from the ledger instead of hitting the world twice
-    (exactly-once across retries). `fresh` forces a new call."""
+    (known-completed calls are not automatically repeated). Ambiguous
+    effects halt for reconciliation. `fresh` explicitly requests a new call."""
     if not _tool_allowed(getattr(s, "spec", {}) or {}, tool):
         return {"isError": True, "content": [{"type": "text", "text":
                 f"tool '{tool}' is denied for server '{s.name}' by mcp.json "
@@ -420,14 +451,16 @@ def guarded_call(s, tool, arguments, root=None, fresh=False):
         risk = classify(spec, s.tool_def(tool))
         if needs_approval(spec, risk, tool):
             import approvals
-            st = approvals.status_of(root, key)
+            approval_key = (key + "|code:" + server_identity(spec)
+                            if spec.get("trust_identity") else key)
+            st = approvals.status_of(root, approval_key)
             if st == "denied":
                 return {"isError": True, "content": [{"type": "text", "text":
                         f"DENIED by the owner: {s.name}.{tool} with these "
                         f"arguments will not run. Do not retry; choose another "
                         f"route or finish with what you have."}]}, "denied"
             if st != "granted":
-                rec = approvals.request(root, key, s.name, tool, arguments,
+                rec = approvals.request(root, approval_key, s.name, tool, arguments,
                                         reason=f"{risk} tool", task_id=task_id,
                                         lineage=lineage)
                 return {"isError": True, "content": [{"type": "text", "text":

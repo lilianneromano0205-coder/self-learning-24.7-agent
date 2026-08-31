@@ -291,6 +291,9 @@ def check_it_works_against_the_real_internet():
     or the catalogue is unavailable. A red suite caused by somebody else's
     outage teaches people to ignore red suites.
     """
+    if os.environ.get("DISCOVER_LIVE_TEST") != "1":
+        print("[live] SKIPPED: set DISCOVER_LIVE_TEST=1 for explicit public-catalogue smoke")
+        return
     try:
         res = discover.search("b-tree index concurrency",
                               rails=["openalex", "crossref"], limit=5)

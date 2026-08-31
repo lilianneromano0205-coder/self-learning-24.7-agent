@@ -150,7 +150,8 @@ def main():
                        roles={"tester": "m"}, scripts={"s.json": []})
     exp = fleet.create(sb2, "Auto Filer", "records its own history")
     with open(os.path.join(exp, "settings.toml"), "w", encoding="utf-8") as f:
-        f.write('[agent]\npoll_interval_seconds = 1\nmax_task_usd = 0\n'
+        f.write('[agent]\nsandbox = "host"\nallow_unsafe_host = true\n'
+                'poll_interval_seconds = 1\nmax_task_usd = 0\n'
                 'reflect_after = []\nmax_done_rejects = 2\n\n'
                 '[providers.m]\ntype = "mock"\nscript = "s.json"\n\n'
                 '[roles.default]\nprovider = "m"\nmodel = "mock"\n\n'

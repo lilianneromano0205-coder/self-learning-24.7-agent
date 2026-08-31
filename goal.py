@@ -144,6 +144,55 @@ def pursue(home, expert, goal, criteria="", cycles=4, drive=False,
         f.write(f"# GOAL\n{goal}\n\n# SUCCESS CRITERIA\n{criteria}\n")
     with open(os.path.join(d, "toolbox.md"), "w", encoding="utf-8") as f:
         f.write(toolbox.capability_note(root))
+    # WHAT THIS EXPERT ALREADY KNOWS HOW TO DO, before it plans how to do
+    # this. toolbox.md says which TOOLS are ready; this says which
+    # COMPETENCE is earned — proven procedures whose triggers this goal
+    # fires, skills with causal evidence, measured competence in the family,
+    # and the cheapest strategy that evidence supports. A planner that
+    # cannot see its own competence re-derives it every time, which is
+    # exactly the expensive reasoning this platform exists to stop paying
+    # for. Advisory, like the toolbox note: it informs the plan, it does not
+    # gate anything, and the graders remain the only authority on success.
+    competence_rel = None
+    try:
+        import capability_graph
+        support = capability_graph.support_for(root, goal)
+        lines = ["# COMPETENCE FOR THIS GOAL",
+                 f"strategy the evidence supports: {support['strategy']}",
+                 f"why: {support['why']}", ""]
+        for row in support["proven_procedures"][:5]:
+            lines.append(f"- PROVEN procedure `{row['name']}` "
+                         f"(fired on: {', '.join(row['fired'][:4])})"
+                         + (f" — typed inputs {row['inputs']}"
+                            if row.get("inputs") else ""))
+        for row in support["candidate_procedures"][:3]:
+            lines.append(f"- candidate procedure `{row['name']}` — unproven, "
+                         f"run only under supervision")
+        for row in support["skills"][:5]:
+            lines.append(f"- skill `{row['skill']}` ({row['status']}"
+                         + ("; ablation-earned" if row["causal"]
+                            else "; co-occurrence only, not causal") + ")")
+        for row in support["competence"][:3]:
+            lines.append(f"- measured competence in `{row['capability']}`: "
+                         f"{row.get('claim') or 'no claim'}")
+        if support["missing_tools"]:
+            lines.append(f"- MISSING tools: "
+                         f"{', '.join(support['missing_tools'][:8])} — plan "
+                         f"around them or acquire them first")
+        if len(lines) == 4:
+            lines.append("- nothing recorded here covers this goal yet. This "
+                         "is new work: do it well, and the next one is "
+                         "cheaper.")
+        lines += ["", f"({support['caveat']})"]
+        with open(os.path.join(d, "competence.md"), "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+        competence_rel = f"{rel_dir}/competence.md"
+    except Exception as e:                    # a missing map never blocks
+        try:                                  # the contract does not exist
+            contractmod.event(root, gid,      # yet, so this is best-effort
+                              "competence_map_unavailable", why=str(e)[:200])
+        except Exception:
+            pass
     commons.refresh_directory(home)
     commons_rel = commons.write_digest(home, root)
 
@@ -259,6 +308,8 @@ def pursue(home, expert, goal, criteria="", cycles=4, drive=False,
         # ---------- 1. PLAN -------------------------------------------------
         plan_rel = f"{rel_dir}/plan-{cycle}.md"
         base_mem = [f"{rel_dir}/goal.md", f"{rel_dir}/toolbox.md"]
+        if competence_rel:
+            base_mem.append(competence_rel)
         # A repaired pursuit opens with the REPAIR SIGNAL: the exact failing
         # checks and their recorded errors, verbatim from the ledger — small
         # and explicit, because models struggle to absorb even good feedback

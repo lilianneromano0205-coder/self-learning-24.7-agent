@@ -42,14 +42,38 @@ design_gate = true                  # interface deliverables must pass designche
 # WHERE model-written commands run, and WHAT they can see. Both the tool path
 # (run_command) and the verification path (done_check / spec CHECK: lines) go
 # through these — the gate used to bypass them and see the full environment.
-sandbox = "host"                    # host | docker | e2b | daytona.
+sandbox = "docker"                  # mandatory containment by default
+allow_unsafe_host = false            # developer-only; host has NO authority isolation
                                     # An unavailable backend FAILS CLOSED: it
                                     # refuses rather than falling back to host.
-sandbox_network = true              # false cuts network inside the sandbox
+sandbox_network = false             # acquisition grants egress only to its arena
 # sandbox_image = "python:3.12-slim"  # image for the docker backend
 command_env_allow = []              # env vars a command MAY see. Everything
                                     # credential-shaped is withheld by default;
                                     # name one here only when a tool needs it.
+
+# Layered verification for open-ended work (verification.py). Empty = L0
+# mechanical gates only, which stay supreme either way: a configured judge
+# can confirm or annotate, never overturn a failing mechanical check.
+# verification_layers = [
+#   {level = 1, kind = "specialist", role = "examiner"},
+#   {level = 4, kind = "frontier", role = "examiner", model = "strong"},
+# ]
+
+# Hybrid memory retrieval's OPTIONAL local embedding model (retrieval.py).
+# Absent = lexical + metadata + freshness only, honestly labeled as such.
+# [agent.memory_retrieval]
+# local_model_path = "/models/all-MiniLM-L6-v2"   # local dir, never fetched
+
+# The cognitive scheduler (scheduler.py). `enabled` hands it routing
+# authority — leave that false until its outcome ledger has earned trust.
+# `shadow` (default true) makes it DECIDE-AND-LOG on every routed task
+# without routing anything: decisions land in logs/scheduler-decisions.jsonl,
+# the loop files each task's real outcome against them, and the evidence for
+# (or against) enabling it accrues at zero risk.
+[agent.scheduler]
+enabled = false
+shadow = true
 
 # Pipeline chaining: when the left role finishes a task, queue the right role
 # on the same course. Gaps feedback (the mandated edge) is automatic anyway.

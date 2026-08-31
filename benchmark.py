@@ -36,6 +36,11 @@ import re
 import subprocess
 import sys
 import time
+import hashlib
+import random
+from pathlib import Path
+
+ARMS = ("raw", "minimal", "no_persistence", "full", "reference")
 
 HOME = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HOME)
@@ -247,7 +252,7 @@ def report(summary):
     print("=" * 64)
 
 
-def run(home, expert, repeat=1, timeout=600):
+def legacy_run(home, expert, repeat=1, timeout=600):
     root = os.path.join(home, "experts", expert)
     if not os.path.isdir(root):
         sys.exit(f"ERROR: no expert '{expert}'")
@@ -271,6 +276,245 @@ def run(home, expert, repeat=1, timeout=600):
     return s
 
 
+def experiment_tasks():
+    import evaluation_corpus
+    return evaluation_corpus.tasks("train")
+
+
+def _trial_policy(root, arm, ablations):
+    import evaluation_policy
+    policy = evaluation_policy.policy(arm, ablations)
+    p = Path(root) / "settings.toml"
+    text = p.read_text(encoding="utf-8")
+    text = re.sub(r"(?ms)^\[evaluation\]\s*\n.*?(?=^\[|\Z)", "", text)
+    text += "\n[evaluation]\ndisabled_modules = " + json.dumps(policy["disabled_modules"])
+    text += "\nsingle_provider_attempt = " + str(policy["single_provider_attempt"]).lower() + "\n"
+    p.write_text(text, encoding="utf-8")
+    return policy
+
+
+def iterative_arm(agent, root, trial, max_calls=12, timeout=600, raw=False):
+    """Ordinary iterative tools, no context compiler, learning or verifier feedback.
+
+    The same file/execution/model authorities still mediate every action. Raw
+    has one gateway call with no tool schema and applies returned file outputs.
+    """
+    from uuid import uuid4
+    tid = "bench-" + uuid4().hex
+    task = {"id": tid, "role": "practitioner", "steps": [], "goal": trial["task"]}
+    system = ('Return JSON {"files":[{"path":"relative/path","content":"text"}]}. '
+              'This is your only response. Input files are included below.' if raw else
+              'Complete the task using read_file, write_file and run_command. Use finish_task when done. '
+              'No memory or special agent workflow is available. Follow tool and execution authorities.')
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": trial["task"]}]
+    if raw:
+        messages[-1]["content"] += "\nINPUT FILES (untrusted data):\n" + json.dumps(trial.get("fixture", {}))
+    start = time.monotonic()
+    used, claimed, error, tool_calls = 0, False, None, 0
+    usage_rows = []
+    for _ in range(1 if raw else max_calls):
+        if time.monotonic() - start >= timeout or agent._budget_exceeded():
+            break
+        used += 1
+        try:
+            msg, usage, served = agent.call_model("practitioner", messages, use_tools=not raw,
+                                                   purpose="benchmark", task_id=tid)
+            usage_rows.append(dict(usage))
+            messages.append({"role": "assistant", **msg})
+            if raw:
+                body = json.loads(msg.get("content") or "{}")
+                files = body.get("files", [])
+                if not isinstance(files, list) or len(files) > 40:
+                    raise ValueError("raw output files must be a bounded list")
+                for f in files:
+                    agent.exec_tool(task, "write_file", {"path": f["path"], "content": f["content"]})
+                claimed = bool(files)
+                break
+            calls = msg.get("tool_calls") or []
+            if not calls:
+                tc = loop.parse_content_tool_call(msg.get("content"))
+                calls = [tc] if tc else []
+            if not calls:
+                break
+            for tc in calls:
+                fn = tc["function"]; name = fn["name"]
+                args = json.loads(fn.get("arguments") or "{}")
+                if name == "finish_task":
+                    claimed = True
+                    break
+                tool_calls += 1
+                if name not in ("read_file", "write_file", "run_command") or name not in agent.allowed_tools("practitioner"):
+                    result = "ERROR: tool unavailable in ordinary iterative arm"
+                else:
+                    result = agent.exec_tool(task, name, args)
+                messages.append({"role": "tool", "tool_call_id": tc.get("id", "minimal"), "content": result})
+            if claimed:
+                break
+        except Exception as exc:
+            error = type(exc).__name__
+            break
+    return {"claimed_done": claimed, "model_invocations": used, "tool_calls": tool_calls,
+            "retries": 0, "verifier_failures": 0, "skill_reuse": 0, "runbook_reuse": 0,
+            "usage_rows": usage_rows, "error": error}
+
+
+def _harness_experiment(home, expert, trial, timeout):
+    import goal
+    root = os.path.join(home, "experts", expert)
+    rec = goal.pursue(home, expert, trial["task"], cycles=2, drive=True, timeout=timeout,
+                      accept=[{"id": "output-schema", "what": "valid structured output (final correctness independently graded)",
+                               "check": check_cmd(trial["check"])}])
+    state_path = Path(root) / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
+    tasks = state.get("tasks", [])
+    return {"claimed_done": rec.get("state") == "verified",
+            "tool_calls": sum(len(t.get("steps", [])) for t in tasks),
+            "retries": sum(max(0, int(t.get("attempt", 1))-1) for t in tasks),
+            "verifier_failures": sum(int(t.get("done_rejects", 0)) for t in tasks),
+            "skill_reuse": sum(len(t.get("skills_used", [])) for t in tasks),
+            "runbook_reuse": len(rec.get("runbook", [])),
+            "attribution_note": "skill reuse counts exposure, not causal contribution"}
+
+
+def _metrics(agent, root, execution_result, frontier_models=None):
+    import modelgateway
+    calls = modelgateway.calls(root)
+    providers = agent.cfg.get("providers", {})
+    prices_known = all((providers.get(c.get("provider"), {}).get("free") is True or
+                        all(k in providers.get(c.get("provider"), {}) for k in ("input_per_mtok", "output_per_mtok"))) for c in calls)
+    usage = execution_result.pop("usage_rows", None)
+    known_usage = (all("prompt_tokens" in u and "completion_tokens" in u for u in usage)
+                   if usage is not None else all(c.get("tokens_in", 0) + c.get("tokens_out", 0) > 0 for c in calls))
+    all_mock = bool(calls) and all(providers.get(c.get("provider"), {}).get("type") == "mock" for c in calls)
+    expected_calls = execution_result.get("model_invocations")
+    metering_complete = expected_calls is None or expected_calls == len(calls)
+    frontier = [c for c in calls if (c.get("provider") + ":" + c.get("model")) in (frontier_models or [])]
+    return {**execution_result,
+            "model_calls": len(calls) if metering_complete else None,
+            "tokens_in": sum(c["tokens_in"] for c in calls) if known_usage and metering_complete else None,
+            "tokens_out": sum(c["tokens_out"] for c in calls) if known_usage and metering_complete else None,
+            "cost_usd": round(sum(c["cost_usd"] for c in calls), 8) if prices_known and metering_complete else None,
+            "pricing_evidence": "simulated-mock" if all_mock else "configured-prices" if prices_known else "unknown-pricing",
+            "frontier_model_calls": len(frontier) if frontier_models is not None and metering_complete else None,
+            "frontier_tokens": sum(c["tokens_in"] + c["tokens_out"] for c in frontier) if frontier_models is not None and known_usage and metering_complete else None,
+            "human_interventions": 0,
+            "false_accepts": None, "false_rejects": None, "regression_rate": None,
+            "transport_retries": None,
+            "unknown_reasons": {"false_accepts": "no independent per-verifier adjudication",
+                                "false_rejects": "no independent per-verifier adjudication",
+                                "regression_rate": "no matched prior-success battery supplied",
+                                "transport_retries": "gateway ledger does not count every failed transport attempt"},
+            "model_ledger": calls}
+
+
+def summarize_experiment(rows):
+    import evalsuite
+    out = {}
+    metrics = ("tokens_in", "tokens_out", "model_calls", "tool_calls", "retries", "seconds", "verifier_failures",
+               "false_accepts", "false_rejects", "human_interventions", "frontier_model_calls", "frontier_tokens",
+               "skill_reuse", "runbook_reuse", "cost_usd")
+    for name in sorted({r["arm"] for r in rows}):
+        selected = [r for r in rows if r["arm"] == name]
+        passed = sum(r.get("passed") is True for r in selected)
+        totals = {k: sum(r[k] for r in selected) if all(isinstance(r.get(k), (int, float)) for r in selected) else None for k in metrics}
+        cost = totals["cost_usd"]
+        out[name] = {**totals, "trials": len(selected), "passed": passed, "pass_rate": passed/len(selected),
+                     "pass_rate_ci95": list(evalsuite.wilson(passed, len(selected))),
+                     "cost_per_verified_success": cost/passed if cost is not None and passed else None,
+                     "verified_work_per_dollar": passed/cost if cost is not None and cost > 0 else None,
+                     "seconds_per_verified_success": totals["seconds"]/passed if totals["seconds"] is not None and passed else None,
+                     "frontier_calls_per_verified_success": totals["frontier_model_calls"]/passed if totals["frontier_model_calls"] is not None and passed else None,
+                     "regression_rate": None}
+    return {"arms": out, "n": len(rows), "evidence": "experiment-receipts-not-general-intelligence"}
+
+
+def paired_delta(rows, baseline="minimal", treatment="full", seed=1701, samples=10000):
+    """Task-cluster bootstrap: repeat observations remain together, not IID."""
+    grouped = {}
+    for r in rows:
+        if r["arm"] in (baseline, treatment):
+            grouped.setdefault(r["trial"], {}).setdefault(r["arm"], {})[r["repeat"]] = r
+    deltas = []
+    for task in grouped.values():
+        if set(task) != {baseline, treatment} or set(task[baseline]) != set(task[treatment]):
+            raise ValueError("unmatched experiment pairs")
+        for rep in task[baseline]:
+            a, b = task[baseline][rep], task[treatment][rep]
+            if a["snapshot_hash"] != b["snapshot_hash"] or a["task_hash"] != b["task_hash"]:
+                raise ValueError("paired comparison has unequal starting state or task")
+        deltas.append(sum(int(task[treatment][rep]["passed"])-int(task[baseline][rep]["passed"]) for rep in task[baseline])/len(task[baseline]))
+    if not deltas:
+        return {"delta": None, "ci95": None, "task_clusters": 0}
+    rng = random.Random(seed)
+    boot = sorted(sum(rng.choice(deltas) for _ in deltas)/len(deltas) for _ in range(samples))
+    return {"delta": sum(deltas)/len(deltas), "ci95": [boot[int(samples*.025)], boot[min(samples-1,int(samples*.975))]],
+            "task_clusters": len(deltas), "bootstrap_seed": seed}
+
+
+def run(home, expert, repeat=3, timeout=600, arms=("raw", "minimal", "no_persistence", "full"),
+        seed=1701, ablations=(), tasks=None, reference=None, frontier_models=None, allow_provider=False):
+    """Matched LIFT-001A runner. Actual provider use requires explicit opt-in."""
+    import evaluation_corpus
+    import evaluation_workspace
+    import evaluation_policy
+    import tempfile
+    source = Path(home) / "experts" / expert
+    if not source.is_dir() or repeat < 1:
+        raise ValueError("existing expert and positive repeat count required")
+    if set(arms) - set(ARMS) or ("reference" in arms and reference is None):
+        raise ValueError("unsupported arm or missing explicit reference adapter")
+    evaluation_policy.policy("full", ablations)
+    agent = loop.Agent(str(source))
+    if not allow_provider and any(p.get("type") != "mock" for p in agent.cfg.get("providers", {}).values()):
+        raise ValueError("provider experiments require allow_provider=True and an owner-approved budget")
+    trials = list(tasks if tasks is not None else experiment_tasks())
+    if not trials or len({t["id"] for t in trials}) != len(trials):
+        raise ValueError("unique nonempty task list required")
+    code_hash = hashlib.sha256(b"".join((Path(HOME)/f).read_bytes() for f in
+                                      ("benchmark.py", "evaluation_corpus.py", "evaluation_policy.py", "loop.py", "goal.py"))).hexdigest()
+    rows = []
+    output = Path(home) / "experiments" / ("lift-001a-" + str(time.time_ns()) + ".jsonl")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="experiment-snapshot-") as temp:
+        snapshot = Path(temp) / "snapshot"
+        snapshot_hash = evaluation_workspace.copy_snapshot(source, snapshot)
+        for rep in range(repeat):
+            for trial in trials:
+                order = list(arms)
+                random.Random(f"{seed}:{rep}:{trial['id']}").shuffle(order)
+                for arm in order:
+                    with evaluation_workspace.arena(snapshot, expert=expert, persistent=arm not in ("raw", "minimal", "no_persistence")) as (arena_home, root, input_hash):
+                        evaluation_workspace.fixture(root, trial.get("fixture", {}))
+                        policy = _trial_policy(root, arm, ablations if arm == "full" else ())
+                        runner = loop.Agent(root)
+                        start = time.monotonic()
+                        try:
+                            if arm in ("raw", "minimal"):
+                                result = iterative_arm(runner, root, trial, timeout=timeout, raw=arm == "raw")
+                            elif arm == "reference":
+                                result = reference(runner, root, trial, timeout=timeout)
+                            else:
+                                result = _harness_experiment(arena_home, expert, trial, timeout)
+                        except Exception as exc:
+                            result = {"claimed_done": False, "error": type(exc).__name__}
+                        elapsed = time.monotonic() - start
+                        metrics = _metrics(runner, root, result, frontier_models)
+                        row = {**metrics, "arm": arm, "trial": trial["id"], "family": trial.get("family"),
+                               "repeat": rep, "seed": seed, "provider_seed_support": "unknown",
+                               "snapshot_hash": snapshot_hash, "effective_input_hash": input_hash,
+                               "task_hash": hashlib.sha256(json.dumps(trial, sort_keys=True).encode()).hexdigest(),
+                               "code_hash": code_hash, "policy": policy,
+                               "passed": evaluation_corpus.grade(root, trial), "seconds": round(elapsed, 4)}
+                        rows.append(row)
+                        with output.open("a", encoding="utf-8") as f:
+                            f.write(json.dumps(row, sort_keys=True) + "\n"); f.flush(); os.fsync(f.fileno())
+    result = summarize_experiment(rows)
+    result.update(rows=rows, receipt_path=str(output), code_hash=code_hash, corpus_hash=evaluation_corpus.corpus_hash())
+    if "minimal" in arms and "full" in arms:
+        result["paired_success_delta"] = paired_delta(rows)
+    return result
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -279,13 +523,17 @@ def main():
     p.add_argument("--repeat", type=int, default=1)
     p.add_argument("--timeout", type=int, default=600)
     p.add_argument("--home", default=HOME)
+    p.add_argument("--allow-provider", action="store_true")
+    p.add_argument("--seed", type=int, default=1701)
+    p.add_argument("--ablate", action="append", default=[])
     sub.add_parser("suite")
     args = ap.parse_args()
     if args.cmd == "suite":
-        for t in SUITE:
+        for t in experiment_tasks():
             print(f"{t['id']}\n  task:  {t['task']}\n  check: {t['check'][:90]}\n")
         return
-    report(run(args.home, args.expert, args.repeat, args.timeout))
+    print(json.dumps(run(args.home, args.expert, args.repeat, args.timeout,
+                         seed=args.seed, ablations=args.ablate, allow_provider=args.allow_provider), indent=2))
 
 
 if __name__ == "__main__":

@@ -25,8 +25,10 @@ pins its laws:
   6. diagnosis maps failing transfer tasks to the competencies they
      examine, carrying the failing checks as evidence (no signal, no
      re-study)
-  7. relearning is bounded and oscillation-aware: identical failure
-     signatures across rounds stop the loop with the wall named
+  7. a consumed evaluation set is never re-sat: a gap found by the
+     exam ends in a demand for a fresh independently sealed pack,
+     because a student who has seen the transfer tasks can never be
+     examined on them again
   8. RETENTION: retest runs the same sealed tasks under fresh pursuit ids
      with no study artifacts injected, and records the delta
   9. verified practice pursuits distill into runbook drafts
@@ -75,10 +77,16 @@ GOOD_HTML = """<!DOCTYPE html>
 def _rig(root):
     """A provider that fails every task instantly, so any PASS in these
     tests can only be the machine path — the same construction the runbook
-    and swarm tests use to make 'zero model calls' a proof, not a claim."""
+    and swarm tests use to make 'zero model calls' a proof, not a claim.
+
+    The host backend is declared deliberately: a pack's validators live
+    OUTSIDE the expert root (the anti-self-exam law puts them there), and the
+    docker backend binds only the root, so a container cannot reach the very
+    graders this fixture exists to run."""
     with open(os.path.join(root, "settings.toml"), "w",
               encoding="utf-8") as f:
-        f.write('[agent]\npoll_interval_seconds = 1\nmax_task_usd = 0\n'
+        f.write('[agent]\nsandbox = "host"\nallow_unsafe_host = true\n'
+                'poll_interval_seconds = 1\nmax_task_usd = 0\n'
                 'reflect_after = []\nmax_done_rejects = 1\n\n'
                 '[providers.m]\ntype = "mock"\nscript = "scripts/w.json"\n\n'
                 '[roles.default]\nprovider = "m"\nmodel = "mock"\n')
@@ -93,6 +101,101 @@ def _place(root, rel):
     os.makedirs(os.path.dirname(p), exist_ok=True)
     with open(p, "w", encoding="utf-8") as f:
         f.write(GOOD_HTML)
+
+
+# --- expressing what the student CAN DO, for the phases that are sealed
+#
+# Pretest, exam and retention run inside a disposable arena (mastery._run_task)
+# which deliberately carries no prior artifacts — "no artifacts, prompts,
+# answers or graders return". That is the anti-contamination law working, and
+# it means an exam can no longer be staged by dropping a finished file in the
+# expert root: the arena never sees it, and it must not.
+#
+# So competence is expressed the way the platform actually holds it — as a
+# PROVEN procedure. `runbooks/` is carried into the arena, goal.pursue tries
+# the deterministic path before any model cycle, and a procedure that writes
+# the artifact makes the task pass with zero model calls. Teaching the student
+# is now `_teach`; forgetting is `_forget`. That is a stronger fixture than
+# the old one: it exercises the machine path the exam is supposed to reward,
+# instead of pre-loading the answer where the arena cannot see it anyway.
+
+# One word that appears in exactly ONE sealed task's goal, so a procedure
+# summons itself for that task and no other. The ids themselves cannot be
+# triggers: runbook._WORD keeps tokens of three characters or more, so "t1"
+# yields no terms at all and such a trigger can never fire.
+TRIGGER = {"t1": "developer", "t2": "fitness", "t3": "accounting",
+           "r1": "gardening", "r2": "bicycle", "r3": "theatre"}
+
+
+def _procedure(tid, html):
+    path = f"out/{tid}/pricing.html"
+    effect = {"predicate": "file_equals", "path": path, "value": html}
+    return {"name": f"write-{tid}", "triggers": [TRIGGER[tid]],
+            "procedure_version": 1,
+            "steps": [{"id": "step-1", "depends_on": [], "kind": "deterministic",
+                       "action": {"tool": "write_file",
+                                  "args": {"path": path, "content": html}},
+                       "preconditions": [], "effects": [effect]}],
+            "operator": {"inputs": {}, "preconditions": [], "effects": [effect],
+                         "invariants": [], "cost_usd": 0.0,
+                         "cost_basis": "deterministic local file adapter",
+                         "latency_seconds": 0.0, "reversibility": "conditional",
+                         "authority": ["workspace-write"],
+                         "reliability": {"source": "sealed test fixture"}},
+            "provenance": {"compiled": True, "trajectory_ids": [],
+                           "input_hashes": [], "family": "pricing",
+                           "alignment": "test fixture"}}
+
+
+def _teach(root, tid, html=None):
+    """Give the student a PROVEN procedure for one task — competence that
+    travels into the sealed arena, unlike an artifact."""
+    import procedure
+    import runbook
+    rb = _procedure(tid, GOOD_HTML if html is None else html)
+    os.makedirs(os.path.join(root, "runbooks"), exist_ok=True)
+    with open(runbook.path(root, rb["name"]), "w", encoding="utf-8") as f:
+        json.dump(rb, f)
+    tp = os.path.join(root, runbook.TRUST)
+    try:
+        with open(tp, encoding="utf-8") as f:
+            trust = json.load(f)
+    except (OSError, ValueError):
+        trust = {}
+    trust[rb["name"]] = {"status": "proven", "wins": 3, "accepted_wins": 3,
+                         "losses": 0, "streak_losses": 0, "history": [],
+                         "evidence_ids": [], "observations": [],
+                         "content_hash": procedure.digest(rb)}
+    with open(tp, "w", encoding="utf-8") as f:
+        json.dump(trust, f)
+
+
+def _forget(root, tid):
+    import runbook
+    try:
+        os.remove(runbook.path(root, f"write-{tid}"))
+    except OSError:
+        pass
+
+
+def _student(home, name, teach=(), broken=()):
+    """A FRESH student per examined scenario.
+
+    The sealed evaluation set is one-shot per (expert, pack hash):
+    mastery._reserve_exposure consumes it before dispatch and refuses a
+    second sitting, which is the anti-peeking law the mastery-leakage fix
+    added. So a file that wants to examine four different competence
+    profiles cannot re-sit one student four times — it needs four students.
+    That is also the more honest fixture: each scenario is a different
+    learner, and no sitting can be contaminated by the one before it."""
+    root = fleet.create(home, name, "earns competence")
+    _rig(root)
+    for tid in teach:
+        _teach(root, tid)
+    for tid in broken:
+        _teach(root, tid,
+               GOOD_HTML.replace("@media (min-width: 700px)", "/* gone */"))
+    return root
 
 
 def main():
@@ -110,10 +213,10 @@ def main():
     check_the_author_law_and_drafts(home)
     check_pretest_baseline_is_recorded(home, root)
     check_grading_is_mechanical_and_model_free(home, root)
-    check_verdict_only_from_the_graders(home, root)
+    whole = check_verdict_only_from_the_graders(home, root)
     check_diagnosis_carries_evidence(home, root)
-    check_relearning_is_bounded(home, root)
-    check_retention_retest(home, root)
+    check_a_consumed_exam_demands_a_fresh_pack(home, root)
+    check_retention_retest(home, whole)
     check_distillation(home, root)
     print("PASS test_mastery")
 
@@ -270,24 +373,38 @@ def check_grading_is_mechanical_and_model_free(home, root):
 
 
 def check_verdict_only_from_the_graders(home, root):
-    # 2 of 3 transfer artifacts correct -> 0.667 < bar 0.7 -> NOT mastered
-    _place(root, "out/t1/pricing.html")
-    _place(root, "out/t2/pricing.html")
-    ex = mastery.exam(home, "student", PACK, timeout=12)
-    assert ex["score"] == round(2 / 3, 3), ex   # stage scores are round(,3)
-    v = mastery.verdict(home, "student", PACK,
+    # TWO STUDENTS, ONE SITTING EACH — the sealed set is one-shot per expert.
+    #
+    # The partial student can do t1 and t2 and not t3, and ALSO has all three
+    # finished artifacts lying in its own root. If the arena leaked prior
+    # work, t3 would pass too and this score would be 1.0 — so the single
+    # number below is simultaneously the scoring assertion and the proof that
+    # an exam cannot be staged from work done outside it.
+    partial = _student(home, "Partial Student", teach=("t1", "t2"))
+    _place(partial, "out/t1/pricing.html")
+    _place(partial, "out/t2/pricing.html")
+    _place(partial, "out/t3/pricing.html")
+    ex = mastery.exam(home, "partial-student", PACK, timeout=12)
+    assert ex["score"] == round(2 / 3, 3), (
+        f"expected 2 of 3 from competence alone; a 1.0 here would mean the "
+        f"three finished artifacts in the expert root reached the sealed "
+        f"arena: {ex}")
+    v = mastery.verdict(home, "partial-student", PACK,
                         practice_score=1.0, exam_score=ex["score"])
     assert v["mastered"] is False, (
         f"2/3 on the sealed exam with a 0.7 bar was called MASTERED: {v}")
     assert "FLOOR" in v["ceiling"], v
-    # third artifact -> 3/3 -> mastered, and the ledger order holds:
-    # grader events precede the verdict event
-    _place(root, "out/t3/pricing.html")
-    ex2 = mastery.exam(home, "student", PACK, timeout=12)
+    print("[sealed] a student holding three finished artifacts still scored "
+          "only what it could rebuild — prior work does not reach the arena")
+
+    # a student competent at all three -> 3/3 -> mastered, and the ledger
+    # order holds: grader events precede the verdict event
+    whole = _student(home, "Whole Student", teach=("t1", "t2", "t3"))
+    ex2 = mastery.exam(home, "whole-student", PACK, timeout=12)
     assert ex2["score"] == 1.0, ex2
-    v2 = mastery.verdict(home, "student", PACK, 1.0, ex2["score"])
+    v2 = mastery.verdict(home, "whole-student", PACK, 1.0, ex2["score"])
     assert v2["mastered"] is True
-    ev = mastery.events(root, PACK)
+    ev = mastery.events(whole, PACK)
     vi = max(i for i, e in enumerate(ev) if e["kind"] == "verdict")
     gi = max(i for i, e in enumerate(ev) if e["kind"] == "task_graded")
     assert gi < vi, "a verdict landed before the graders that justify it"
@@ -296,14 +413,15 @@ def check_verdict_only_from_the_graders(home, root):
           "against the pack's frozen thresholds, grader events before the "
           "verdict in the ledger, and the verdict names its own ceiling "
           "(a mechanical floor, not taste)")
+    return whole
 
 
 def check_diagnosis_carries_evidence(home, root):
-    # break t2's artifact so its responsive check fails
-    p = os.path.join(root, "out", "t2", "pricing.html")
-    io.open(p, "w", encoding="utf-8").write(
-        GOOD_HTML.replace("@media (min-width: 700px)", "/* gone */"))
-    ex = mastery.exam(home, "student", PACK, timeout=12)
+    # a student whose t2 procedure emits markup with NO breakpoint: the
+    # responsive check fails for a real gap in competence, not a damaged
+    # file. Its own sitting, because the sealed set is one-shot.
+    root = _student(home, "Gapped Student", teach=("t1", "t3"), broken=("t2",))
+    ex = mastery.exam(home, "gapped-student", PACK, timeout=12)
     plan = mastery.diagnose(ex)
     comps = {p_["competency"] for p_ in plan}
     assert "responsive-layout" in comps, (
@@ -312,46 +430,52 @@ def check_diagnosis_carries_evidence(home, root):
     assert "t2" in hit["failed_tasks"] and hit["failed_checks"], (
         f"the diagnosis must carry the failing task and checks as its "
         f"evidence — no signal, no re-study: {hit}")
-    _place(root, "out/t2/pricing.html")     # repair for later checks
     print("[diagnose] a transfer failure mapped to exactly the competency "
           "its task examines, carrying the failing checks as evidence")
 
 
-def check_relearning_is_bounded(home, root):
-    # make t1 fail permanently, monkeypatch study to count invocations,
-    # and let run() loop: identical failure signatures must stop it
-    os.remove(os.path.join(root, "out", "t1", "pricing.html"))
-    calls = []
-    orig_study = mastery.study
-    mastery.study = lambda *a, **kw: calls.append(kw.get("competencies")) or []
-    try:
-        r = mastery.run(home, "student", PACK, drive=False,
-                        skip_study=True, timeout=12)
-    finally:
-        mastery.study = orig_study
-    assert r["relearn_rounds"] <= mastery.MAX_RELEARN_ROUNDS, r
+def check_a_consumed_exam_demands_a_fresh_pack(home, root):
+    """The old law said the relearn loop was BOUNDED — it stopped after two
+    identical failures. The exposure law replaces it with something stricter:
+    the sealed set is consumed by the sitting that used it, so there is no
+    second attempt at the same exam to bound. A diagnosis therefore ends in a
+    demand for a fresh, independently sealed pack rather than a re-sit, and
+    the number of relearn rounds is structurally zero.
+
+    This is the honest reading of "unseen": a student who has now seen t1-t3
+    cannot be re-examined on t1-t3 at any distance, however much re-study
+    happens in between."""
+    root = _student(home, "Stuck Student", teach=("t2", "t3"))
+    _forget(root, "t1")
+    r = mastery.run(home, "stuck-student", PACK, drive=False,
+                    skip_study=True, timeout=12)
     ev = mastery.events(root, PACK)
-    assert any(e["kind"] == "not_converging" for e in ev), (
-        "the same failure signature repeated across rounds and the loop "
-        "did not stop — a third identical attempt is a loop wearing "
-        "persistence's clothes")
+    assert r["relearn_rounds"] == 0, (
+        f"a relearn round re-sat a consumed evaluation set: {r}")
+    assert any(e["kind"] == "fresh_pack_required" for e in ev), (
+        "the exam found a gap and the loop neither re-sat it nor said why — "
+        "a diagnosis that leads nowhere is not a diagnosis")
     assert r["verdict"]["mastered"] is False
-    # targeted: re-study was called with SPECIFIC competencies, not None
-    targeted = [c for c in calls if c is not None]
-    assert targeted and all(c for c in targeted), (
-        f"re-study ran untargeted (whole curriculum) instead of attacking "
-        f"the failing competencies: {calls}")
-    _place(root, "out/t1/pricing.html")
-    print(f"[bounded] the mastery loop stopped after "
-          f"{r['relearn_rounds']} relearn round(s) on an identical failure "
-          f"signature ('not_converging' recorded), verdict NOT mastered, "
-          f"and every re-study was targeted at named competencies")
+    assert r["exam"] == round(2 / 3, 3), r
+    sittings = [e for e in ev
+                if e.get("kind") == "task_graded" and e.get("phase") == "exam"]
+    assert len(sittings) == 3, (
+        f"the sealed transfer set was graded {len(sittings)} times for three "
+        f"tasks — an exam was re-sat: {sittings}")
+    print("[consumed] a gap found by the exam ends in 'fresh pack required', "
+          "not a re-sit: each sealed task was graded exactly once, no "
+          "relearn round re-used it, and the verdict stayed NOT mastered")
 
 
 def check_retention_retest(home, root):
+    # RETENTION IS A THIRD, SEPARATE SET (r1-r3): never seen in the
+    # baseline, in practice or in the exam. Competence for it has to be
+    # held independently, which is the whole point of the split.
+    for tid in ("r1", "r2", "r3"):
+        _teach(root, tid)
     ex_gids = {e["gid"] for e in mastery.events(root, PACK)
                if e.get("kind") == "task_graded" and e.get("phase") == "exam"}
-    r = mastery.retest(home, "student", PACK, timeout=12)
+    r = mastery.retest(home, "whole-student", PACK, timeout=12)
     assert r["score"] == 1.0, r
     re_gids = {e["gid"] for e in mastery.events(root, PACK)
                if e.get("kind") == "task_graded"

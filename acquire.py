@@ -37,6 +37,9 @@ import re
 import shutil
 import sys
 import time
+import stat
+import tempfile
+import shlex
 
 # A Windows console defaults to cp1252, which cannot encode the arrows in this
 # module's own docstring — so `acquire.py --help` died before printing a word.
@@ -97,7 +100,66 @@ def _path(root):
 
 def _safe_name(name):
     """A package name as a directory name, with no path meaning at all."""
-    return re.sub(r"[^A-Za-z0-9._-]", "_", str(name))[:64] or "unnamed"
+    value = re.sub(r"[^A-Za-z0-9._-]", "_", str(name))[:64]
+    if value in ('', '.', '..'):
+        raise Refused('package name has no safe directory identity')
+    return value
+
+
+def _contained(base, target):
+    """Validate lexical and resolved containment including Windows junctions."""
+    base = os.path.abspath(base)
+    target = os.path.abspath(target)
+    if os.path.commonpath([base, target]) != base or target == base:
+        raise Refused('install path escapes its capability/arena directory')
+    current = target
+    while current != base:
+        if os.path.lexists(current):
+            info = os.lstat(current)
+            if stat.S_ISLNK(info.st_mode) or getattr(info, 'st_file_attributes', 0) & 1024:
+                raise Refused('links and junctions are forbidden in acquisition paths')
+        current = os.path.dirname(current)
+    if os.path.realpath(base) != base or os.path.commonpath([os.path.realpath(base), os.path.realpath(target)]) != os.path.realpath(base):
+        raise Refused('resolved acquisition path escapes its authority root')
+    return target
+
+
+def validate_output(path, max_files=50000, max_bytes=512 * 1024 * 1024):
+    """Bounded regular-file tree only; reject links, devices, sockets, aliases."""
+    digest = hashlib.sha256()
+    count = total = 0
+    if not os.path.isdir(path):
+        raise Refused('installer produced no output directory')
+    for parent, dirs, files in os.walk(path, followlinks=False):
+        for name in sorted(dirs + files):
+            full = os.path.join(parent, name)
+            info = os.lstat(full)
+            if (stat.S_ISLNK(info.st_mode) or getattr(info, 'st_file_attributes', 0) & 1024
+                    or not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode))
+                    or (stat.S_ISREG(info.st_mode) and info.st_nlink != 1)):
+                raise Refused('installer output contains a link or special file')
+            if stat.S_ISREG(info.st_mode):
+                count += 1; total += info.st_size
+                if count > max_files or total > max_bytes:
+                    raise Refused('installer output exceeds file/byte limits')
+                rel = os.path.relpath(full, path).replace(os.sep, '/')
+                digest.update(rel.encode('utf-8') + b'\0')
+                with open(full, 'rb') as f:
+                    for block in iter(lambda: f.read(1024 * 1024), b''):
+                        digest.update(block)
+                digest.update(b'\0')
+    if not count:
+        raise Refused('installer output is empty')
+    return digest.hexdigest()
+
+
+def _remove_tree(base, target):
+    target = _contained(base, target)
+    if os.path.lexists(target):
+        validate_output(target) if os.listdir(target) else None
+        shutil.rmtree(target)
+    if os.path.lexists(target):
+        raise Refused('installed bytes remain after removal')
 
 
 def _import_name(name):
@@ -386,197 +448,82 @@ def install(root, home, acq_id, worker_id=None, task_text=""):
     # incapable of altering the interpreter the platform itself runs on. A
     # dependency that can rewrite the harness is not a dependency, it is a
     # new owner.
-    target = os.path.join(root, "capabilities", _safe_name(rec["name"]))
-    # THE CONTAINER INSTALLS INTO STAGING, AND THIS PROCESS PROMOTES.
-    # capabilities/ is CONTROL state — toolbox reads it into decisions — so
-    # every sandbox container binds it read-only (controlplane.readonly_mounts)
-    # and the kernel refuses writes there, pip's included. The first CI run
-    # after that mount proved it: pip's move into /work/capabilities died
-    # (EXDEV, then the read-only bind) and every acquisition was rejected.
-    # The rule stays absolute — no container ever holds a writable control
-    # mount, no exceptions for the platform's own jobs — so the install lands
-    # in tmp/ (ZONE_ROOT, writable) and the trusted host-side ladder, which
-    # is the thing owner policy already governs, moves the result into
-    # control territory only after the install succeeded.
-    stage = os.path.join(root, "tmp",
-                         "acquire-stage-" + _safe_name(rec["name"]))
-    if os.path.isdir(stage):
-        shutil.rmtree(stage)                 # a dead earlier attempt
-    os.makedirs(stage)
-    # A LOCAL path is the safest install there is: nothing is resolved from a
-    # registry, so the name cannot be typosquatted and the bytes cannot change
-    # between the inspection and the install. It is also what makes this step
-    # testable without reaching the network at all.
-    local = rec.get("local_path")
-    if local:
-        spec = local if os.path.isabs(local) else os.path.join(root, local)
-        if not os.path.exists(spec):
-            raise Refused(f"local_path {spec!r} does not exist")
-    else:
-        spec = rec["name"] if not rec.get("version") else \
-            f"{rec['name']}=={rec['version']}"
-    # RELATIVE paths, because the command runs with the expert root mounted
-    # somewhere else. sandbox.run bind-mounts root at /work and runs with
-    # cwd=/work, so an absolute host path inside this argv would simply not
-    # exist in the container — pip would report "file not found" and the
-    # acquisition would be rejected for a reason that has nothing to do with
-    # the package. The cwd is the expert root in every backend, so relative
-    # paths are the ones that mean the same thing everywhere.
-    rel_target = os.path.relpath(stage, root).replace(os.sep, "/")
-    rel_spec = spec
-    if local:
-        try:
-            rel_spec = "./" + os.path.relpath(spec, root).replace(os.sep, "/")
-        except ValueError:                   # a different drive on Windows
-            raise Refused(
-                f"local_path {spec!r} is outside the expert root, so it is "
-                f"not visible inside the sandbox. Copy it under the expert "
-                f"first.")
-    # THE SOURCE DECIDES THE INSTALLER. This function used to run pip
-    # unconditionally, and never read rec["source"] at all — proven with an
-    # AST walk: 5 sources declared in SOURCES, `install() reads rec['source']:
-    # NEVER`. So an npm or apt or mcp acquisition ran `pip install <name>`
-    # against PyPI, which for a name like `express` silently fetches an
-    # unrelated distribution. Four of the five declared sources were not
-    # implemented and none of them said so.
-    #
-    # Two are implemented here. The other two are REFUSED BY NAME, because a
-    # refusal that tells you where to go is worth more than a branch that
-    # pretends: `mcp` is a trust decision the owner makes in mcp.json (and
-    # mcp.py already has the catalog and the `enable` command for it), and
-    # `apt` needs root inside the container, which this sandbox deliberately
-    # does not grant.
-    src = str(rec.get("source") or "pypi").lower()
-    if src == "pypi":
-        argv = ["python", "-m", "pip", "install", "--no-input",
-                "--disable-pip-version-check", "--no-warn-script-location",
-                "--target", rel_target, rel_spec]
-        if rec.get("index_url"):
-            argv += ["--index-url", str(rec["index_url"])]
-    elif src == "npm":
-        # --prefix keeps node_modules inside the expert, the same isolation
-        # --target gives pip, and the same reason: visible to the File
-        # Authority, carried by backup.py, destroyed with the expert.
-        argv = ["npm", "install", "--prefix", rel_target, "--no-fund",
-                "--no-audit", rel_spec]
-    elif src == "mcp":
-        raise Refused(
-            f"an MCP server is a TRUST DECISION, not an install: it runs a "
-            f"command on this machine with the fleet's own permissions, so "
-            f"the owner registers it rather than the agent acquiring it. "
-            f"Run `python mcp.py catalog` to see the vetted list and "
-            f"`python mcp.py enable {rec['name']}` to turn one on — that is "
-            f"the supported route to a browser, a database or GitHub.")
-    elif src == "skill":
-        raise Refused(
-            "a skill is not installed, it is IMPORTED and then earned: put "
-            "the folder under skills/ and let it be promoted through the "
-            "trust graph by working, which is what skills.py exists for.")
-    else:                                    # apt, and anything added later
-        raise Refused(
-            f"acquiring from {src!r} is declared in SOURCES but not "
-            f"implemented, and this refuses rather than falling back to pip "
-            f"— pip would resolve {rec['name']!r} against PyPI, which is a "
-            f"different registry and quite possibly a different package.")
-
-    # WHERE pip RUNS, not just where its files land.
-    #
-    # The first version of this ran execution.run("converter", ...), which is
-    # the platform's own argv path and is NOT sandboxed. That satisfied
-    # "--target keeps the package out of the host interpreter" and violated
-    # the rule at the top of this module — "an install never runs on the host
-    # or on the control plane" — because pip ITSELF then executed on the
-    # host, and a package's build backend runs arbitrary code at install
-    # time. Making a fake control real is worth nothing if it breaks a real
-    # one on the way; before that change nothing ran at all, so the rule was
-    # at least vacuously true.
-    #
-    # sandbox.py is the thing that actually isolates, and it already FAILS
-    # CLOSED: a backend that is configured but unavailable returns 127 and
-    # says what is missing rather than quietly running on the host. The
-    # worker registry says WHICH computer; the sandbox backend is what makes
-    # that mean anything.
     import sandbox
     cfg = _expert_cfg(root)
     backend = sandbox.backend_name(cfg)
-    if backend == "host":
-        raise Refused(
-            "refusing to install: [agent] sandbox = \"host\", so there is no "
-            "isolated place to run pip. A new dependency is untrusted code by "
-            "definition and its build backend executes at install time, so it "
-            "does not run on this machine. Set [agent] sandbox = \"docker\" "
-            "(or e2b/daytona) and try again — this is the one rule this "
-            "module will not bend.")
+    if backend != "docker":
+        raise Refused(f"acquisition requires Docker workspace isolation; {backend!r} is not supported")
     avail, why = sandbox.available(cfg)
     if not avail:
-        raise Refused(
-            f"refusing to install: the {backend!r} sandbox is configured but "
-            f"unavailable ({why}). Acquisition does NOT fall back to the "
-            f"host.")
-    # EGRESS, deliberately, and only here.
-    #
-    # The docker sandbox runs --network none by default, which is right for
-    # model-written commands and wrong for this one: pip cannot fetch a
-    # package, or even its build backend, without a network. Discovered by
-    # running it — the first isolated install died on
-    # "pip subprocess to install build dependencies did not run successfully
-    #  ... connection broken", which is the sandbox working exactly as
-    # designed and the acquisition being impossible inside it.
-    #
-    # So the install container gets egress while the command containers do
-    # not. The trade is explicit: the container is disposable, its filesystem
-    # is the expert root and nothing else, and sandbox.run has already
-    # SCRUBBED every credential-shaped variable out of its environment — so
-    # what egress buys an attacker here is the ability to download the
-    # package we asked for. That is the job.
-    install_cfg = {**cfg, "agent": {**(cfg.get("agent") or {}),
-                                    "sandbox_network": True}}
-    cmd = " ".join(f'"{a}"' if (" " in str(a) or "\\" in str(a)) else str(a)
-                   for a in argv)
-    rc, out, err = sandbox.run(cmd, root, dict(os.environ), 900, install_cfg)
-    ok = (rc == 0)
-    if ok:
-        # promotion into control territory happens HERE, in the host process
-        # that walked the ladder — never inside the container. A reinstall
-        # replaces wholesale: half of yesterday's package under half of
-        # today's is a capability nobody tested.
-        if os.path.isdir(target):
-            shutil.rmtree(target)
-        os.makedirs(os.path.dirname(target), exist_ok=True)
-        shutil.move(stage, target)
-    else:
-        shutil.rmtree(stage, ignore_errors=True)
-    rec["worker"] = w["id"]
-    rec["install_path"] = os.path.relpath(target, root).replace(os.sep, "/")
-    rec["stage"] = "installed" if ok else "rejected"
-    rec["install_evidence"] = {
-        "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "worker": w["id"],
-        "zone": w["zone"],
-        # the argv that actually ran — the staged target included. An
-        # evidence field that "simplifies" the command is a claim, not a
-        # record (the old string also printed --target for npm installs).
-        "command": " ".join(argv),
-        "exit_code": rc,
-        "output": ((out or "") + (err or "")).strip()[-1200:],
-        "installed_names": sorted(os.listdir(target))[:40] if ok else [],
-    }
-    if not ok:
-        rec["history"].append({
-            "at": rec["install_evidence"]["at"], "stage": "rejected",
-            "why": f"install exited {rc}: "
-                   f"{((err or out or '').strip() or 'no output')[:160]}"})
+        raise Refused(f"isolated acquisition unavailable: {why}; no host fallback")
+    src = str(rec.get("source") or "pypi").lower()
+    if src not in ("pypi", "npm"):
+        routes = {'mcp': 'TRUST DECISION: use the owner-managed MCP catalog',
+                  'skill': 'skills are IMPORTED using the skill registry',
+                  'apt': 'apt acquisition is not implemented'}
+        raise Refused(routes.get(src, f'{src!r} acquisition is not implemented'))
+    os.makedirs(os.path.join(root, "tmp"), exist_ok=True)
+    arena = tempfile.mkdtemp(prefix="acquire-arena-", dir=os.path.join(root, "tmp"))
+    _contained(root, arena)
+    stage = os.path.join(arena, "output")
+    os.makedirs(stage)
+    os.makedirs(os.path.join(arena, "input"))
+    local = rec.get("local_path")
+    try:
+        if local:
+            source = _contained(root, local if os.path.isabs(local) else os.path.join(root, local))
+            validate_output(source)
+            shutil.copytree(source, os.path.join(arena, "input", "package"))
+            package_spec = "./input/package"
+        elif src == "pypi":
+            package_spec = f"{rec['name']}=={rec['version']}"
+        else:
+            package_spec = f"{rec['name']}@{rec['version']}"
+        if src == "pypi":
+            argv = ["python", "-m", "pip", "install", "--no-input",
+                    "--disable-pip-version-check", "--no-warn-script-location",
+                    "--target", "output", package_spec]
+            if rec.get("index_url"):
+                argv += ["--index-url", str(rec["index_url"])]
+        else:
+            argv = ["npm", "install", "--prefix", "output", "--no-fund", "--no-audit", package_spec]
+        # Only this disposable minimal filesystem is network-enabled. No
+        # expert data, fleet authority, ambient credentials or extra mounts.
+        install_cfg = {"agent": {"sandbox": "docker", "sandbox_network": True,
+                                 "sandbox_image": cfg.get("agent", {}).get("sandbox_image") or sandbox.DOCKER_IMAGE}}
+        rc, out, err = sandbox.run(shlex.join(argv), arena, {}, 900, install_cfg)
+        if rc:
+            raise Refused(f"install FAILED (exit {rc}): {str(err or out)[-300:]}")
+        content_hash = validate_output(stage)
+        rec["worker"] = w["id"]
+        rec["arena_path"] = os.path.relpath(arena, root).replace(os.sep, "/")
+        rec["install_path"] = os.path.relpath(stage, root).replace(os.sep, "/")
+        rec["content_hash"] = content_hash
+        rec["stage"] = "installed"
+        rec["install_evidence"] = {
+            "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "worker": w["id"],
+            "zone": w["zone"], "command": shlex.join(argv), "exit_code": rc,
+            "output": str(out + err)[-1200:], "content_hash": content_hash,
+            "workspace_exposed": False, "installed_names": sorted(os.listdir(stage))[:40]}
+        rec["history"].append({"at": rec["install_evidence"]["at"], "stage": "installed",
+                               "why": "minimal arena; bytes not promoted before capability test"})
         _save(root, rows)
-        raise Refused(
-            f"install FAILED (exit {rc}) and the acquisition is rejected, not "
-            f"pending: {((err or out or '').strip() or 'no output')[:300]}")
-    rec["history"].append({"at": rec["install_evidence"]["at"],
-                           "stage": "installed", "why": f"in {w['name']}"})
-    _save(root, rows)
-    return rec
+        return rec
+    except Exception as e:
+        # The trusted host validates containment before any recursive cleanup.
+        _contained(root, arena)
+        shutil.rmtree(arena)
+        rec["stage"] = "rejected"
+        rec["install_evidence"] = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "exit_code": 1,
+                                   "output": str(e)[:500], "workspace_exposed": False}
+        _save(root, rows)
+        if isinstance(e, Refused):
+            raise
+        raise Refused(f"acquisition failed validation: {e}") from e
 
 
 def capability_test(root, acq_id, passed=None, evidence="", command="",
-                    probe=None):
+                    probe=None, module=""):
     """Step 6: MANDATORY, and now actually a test.
 
     `passed` and `evidence` used to be SUPPLIED BY THE CALLER. The step the
@@ -601,84 +548,84 @@ def capability_test(root, acq_id, passed=None, evidence="", command="",
         raise Refused(f"{acq_id} is at stage {rec['stage']}; a capability test "
                       f"runs against an installed tool")
 
+    if passed is True:
+        raise Refused("a real sealed capability probe is mandatory; an owner assertion cannot replace execution")
     if passed is None:
-        target = os.path.join(root, rec.get("install_path")
-                              or os.path.join("capabilities",
-                                              _safe_name(rec["name"])))
-        if not os.path.isdir(target):
-            raise Refused(
-                f"nothing is installed at {target!r}, so there is nothing to "
-                f"test. An acquisition cannot pass a capability test by "
-                f"having its paperwork in order.")
-        # The probe IMPORTS code that was installed seconds ago from outside
-        # this project. That is untrusted execution by definition, so it runs
-        # through `capability_probe` — the operation declared model-authored,
-        # policy-screened and SANDBOXED — and not through the platform's own
-        # argv path, which is not sandboxed. Testing a new dependency by
-        # running it unconfined would defeat the entire point of installing it
-        # into an isolated directory in the first place.
-        #
-        # The probe is written to a FILE rather than passed with -c because
-        # the operation takes a shell string, and a program embedded in a
-        # shell string is a quoting bug waiting for a package name with an
-        # apostrophe in it.
-        # The probe must NOT live in capabilities/. Python puts a script's own
-        # directory on sys.path[0], so a probe stored there makes every
-        # sibling folder an implicit NAMESPACE PACKAGE — and an empty
-        # capabilities/<name>/ directory then imports successfully. Measured:
-        # a package that was never installed reported "imported notinstalled"
-        # and the ladder marked it TESTED. That is the precise false pass this
-        # step exists to prevent, manufactured by the step itself.
-        probe_dir = os.path.join(root, "tmp")
-        os.makedirs(probe_dir, exist_ok=True)
-        probe_py = os.path.join(probe_dir, f"probe-{_safe_name(rec['name'])}.py")
-        with open(probe_py, "w", encoding="utf-8") as f:
-            f.write(
-                "import os, sys\n"
-                # REPLACE sys.path, never insert: a package that happens to
-                # exist in the host interpreter must not make a failed install
-                # look successful. The stdlib paths Python needs are already
-                # bound before this line runs.
-                f"sys.path = [{target!r}] + [p for p in sys.path\n"
-                "             if p and 'site-packages' not in p "
-                "and p != os.path.dirname(os.path.abspath(__file__))]\n"
-                f"import {_import_name(rec['name'])} as m\n"
-                # a namespace package has __file__ = None. Requiring a real
-                # file inside the target is what tells an INSTALLED package
-                # apart from an empty directory that merely shares its name.
-                "f = getattr(m, '__file__', None)\n"
-                "if not f:\n"
-                "    raise SystemExit('NOT INSTALLED: %r resolved to a "
-                "namespace package with no file — an empty directory, not a "
-                "package' % m.__name__)\n"
-                f"if not os.path.abspath(f).startswith(os.path.abspath({target!r})):\n"
-                "    raise SystemExit('WRONG COPY: imported from %s, not from "
-                "the isolated install' % f)\n"
-                "print('imported', m.__name__, getattr(m, '__version__', ''),\n"
-                "      'from', f)\n")
-        import execution
+        if not rec.get("arena_path"):
+            raise Refused("nothing is installed in a validated acquisition arena; reinstall before testing")
+        arena = _contained(os.path.join(root, "tmp"), os.path.join(root, rec["arena_path"]))
+        target = _contained(arena, os.path.join(root, rec["install_path"]))
+        before = validate_output(target)
+        if before != rec.get("content_hash"):
+            raise Refused("TAMPER: installed output differs from recorded hash")
+        cfg = _expert_cfg(root)
+        import sandbox
+        if sandbox.backend_name(cfg) != "docker":
+            raise Refused("capability probes require Docker isolation; no host import")
+        # Move within the arena to the ordinary read-only CONTROL directory.
+        readonly_target = os.path.join(arena, "capabilities", "package")
+        os.makedirs(os.path.dirname(readonly_target), exist_ok=True)
+        if target != readonly_target:
+            os.replace(target, readonly_target)
+        rec["install_path"] = os.path.relpath(readonly_target, root).replace(os.sep, "/")
+        _save(root, rows)  # interrupted probes retain their actual staging path
+        os.makedirs(os.path.join(arena, "prompts"), exist_ok=True)
+        probe_py = os.path.join(arena, "prompts", "capability-probe.py")
+        # A CALLER THAT KNOWS THE IMPORT NAME MAY SAY SO. _import_name only
+        # transliterates the DISTRIBUTION name, so `ulid-py` became `ulid_py`
+        # while the module it actually installs is `ulid` — the arena probe
+        # then failed to import a package that was installed perfectly well,
+        # and the capability was rejected for the guess rather than for the
+        # bytes. The frontier seals the real module name in its row; anything
+        # else keeps the guess.
+        module = str(module or "").strip() or _import_name(rec["name"])
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*",
+                            module):
+            raise Refused(f"{module!r} is not a python module name")
+        source = (
+            "import os,sys,importlib\n"
+            "target='/work/capabilities/package'\n"
+            "sys.path=[target]+[p for p in sys.path if p and 'site-packages' not in p and p != '/work/prompts']\n"
+            f"m=importlib.import_module({module!r})\n"
+            "f=getattr(m,'__file__',None)\n"
+            "if not f or os.path.commonpath([target,os.path.realpath(f)]) != target: raise SystemExit('NOT INSTALLED: wrong or empty package')\n"
+            "print('imported',m.__name__,'from',f)\n")
+        Path = __import__('pathlib').Path
+        Path(probe_py).write_text(source, encoding="utf-8")
         if probe:
-            cmd = " ".join(f'"{a}"' if " " in str(a) else str(a) for a in probe)
+            import controlplane
+            controlplane.owner_only("provide acquisition probe")
+            argv = list(probe)
+        elif rec.get("source") == "npm":
+            argv = ["node", "-e", f"console.log(require.resolve({('./capabilities/package/node_modules/' + rec['name'])!r}))"]
         else:
-            cmd = f'"{sys.executable}" "{probe_py}"'
-        argv = probe or [sys.executable, probe_py]
-        rc, out, err = execution.run("capability_probe", cmd, root,
-                                     timeout=180,
-                                     reason=f"capability test {rec['name']}")
-        passed = (rc == 0)
-        evidence = (f"exit {rc}: " + ((out or "") + (err or "")).strip()[-400:]) \
-            or f"exit {rc} with no output"
-        command = " ".join(str(a) for a in argv)[:300]
+            argv = ["python", "prompts/capability-probe.py"]
+        probe_hash = hashlib.sha256(json.dumps([argv,source], sort_keys=True).encode()).hexdigest()
+        probe_cfg = {"agent": {"sandbox":"docker", "sandbox_network":False,
+                               "sandbox_image":cfg.get("agent",{}).get("sandbox_image") or sandbox.DOCKER_IMAGE}}
+        import execution
+        rc, out, err = execution.run("capability_probe", shlex.join(argv), arena,
+                                     cfg=probe_cfg, timeout=180,
+                                     reason=f"sealed capability test {rec['name']}")
+        passed = rc == 0 and validate_output(readonly_target) == before
+        evidence = f"exit {rc}: " + str(out + err)[-400:]
+        command = shlex.join(argv)
+        rec["probe_hash"] = probe_hash
+        if passed:
+            final = _contained(os.path.join(root, "capabilities"),
+                               os.path.join(root, "capabilities", _safe_name(rec["name"])))
+            os.makedirs(os.path.dirname(final), exist_ok=True)
+            # First promotion is an atomic rename. Replacing an active install
+            # needs explicit removal; never expose half a previous/new tree.
+            if os.path.lexists(final):
+                raise Refused("capability already exists; remove it explicitly before replacement")
+            os.replace(readonly_target, final)
+            rec["install_path"] = os.path.relpath(final, root).replace(os.sep, "/")
+            rec.pop("arena_path", None)
+            _contained(root, arena)
+            shutil.rmtree(arena)
     else:
-        # Check what the CALLER supplied, before decorating it. Prefixing
-        # first made the emptiness check unreachable — "   " became
-        # "OWNER-ASSERTED (nothing was observed):    ", which is not empty,
-        # so a pass with no evidence would have been accepted. The refusal
-        # was still in the file and could no longer fire.
-        if not str(evidence).strip():
-            raise Refused("a capability test records what it OBSERVED; a pass "
-                          "with no evidence is a claim")
-        evidence = f"OWNER-ASSERTED (nothing was observed): {evidence}"
+        evidence = "OWNER-REPORTED FAILURE: " + str(evidence)
 
     if not str(evidence).strip():
         raise Refused("a capability test records what it OBSERVED; a pass "
@@ -724,6 +671,15 @@ def remove(root, acq_id, why="", by="owner"):
     rec = next((r for r in rows if r["id"] == acq_id), None)
     if rec is None:
         raise KeyError(acq_id)
+    install_path = rec.get('install_path')
+    if install_path:
+        target = os.path.join(root, install_path)
+        if rec.get('arena_path'):
+            arena = _contained(os.path.join(root, 'tmp'), os.path.join(root, rec['arena_path']))
+            _contained(arena, target)
+            _remove_tree(os.path.join(root, 'tmp'), arena)
+        else:
+            _remove_tree(os.path.join(root, 'capabilities'), target)
     rec["stage"] = "removed"
     rec["history"].append({"at": time.strftime("%Y-%m-%dT%H:%M:%S"),
                            "stage": "removed", "why": f"{by}: {why}"[:200]})

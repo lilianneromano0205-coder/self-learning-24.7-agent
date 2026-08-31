@@ -103,7 +103,15 @@ def run(op, command, root, cfg=None, role="default", task=None, timeout=300,
     if spec is None:
         raise Refused(f"unknown execution operation {op!r}; the catalogue is: "
                       f"{', '.join(sorted(OPERATIONS))}")
-    cfg = cfg or {}
+    if cfg is None:
+        import tomllib
+        try:
+            with open(os.path.join(root, "settings.toml"), "rb") as f:
+                cfg = tomllib.loads(f.read().decode("utf-8-sig"))
+        except FileNotFoundError:
+            cfg = {}
+        except (OSError, ValueError) as e:
+            raise Refused(f"execution configuration cannot be read: {e}") from e
     started = time.time()
 
     if spec["shell"]:
@@ -198,8 +206,8 @@ def run(op, command, root, cfg=None, role="default", task=None, timeout=300,
         try:
             import controlplane
             seal = controlplane.seal(root)
-        except Exception:                    # pragma: no cover — defensive
-            seal = None
+        except Exception as e:
+            raise Refused(f"cannot seal execution authority state: {e}") from e
 
     # ---- execute, contained according to the operation
     try:
@@ -235,8 +243,8 @@ def run(op, command, root, cfg=None, role="default", task=None, timeout=300,
             import controlplane
             clean, why = controlplane.enforce(
                 root, seal, op=op, command=command, role=role, task=task)
-        except Exception:                    # pragma: no cover — defensive
-            clean, why = True, ""
+        except Exception as e:
+            clean, why = False, f"cannot verify execution authority state: {e}"
         if not clean:
             _trace(root, op, command, role, task,
                    refused=f"control plane tamper (command exited {rc})")

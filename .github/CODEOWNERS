@@ -1,0 +1,17 @@
+# Effective only when main requires code-owner review; see docs/REPOSITORY_GOVERNANCE.md.
+/.github/ @reda-baqechame
+/execution.py @reda-baqechame
+/sandbox.py @reda-baqechame
+/controlplane.py @reda-baqechame
+/contract.py @reda-baqechame
+/fileauth.py @reda-baqechame
+/credentials.py @reda-baqechame
+/mcp.py @reda-baqechame
+/ui.py @reda-baqechame
+/ui.html @reda-baqechame
+/federation.py @reda-baqechame
+/effects.py @reda-baqechame
+/approvals.py @reda-baqechame
+/acquire.py @reda-baqechame
+/modelgateway.py @reda-baqechame
+/tests/release_checks.py @reda-baqechame

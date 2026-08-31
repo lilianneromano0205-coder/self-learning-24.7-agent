@@ -418,6 +418,21 @@ def stash(root, task_id, n, paths, result):
         kept.append(rel)
     rec = {"attempt": n, "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
            "artifacts": kept, **result}
+    # CONTENT FINGERPRINT — the diversity input next_attempt() was reading
+    # and nothing was writing, so diversity was constantly 1.0 and identical
+    # retries looked as promising as genuinely different ones. Hashed from
+    # the stashed artifact BYTES: two attempts that wrote the same files the
+    # same way are the same attempt, whatever their prose said.
+    import hashlib
+    h = hashlib.sha256()
+    for rel in sorted(kept):
+        p = _stash_dst(d, rel)
+        try:
+            with open(p, "rb") as f:
+                h.update(rel.encode() + b"\0" + f.read() + b"\0")
+        except OSError:
+            h.update(rel.encode() + b"\0!unreadable\0")
+    rec["fingerprint"] = h.hexdigest()
     if refused:
         rec["refused_paths"] = refused[:20]
     with open(os.path.join(d, "score.json"), "w", encoding="utf-8") as f:
@@ -455,11 +470,169 @@ def attempts_for(task, cfg=None):
     """How many attempts this task has earned. Adaptive: 1 until something
     fails, then 3, then 5 — capped by the owner's setting."""
     ag = ((cfg or {}).get("agent", {}) or {})
+    try:
+        from evaluation_policy import disabled
+        if disabled(cfg or {}, 'candidates'):
+            return 1
+    except ImportError:
+        pass
     if not ag.get("candidates_on_gate_failure", True):
         return 1
     cap = int(ag.get("candidates_max", DEFAULT_MAX))
     rounds = int(task.get("candidate_rounds", 0))
     return max(1, min(cap, ESCALATION.get(rounds, cap)))
+
+
+def next_attempt(task, attempts, cfg=None, *, recovery_probability=None,
+                 remaining_budget_usd=None, recovery_observations=()):
+    """Adaptive sequential stopping, evaluated after EVERY mechanical attempt.
+
+    Historical samples must be development observations of *another* task,
+    scored by L0. Held-out evaluations never tune this policy. Without these,
+    the configured recovery prior is explicitly heuristic. This augments the
+    compatibility 1/3/5 API; the loop uses this decision to stop further work.
+    """
+    from scheduler import _number
+    ag = ((cfg or {}).get('agent', {}) or {})
+    cap = max(1, int(ag.get('candidates_max', DEFAULT_MAX)))
+    # THE STOPPING CEILING IS THE RETRY SETTING, NOT THE STASH SETTING.
+    # min() of the two silently lowered the documented `max_done_rejects = 6`
+    # to `candidates_max = 5`: the task failed one refusal early, and the
+    # message it printed still counted to six. candidates_max caps how many
+    # attempts are SCORED and kept; when the task gives up is a different
+    # question, and settings.toml answers it in one place.
+    hard_cap = max(1, int(ag.get('max_done_rejects', cap)))
+    n = len(attempts)
+    try:
+        from evaluation_policy import disabled
+        ablated = disabled(cfg or {}, 'candidates')
+    except ImportError:
+        ablated = False
+    reason = None
+    if ablated or not ag.get('candidates_on_gate_failure', True):
+        reason = 'candidate sampling disabled'
+    elif any(a.get('passed') is True for a in attempts):
+        reason = 'mechanical success already obtained'
+    elif n >= hard_cap:
+        reason = 'hard candidate ceiling reached'
+    model_cost = _number(ag.get('candidate_model_cost_usd'), .01)
+    verifier_cost = _number(ag.get('candidate_verifier_cost_usd'), .001)
+    latency_cost = _number(ag.get('candidate_latency_cost_usd'))
+    cost = model_cost + verifier_cost + latency_cost
+    budget = _number(task.get('budget_usd'), _number(ag.get('candidate_budget_usd'), 1.))
+    spent = max(_number(task.get('cost_usd')), sum(_number(a.get('cost_usd')) for a in attempts))
+    remaining = max(0., budget - spent)
+    if remaining_budget_usd is not None:
+        remaining = min(remaining, _number(remaining_budget_usd))
+    if cost > remaining or remaining <= 0:
+        reason = 'remaining budget cannot cover another model and verifier attempt'
+    best = max((_number(a.get('score')) for a in attempts), default=0.)
+    fingerprints = [a.get('fingerprint') for a in attempts if a.get('fingerprint')]
+    diversity = len(set(fingerprints)) / len(fingerprints) if fingerprints else 1.
+    cls = str(task.get('task_class') or task.get('kind') or 'general')
+    seen, samples = set(), []
+    for row in recovery_observations:
+        tid = row.get('task_id')
+        if tid == task.get('id') or not tid or tid in seen or row.get('split') != 'development' or \
+                row.get('verified_l0') is not True or type(row.get('next_success')) is not bool or \
+                row.get('task_class', 'general') != cls or \
+                int(_number(row.get('attempt'), 1)) != max(1, n) or \
+                abs(_number(row.get('best_score')) - best) > .25:
+            continue
+        seen.add(tid)
+        samples.append(row['next_success'])
+    kind = 'caller_supplied_estimate' if recovery_probability is not None else 'heuristic_prior'
+    if recovery_probability is None:
+        if len(samples) >= max(1, int(ag.get('candidate_min_observations', 5))):
+            probability = (sum(samples) + 1) / (len(samples) + 2)
+            kind = 'empirical_smoothed'
+        else:
+            probability = _number(ag.get('candidate_recovery_prior'), .2)
+        probability *= diversity
+    else:
+        probability = _number(recovery_probability)
+    probability = min(1., probability)
+    value = _number(task.get('task_value_usd'), _number(ag.get('candidate_task_value_usd'), 1.))
+    benefit = probability * value
+    if reason is None and benefit <= cost:
+        reason = 'expected marginal verified benefit does not exceed marginal compute cost'
+    return {'continue': reason is None, 'reason': reason or 'positive marginal expected value',
+            'attempts': n, 'hard_ceiling': hard_cap, 'best_mechanical_score': best,
+            'diversity': diversity, 'recovery_probability': probability,
+            'estimate_kind': kind, 'calibrated': False, 'historical_n': len(samples),
+            'expected_marginal_benefit': benefit, 'marginal_compute_cost': cost,
+            'model_cost_usd': model_cost, 'verifier_cost_usd': verifier_cost,
+            'remaining_budget_usd': remaining}
+
+
+RECOVERY = os.path.join("logs", "candidate-recovery.jsonl")
+
+
+def record_recovery(root, task):
+    """File this task's attempt sequence as DEVELOPMENT observations.
+
+    next_attempt()'s empirical branch reads rows shaped {task_id, task_class,
+    attempt, best_score, next_success, split, verified_l0} — and nothing in
+    the platform ever wrote one, so the "historical probability another
+    sample fixes this failure" input was a documented field with no writer
+    and every stopping decision fell to the configured prior. Written once,
+    at the task's terminal outcome, from the same stash ledger the scores
+    came from. All live rows are split=development: held-out evaluations
+    never tune this policy (the module's own rule)."""
+    attempts = history(root, task["id"])
+    if not attempts:
+        return 0
+    verified = bool(task.get("done_check"))
+    cls = str(task.get("task_class") or task.get("kind") or "general")
+    rows, best = [], 0.0
+    for i, a in enumerate(attempts):
+        try:
+            best = max(best, float(a.get("score") or 0.0))
+        except (TypeError, ValueError):
+            pass
+        if i + 1 < len(attempts):
+            nxt = attempts[i + 1].get("passed") is True
+        elif task.get("status") == "done":
+            # a stash happens on REFUSAL, so a terminal `done` means the try
+            # after this stash is the one that passed the gate
+            nxt = True
+        else:
+            # THE SAMPLE THAT WAS NEVER DRAWN. The task stopped here, so
+            # nothing observed what another attempt would have done. Writing
+            # False would teach the stopping rule that sampling does not help
+            # using the very cases where sampling was never tried — a policy
+            # trained on its own decision to stop, which converges on
+            # stopping. None fails next_attempt's `is not bool` filter by
+            # construction, so the row is kept as history and excluded from
+            # the estimate.
+            nxt = None
+        rows.append({"task_id": task["id"], "task_class": cls,
+                     "attempt": i + 1, "best_score": round(best, 4),
+                     "next_success": (None if nxt is None else bool(nxt)),
+                     "sampling_stopped_here": nxt is None,
+                     "split": "development", "verified_l0": verified,
+                     "at": time.strftime("%Y-%m-%dT%H:%M:%S")})
+    target = os.path.join(root, RECOVERY)
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    with open(target, "a", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row) + "\n")
+    return len(rows)
+
+
+def recovery_observations(root, limit=5000):
+    """The development-split rows next_attempt() filters for similarity."""
+    try:
+        with open(os.path.join(root, RECOVERY), encoding="utf-8") as f:
+            rows = []
+            for line in f:
+                try:
+                    rows.append(json.loads(line))
+                except ValueError:
+                    continue
+            return rows[-limit:]
+    except OSError:
+        return []
 
 
 def history(root, task_id):

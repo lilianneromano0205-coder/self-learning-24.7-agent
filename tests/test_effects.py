@@ -254,7 +254,8 @@ def main():
         assert "truncated: 30000 more chars" in out and len(out) < 21_000
     finally:
         s.close()
-    assert len(mcp.CATALOG) >= 8 and "playwright" in mcp.CATALOG
+    assert {"filesystem", "git", "fetch", "memory", "time", "sqlite", "playwright"} <= set(mcp.CATALOG)
+    assert "github" not in mcp.CATALOG, "deprecated GitHub reference package is not vetted"
     print("[governance] role allowlists and tool deny lists enforced before "
           "the server is touched; 50k-char result capped at 20k; a vetted "
           "catalog of 8 open-source servers ships")

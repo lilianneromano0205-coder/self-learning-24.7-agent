@@ -23,6 +23,8 @@ sys.path.insert(0, AGENT_DIR)
 import quick
 
 EXPERT_SETTINGS = """[agent]
+sandbox = "host"
+allow_unsafe_host = true
 poll_interval_seconds = 1
 inbox_settle_seconds = 0
 max_task_usd = 0

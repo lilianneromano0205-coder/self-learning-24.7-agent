@@ -22,7 +22,7 @@ import json
 import os
 import sys
 
-from common import AGENT_DIR, make_sandbox
+from common import AGENT_DIR, make_sandbox, seal_variant_protocol
 
 sys.path.insert(0, AGENT_DIR)
 import variants as V
@@ -73,8 +73,15 @@ def main():
         assert "one task proves nothing" in str(ex)
     print("[guards] no promotion without a trial; no trial on a single task")
 
+    # Promotion now demands the sealed three-battery protocol (hidden
+    # promotion + delayed regression). The development receipts below stay
+    # REAL — the trial seals seed 0 itself; the hidden phases are fabricated
+    # sealed receipts through the same owner authority (see common.py).
+    battery = seal_variant_protocol(sb, "v2", battery, pass_gate=CHECK,
+                                    skip_dev_seed=0)
+
     # --- 1. the two-arm trial, both arms through REAL gated drains
-    r = V.trial(sb, "v2", battery, timeout=240)
+    r = V.trial(sb, "v2", None, timeout=240)
     assert r["base"]["passes"] == 0 and r["base"]["tasks"] == 2, r["base"]
     assert r["base"]["gate_rejects"] >= 2, \
         "the base arm must have been refused by the gate, not skipped"

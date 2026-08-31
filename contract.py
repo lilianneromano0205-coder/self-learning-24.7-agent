@@ -324,9 +324,11 @@ def freeze(root, gid):
 
 
 def _sealed_hash(root, gid):
-    """The hash the OUTSIDE ledger remembers for this contract. The LAST
-    seal wins (a legitimately amended contract is re-sealed); a missing seal
-    is 'never frozen', which verify treats as failure, not as licence."""
+    """First seal wins; any conflicting append is tamper, never an amendment.
+
+    Amended criteria require a new contract identity. Conflicts return an
+    impossible digest so verify takes the existing TAMPER path before running.
+    """
     sp, _kind = seal_path(root)
     found = None
     try:
@@ -337,7 +339,12 @@ def _sealed_hash(root, gid):
                 except ValueError:
                     continue
                 if row.get("gid") == str(gid):
-                    found = row.get("accept_hash")
+                    candidate = row.get("accept_hash")
+                    if not isinstance(candidate, str) or len(candidate) != 64:
+                        return "TAMPER: malformed seal"
+                    if found is not None and candidate != found:
+                        return "TAMPER: conflicting seals"
+                    found = candidate
     except OSError:
         pass
     return found

@@ -179,7 +179,10 @@ def main():
         assert r["published"] == ["deep-one"]
         f1 = api("GET", "/api/federation")
         assert [sk["expert"] for sk in f1["card"]["skills"]] == ["deep-one"]
-        assert f1["a2a"]["protocolVersion"] == "1.0"
+        # the card no longer claims A2A protocol conformance it does not
+        # implement (federation.a2a_card's honesty block replaced the old
+        # protocolVersion field); test_mcp.py already asserts the new shape
+        assert f1["a2a"]["interoperability"]["a2a_task_api"] is False
         # the WORD "secret" legitimately appears in the A2A security-scheme
         # description; what must never appear is the secret's VALUE
         sys.path.insert(0, AGENT_DIR)

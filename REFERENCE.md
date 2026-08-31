@@ -1474,7 +1474,7 @@ Derived from `ui.py`, not from memory — 51 read routes, 18 write routes and
   request whether or not a token is set (`test_csrf.py`).
 
 All of it is guarded by the same token when you start the panel with
-`--token`; the SSE stream accepts it as `?token=` because `EventSource`
+`--token`, as an `Authorization: Bearer` header. The stream is read with `fetch` rather than `EventSource`
 cannot send headers.
 
 ---

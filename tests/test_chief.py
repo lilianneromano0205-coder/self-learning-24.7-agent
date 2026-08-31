@@ -87,6 +87,20 @@ def main():
         f.write("KEYWORDS: trick\nbad advice\n")
     for i in range(3):
         sg.record_use(root, ["skills/bad-trick.md"], f"t{i}", success=False)
+    # Co-occurrence losses no longer quarantine — that verdict is earned only
+    # through a matched held-out ablation (skills._earned_status). Seed the
+    # graph entry exactly as a completed harmful ablation writes it, so the
+    # briefing surfaces a REAL quarantine rather than a superstition.
+    import hashlib as _hl
+    with open(os.path.join(root, "skills", "bad-trick.md"), "rb") as f:
+        _sha = _hl.sha256(f.read()).hexdigest()
+    g = sg.load_graph(root)
+    ent = sg.entry(g, "bad-trick")
+    ent.update({"status": "quarantined", "losses": 3,
+                "evidence_basis": "matched_heldout_ablation",
+                "skill_sha256": _sha,
+                "updated": time.strftime("%Y-%m-%dT%H:%M:%S")})
+    sg.save_graph(root, g)
 
     b = chief.briefing(home)
     verbs = [r["verb"] for r in b["recommendations"]]

@@ -40,12 +40,16 @@ import shutil
 import subprocess
 import sys
 import time
+import hashlib
+import learning_authority as authority
 
 HOME = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HOME)
 
 ENV_VAR = "AGENT_PROMPT_VARIANT"
 MIN_TASKS = 2
+BATTERY_MINIMUMS = {"development": 2, "promotion": 20, "regression": 20}
+MIN_REGRESSION_DELAY = 86400
 
 
 def _dir(root, vid=None):
@@ -103,7 +107,14 @@ def spawn(root, vid, role, prompt_text, note="", prediction=None):
         raise SystemExit(f"REFUSED: '{role}' is a protected charter — the "
                          f"constitution, grounding contract, examiner and "
                          f"student prompts cannot be evolved by variants.")
+    # identifier() refuses a leading underscore, so it must run AFTER the
+    # protected-charter refusal — '_grounding' deserves the protection
+    # message, not a record-key validation error
+    authority.identifier(role)
     vdir = _dir(root, vid)
+    old = load_manifest(root).get(vid, {})
+    if old.get("evaluation_protocol") or old.get("status") == "promoted":
+        raise SystemExit("REFUSED: evaluated/promoted charter is frozen; spawn a new variant")
     os.makedirs(vdir, exist_ok=True)
     with open(os.path.join(vdir, f"{role}.md"), "w", encoding="utf-8") as f:
         f.write(prompt_text)
@@ -160,7 +171,7 @@ def _clone_root(root, dest, arm):
     DIFFERENT run — copying them would make the arm's own heartbeat check see
     a stale pulse), and __pycache__.
     """
-    skip = {"backups", "logs", "contexts", "__pycache__", ".git"}
+    skip = {"backups", "logs", "contexts", "__pycache__", ".git", "org", "training", "proof"}
     shutil.copytree(root, dest,
                     ignore=lambda d, names: [n for n in names if n in skip],
                     dirs_exist_ok=True)
@@ -174,7 +185,82 @@ def _clone_root(root, dest, arm):
     return dest
 
 
-def trial(root, vid, battery, timeout=600, isolate=True):
+def _charter_hash(root, vid, roles, live=False):
+    data = {}
+    for role in roles:
+        authority.identifier(role)
+        if role in PROTECTED_ROLES or role.startswith("_"):
+            raise SystemExit("REFUSED: protected role in charter manifest")
+        path = os.path.join(root, "prompts", f"{role}.md") if live else os.path.join(_dir(root, vid), f"{role}.md")
+        if os.path.islink(path):
+            raise SystemExit("REFUSED: redirected charter")
+        try:
+            with open(path, "rb") as stream:
+                data[role] = hashlib.sha256(stream.read()).hexdigest()
+        except FileNotFoundError:
+            if not live:
+                raise
+            data[role] = None
+    return authority.digest(data)
+
+
+def configure_evaluation(root, vid, batteries, *, seeds=(0, 1, 2), delay_seconds=MIN_REGRESSION_DELAY):
+    """Owner freezes three disjoint batteries before any evaluated trial.
+
+    Development may be inspected. Promotion is one-shot per seed, hidden
+    until evaluation; delayed regression is unavailable for at least one day
+    after completion of the promotion battery. New charters need new packs.
+    """
+    _owner_only("configure evaluation", vid)
+    authority.identifier(vid)
+    manifest = load_manifest(root)
+    entry = manifest[vid]
+    if entry.get("trials") or entry.get("evaluation_protocol"):
+        raise SystemExit("REFUSED: configure sealed protocol before trials")
+    if len(set(seeds)) < 3 or any(type(s) is not int or s < 0 for s in seeds):
+        raise SystemExit("REFUSED: three distinct nonnegative seeds required")
+    if type(delay_seconds) not in (int, float) or not delay_seconds >= MIN_REGRESSION_DELAY or delay_seconds > 365 * 86400:
+        raise SystemExit("REFUSED: delayed regression must wait at least one day")
+    seen_ids, seen_content = set(), set()
+    for phase, minimum in BATTERY_MINIMUMS.items():
+        tasks = batteries.get(phase, [])
+        if len(tasks) < minimum:
+            raise SystemExit(f"REFUSED: {phase} battery requires {minimum} distinct tasks")
+        families = set()
+        for task in tasks:
+            identity = str(task.get("id", ""))
+            content = authority.digest({"goal": task.get("goal"), "course": task.get("course")})
+            if not identity or not task.get("goal") or not task.get("done_check") or identity in seen_ids or content in seen_content:
+                raise SystemExit("REFUSED: missing gate or overlapping battery identities/content")
+            seen_ids.add(identity); seen_content.add(content)
+            if task.get("family"):
+                families.add(task["family"])
+        if phase != "development" and len(families) < 5:
+            raise SystemExit("REFUSED: hidden batteries require at least five families")
+    protocol = {"batteries": batteries, "seeds": list(seeds), "delay_seconds": delay_seconds,
+                "roles": entry["roles"], "candidate_hash": _charter_hash(root, vid, entry["roles"]),
+                "base_hash": _charter_hash(root, vid, entry["roles"], live=True), "created": time.time()}
+    authority.store(root, "variant-protocol", vid, protocol)
+    entry["evaluation_protocol"] = authority.digest(protocol)
+    save_manifest(root, manifest)
+    return {"protocol_hash": entry["evaluation_protocol"], "seeds": list(seeds),
+            "tasks": {key: len(value) for key, value in batteries.items()}}
+
+
+def _load_protocol(root, vid):
+    try:
+        protocol = authority.load(root, "variant-protocol", vid)
+    except authority.Refused as exc:
+        raise SystemExit("REFUSED: sealed hidden promotion battery required") from exc
+    entry = load_manifest(root)[vid]
+    if entry.get("evaluation_protocol") != authority.digest(protocol) or entry["roles"] != protocol["roles"]:
+        raise SystemExit("REFUSED: TAMPER in variant protocol")
+    if _charter_hash(root, vid, entry["roles"]) != protocol["candidate_hash"] or _charter_hash(root, vid, entry["roles"], live=True) != protocol["base_hash"]:
+        raise SystemExit("REFUSED: charter changed since sealed evaluation")
+    return protocol
+
+
+def trial(root, vid, battery=None, timeout=600, isolate=True, *, phase="development", seed=0):
     """Run the battery under BOTH charters and score with the same gates.
     battery: list of {role, goal, done_check, course?}. The variant arm is
     selected purely by an environment variable in the child process — the
@@ -201,7 +287,32 @@ def trial(root, vid, battery, timeout=600, isolate=True):
     has its own isolation. Nothing in the platform passes it; it exists so the
     honest default cannot be mistaken for the only option.
     """
-    if len(battery) < MIN_TASKS:
+    authority.identifier(vid)
+    if not isolate:
+        raise SystemExit("REFUSED: paired cloned roots are mandatory")
+    if phase not in BATTERY_MINIMUMS:
+        raise SystemExit("REFUSED: unknown evaluation battery")
+    manifest = load_manifest(root)
+    protocol = None
+    if phase != "development" or manifest.get(vid, {}).get("evaluation_protocol"):
+        _owner_only("run sealed evaluation", vid)
+        protocol = _load_protocol(root, vid)
+        if battery is not None and battery != protocol["batteries"][phase]:
+            raise SystemExit("REFUSED: caller cannot replace sealed battery")
+        battery = protocol["batteries"][phase]
+        if seed not in protocol["seeds"]:
+            raise SystemExit("REFUSED: undeclared evaluation seed")
+        if phase == "promotion":
+            for declared in protocol["seeds"]:
+                authority.load(root, "variant-result", f"{vid}-development-{declared}")
+        if phase == "regression":
+            completed = [authority.load(root, "variant-result", f"{vid}-promotion-{s}")["completed"] for s in protocol["seeds"]]
+            if time.time() < max(completed) + protocol["delay_seconds"]:
+                raise SystemExit("REFUSED: delayed regression battery is not yet available")
+        # Burning the attempt before execution prevents repeated hidden
+        # peeking after a crash or selecting the friendliest rerun.
+        authority.store(root, "variant-attempt", f"{vid}-{phase}-{seed}", {"started": time.time()})
+    if not battery or len(battery) < MIN_TASKS:
         raise SystemExit(f"a trial needs >= {MIN_TASKS} tasks — one task "
                          f"proves nothing (that is the fragility lesson)")
     import loop
@@ -235,17 +346,21 @@ def trial(root, vid, battery, timeout=600, isolate=True):
                     item.get("role", "practitioner"), item["goal"],
                     course=item.get("course"),
                     done_check=item.get("done_check")))
-            _drain(arm_root, env_extra, timeout)
+            rc = _drain(arm_root, {**env_extra, "AGENT_EVAL_SEED": str(seed)}, timeout)
             agent = loop.Agent(arm_root)
             passes = rejects = 0
+            outcomes = []
             for tid in ids:
                 t = agent.find_task(tid) or {}
-                if t.get("status") == "done":
+                accepted = t.get("status") == "done" and rc == 0
+                outcomes.append(accepted)
+                if accepted:
                     passes += 1
                 rejects += t.get("done_rejects", 0)
             results[arm] = {"tasks": len(ids), "passes": passes,
                             "gate_rejects": rejects, "task_ids": ids,
-                            "root": arm_root if isolate else root}
+                            "root": arm_root if isolate else root, "outcomes": outcomes,
+                            "returncode": rc}
     finally:
         if arena:
             shutil.rmtree(arena, ignore_errors=True)
@@ -268,12 +383,19 @@ def trial(root, vid, battery, timeout=600, isolate=True):
             "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
     m[vid]["status"] = "trialed"
     save_manifest(root, m)
+    if protocol:
+        _load_protocol(root, vid)
+        authority.store(root, "variant-result", f"{vid}-{phase}-{seed}",
+                        {"results": results, "completed": time.time(), "seed": seed,
+                         "protocol_hash": authority.digest(protocol)})
     return results
 
 
 def promote(root, vid):
     """The gate: strictly better gated passes, or no promotion. Ties lose —
     churn without evidence is how charters rot."""
+    _owner_only("promote", vid)
+    authority.identifier(vid)
     m = load_manifest(root)
     e = m.get(vid)
     if not e:
@@ -281,16 +403,12 @@ def promote(root, vid):
     tr = e.get("trials")
     if not tr:
         raise SystemExit("REFUSED: no trial on record — run the trial first")
-    b, v = tr["base"], tr["variant"]
-    if v["tasks"] < MIN_TASKS:
-        raise SystemExit(f"REFUSED: trial too small ({v['tasks']} tasks)")
-    if v["passes"] <= b["passes"]:
-        raise SystemExit(
-            f"REFUSED: variant did not strictly beat base "
-            f"({v['passes']}/{v['tasks']} vs {b['passes']}/{b['tasks']} gated "
-            f"passes). Evolution without evidence is superstition.")
-    # a declared prediction is a second, stricter gate: better-by-accident is
-    # not the same as understood, and only the understood change is kept
+    if e.get("status") == "promoted":
+        raise SystemExit("REFUSED: variant is already promoted")
+    # The prediction gate judges the variant's OWN declared hypothesis
+    # against the trial on record; it needs no sealed battery and is the
+    # stricter, cheaper refusal — so it fires before the protocol demand,
+    # and a wrong prediction is named as such instead of as missing seals.
     chk = e.get("prediction_check")
     if e.get("prediction") and not chk:
         raise SystemExit("REFUSED: this variant declared a prediction but the "
@@ -303,6 +421,38 @@ def promote(root, vid):
             f"{chk['observed_delta']:+g}). The charter may be better by "
             f"accident, but it is not understood — revise the prediction or "
             f"the change, then trial again.")
+    # The trial-on-record gates read only the manifest, so they too fire
+    # before the sealed-battery demand: a too-small trial or a tie is named
+    # as what it is, not as missing seals it could never have earned.
+    b, v = tr["base"], tr["variant"]
+    if v["tasks"] < MIN_TASKS:
+        raise SystemExit(f"REFUSED: trial too small ({v['tasks']} tasks)")
+    if v["passes"] <= b["passes"]:
+        raise SystemExit(
+            f"REFUSED: variant did not strictly beat base "
+            f"({v['passes']}/{v['tasks']} vs {b['passes']}/{b['tasks']} gated "
+            f"passes). Evolution without evidence is superstition.")
+    protocol = _load_protocol(root, vid)
+    import proof
+    paired = []
+    for phase in ("development", "promotion", "regression"):
+        for seed in protocol["seeds"]:
+            try:
+                receipt = authority.load(root, "variant-result", f"{vid}-{phase}-{seed}")
+            except authority.Refused as exc:
+                raise SystemExit("REFUSED: incomplete sealed battery evidence") from exc
+            result = receipt["results"]
+            if receipt["protocol_hash"] != authority.digest(protocol):
+                raise SystemExit("REFUSED: evaluation protocol changed")
+            if phase == "regression" and result["variant"]["passes"] < result["base"]["passes"]:
+                raise SystemExit("REFUSED: delayed regression battery regressed")
+            if phase == "promotion":
+                for index, task in enumerate(protocol["batteries"][phase]):
+                    paired.append({"task": task["id"], "seed": seed,
+                        "base": result["base"]["outcomes"][index],
+                        "candidate": result["variant"]["outcomes"][index]})
+    if not proof.paired_evidence({"paired_results": paired, "preregistered": True})["meaningful"]:
+        raise SystemExit("REFUSED: hidden promotion evidence did not strictly beat base with adequate repeated evidence")
     vdir = _dir(root, vid)
     for role in e["roles"]:
         live = os.path.join(root, "prompts", f"{role}.md")
@@ -318,11 +468,14 @@ def promote(root, vid):
 
 
 def rollback(root, vid):
+    _owner_only("rollback", vid)
+    authority.identifier(vid)
     m = load_manifest(root)
     e = m.get(vid)
     if not e or e.get("status") != "promoted":
         raise SystemExit("REFUSED: only a promoted variant can roll back")
     vdir = _dir(root, vid)
+    _charter_hash(root, vid, e["roles"])
     for role in e["roles"]:
         backup = os.path.join(vdir, f"backup-{role}.md")
         live = os.path.join(root, "prompts", f"{role}.md")

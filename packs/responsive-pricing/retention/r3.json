@@ -1,0 +1,33 @@
+{
+  "id": "r3",
+  "goal": "Create a neighborhood theatre membership at out/r3/pricing.html. Include three priced tiers, distinct calls to action, semantic HTML landmarks and headings, accessible controls, and a responsive phone-first layout.",
+  "competencies": [
+    "semantic-structure",
+    "accessibility",
+    "responsive-layout",
+    "pricing-ux"
+  ],
+  "accept": [
+    {
+      "id": "A1",
+      "what": "semantic structure floor",
+      "check": "python \"{PACK}/validators/check_semantics.py\" out/r3/pricing.html"
+    },
+    {
+      "id": "A2",
+      "what": "accessibility floor",
+      "check": "python \"{PACK}/validators/check_a11y.py\" out/r3/pricing.html"
+    },
+    {
+      "id": "A3",
+      "what": "responsive floor",
+      "check": "python \"{PACK}/validators/check_responsive.py\" out/r3/pricing.html"
+    },
+    {
+      "id": "A4",
+      "what": "3 priced tiers with CTAs",
+      "check": "python \"{PACK}/validators/check_pricing.py\" out/r3/pricing.html 3"
+    }
+  ],
+  "instance_id": "retention-3"
+}

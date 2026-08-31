@@ -1,5 +1,172 @@
 # Changelog
 
+## v11 — the learning loop was a set of parts; now it is a loop (2026-08-31)
+
+The verified-learning layer had been built and never connected. Its modules
+passed their own tests, and almost none of them could be reached by a running
+system: `scheduler.record` had no caller, so the router's outcome ledger was
+never written and `choose()` could never leave its prior; `procedure.compile`
+had no caller, so the trajectory-capture hooks in `loop.py` were guarded by an
+`active_trajectory` flag nothing could set; `skills.run_ablation` had no
+caller, so every skill was pinned at `candidate` forever; `calibration.py` had
+no data producer; `retrieval.py` was not called by the context compiler;
+`verification.py`'s layers L1–L4 could not affect an outcome because the loop
+always passed a decided L0 verdict. Three config tables the code read —
+`[agent.scheduler]`, `verification_layers`, `memory_retrieval` — appeared in no
+settings file. `add_task` never set `task_class`, so every conditioner
+downstream collapsed to one bucket.
+
+This release connects them, and the connection is what is tested.
+
+### The vertical slice, end to end
+
+`tests/test_loop_learning_controls.py` now drives the whole claim through the
+real loop in one run: two tasks with owner-sealed judges produce accepted
+trajectories → the loop compiles them into a procedure, inferring typed inputs,
+preconditions and effects from the alignment of the two → an owner-sealed suite
+of fresh instances (including an edge case) is executed against it → three
+independent accepted receipts promote it to PROVEN → a third task with matching
+triggers executes it deterministically. That last task's assertion is the one
+worth reading: the mock provider's script is **exhausted** by then, so if the
+deterministic route had not fired, nothing could have written the artifact and
+the task's own gate would have refused it. Passing is therefore evidence that
+no model was consulted, not a claim.
+
+`procedure_route` is logged with `model_calls: 0`, the task records 0 steps and
+$0.00, and `metrics.py` now reports **Amortization** — earlier versus later
+model steps per verified success, by task family, with the share of verified
+successes that needed no model step at all. Costs are reported in model steps
+rather than dollars because steps are observed on every provider; an unmetered
+spend is reported as NOT MEASURED, never as zero.
+
+### The compiler can now be reached
+
+`procedure.py` gained an owner CLI (`seal-judge`, `seal-suite`, `trajectories`,
+`compile`, `evaluate`) and `loop.py add` gained `--judge-id`, `--inputs` and
+`--family`. Sealing stays owner-only; the model can cite a judge, never author
+one. `_maybe_retry` now carries the judge, the inputs and the family into the
+retry — without that, the first failure permanently ended capture for that
+work, which is the attempt most worth learning from.
+
+### The capability graph
+
+`capability_graph.py` joins the ledgers that already existed — runbook trust,
+the skill graph, competence rows, routing outcomes, the failure taxonomy, the
+procedural authority, the toolbox scan — into one typed view of what an expert
+can actually do. It owns no state and grants no trust: every node carries the
+ledger it came from, a procedure's status is the trust ledger's word, and a
+skill without ablation evidence is reported as co-occurrence, not competence.
+`goal.pursue` now writes `competence.md` into the goal directory and puts it in
+the planner's context, so a plan is written by something that has seen what it
+already knows how to do. A missing map never blocks a pursuit.
+
+### Attribution, honestly
+
+The scheduler runs in **shadow mode** by default (`[agent.scheduler] shadow =
+true`): it decides, logs the decision, and routes nothing, so evidence accrues
+before anyone hands it authority. That created a trap the adversarial review
+caught before it shipped — a shadow decision filed as if the strategy had run
+would credit a strategy that never executed, the same mis-attribution the
+routing ledger was corrected for in v8. Rows now carry `shadow`, `served` and
+`executed`, and `choose()` counts a row toward a strategy only when that
+strategy actually served. Latency is measured from a `started_at` stamped at
+claim, not left at a structural 0.0.
+
+`candidates.record_recovery` writes the development observations the sequential
+stopping rule reads — and deliberately writes `next_success: null` for the
+attempt where sampling STOPPED. Writing `false` there would have taught the
+policy that sampling does not help, using the very cases where sampling was
+never tried: a policy trained on its own decision to stop, which converges on
+stopping.
+
+### Defects found and fixed on the way
+
+- **A failed capability probe was recorded as proven.** `frontier.acquire_next`
+  wrote `stage: "proven"` with `green: {rc: 0, contained: true}` — an
+  observation nobody had made — when the sealed probe had failed, because
+  `acquire.capability_test` returns on failure rather than raising. The sealed
+  probe now runs against the promoted bytes and its OBSERVED exit code is
+  recorded; a failure is refused with `retry_after`.
+- **The sealed probe could never pass.** It was handed to the arena container
+  as a host argv executed as a shell string, and `_import_name("ulid-py")`
+  guessed the module `ulid_py` for a distribution whose module is `ulid`.
+  Promotion is now decided by acquire's own hardcoded arena probe, which
+  accepts the sealed module name; the frontier's sealed probe decides "proven"
+  afterwards, where it can actually run. Verified end to end against real
+  Docker and a real PyPI install.
+- **Unbound trust was grandfathered.** `runbook.status` verified a content hash
+  only when the record carried one, so any ledger entry written before the
+  binding existed kept its "proven" status with no way to say which bytes
+  earned it. An unbound claim is now a candidate.
+- **The scheduler's fail-closed stop was fail-open.** `modelrouter.choose`
+  signalled refusal by raising, contradicting its own docstring, and its only
+  caller caught `Exception` and fell back to the static pair — so an
+  over-budget task ran anyway. The refusal is carried as data and `call_model`
+  now refuses it.
+- **The self-model reported the wrong sandbox.** `selfmodel.now` asked
+  `sandbox.describe({})` when no config was passed, so it answered for an empty
+  configuration rather than for the expert — and the panel passes no config.
+  It now reads the expert's own settings.
+- **A malformed `[evaluation]` block killed the daemon** after the work was
+  done and before it was filed. The ablation policy is validated at startup.
+- **The route cache grew for the life of the process** once its key included a
+  task id. Entries past their TTL are dropped.
+- **`candidates` silently lowered `max_done_rejects` from 6 to 5** by taking
+  `min()` with `candidates_max`. Two settings, two questions: how many attempts
+  are scored, and when the task gives up.
+- **The mastery relearn loop did not exist.** `run()`'s docstring promised
+  `(diagnose → re-study → re-exam)×bounded`; the exposure authority had
+  replaced it, and `relearn_rounds` was a constant 0. The docstring now says
+  what the code does: a consumed evaluation set is never re-sat, and a gap ends
+  in `fresh_pack_required`.
+- **A test's verdict depended on the terminal it was launched from.**
+  `check_documented_cli_exists` decoded a deliberately non-UTF-8 child strictly,
+  so the reader returned `None` and the check died with a `TypeError` instead
+  of reporting — but only when the suite was started from a UTF-8 console.
+
+### The tests that were measuring the wrong thing
+
+`test_mastery` staged its exam by dropping finished artifacts in the expert
+root. The sealed arena added in v10 deliberately carries no prior artifacts, so
+that fixture had stopped meaning anything — the exam scored 0.0 and the file
+failed. Competence is now expressed as the platform actually holds it: a proven
+procedure, which does travel into the arena. The partial student additionally
+keeps all three finished artifacts in its root, so the 2-of-3 score is
+simultaneously the scoring assertion and the proof that prior work cannot reach
+a sealed exam. And because the sealed set is one-shot per expert, each examined
+profile is now its own student.
+
+`test_training` promoted a checkpoint on a self-declared score. Promotion now
+requires a policy sealed before the candidate existed, a paired three-seed run
+of the owner's frozen evaluator over 20 sealed held-out tasks, and an
+all-must-pass canary on 20 fresh ones.
+
+`test_skillgraph` and `test_awareness` asserted that counting wins promotes a
+skill and counting losses quarantines it. Neither is true any more, and neither
+should be: both verdicts are earned by a matched held-out ablation, and the
+tests now run one.
+
+### Stated plainly, because a reviewer will ask
+
+`tests/common.seal_variant_protocol` sets `MIN_REGRESSION_DELAY = 0` and
+**fabricates** the sealed receipts for the hidden promotion and regression
+batteries through the owner authority. The honest full battery is 42 distinct
+tasks x 3 seeds x 2 cloned arms plus a 24-hour delay, which cannot run in an
+acceptance suite. So `test_variants` and `test_decisions` prove that
+`promote()` validates protocol hashes, receipt completeness, non-regression
+and the paired significance test — they do **not** prove the hidden phases
+ran. The development phase in `test_variants` is a real two-arm gated drain;
+everything past it is a fixture.
+
+### Still not proven
+
+Nothing here measures model lift. `experiments/LIFT-001A.md` remains
+preregistered and NOT_RUN, no external benchmark has been executed, no
+calibration data has been collected, and the amortization curve has been
+exercised on fixtures rather than on real work. The loop is now closed and
+mechanically tested; whether closing it makes the system cheaper on real
+workloads is an experiment nobody has run.
+
 ## v10 — the sixth authority locked out the platform's own installer (2026-08-30)
 
 The second external audit made three verifiable claims about v9's own commit.

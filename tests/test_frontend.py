@@ -80,7 +80,7 @@ def main():
                      "/skill", "dlgSkillImport(", "trustSkill(",
                      "/trace", "traceDlg(", "/routine", "dlgRoutine(",
                      "loadToolStats(", "loadRoutines(",
-                     "/api/events", "EventSource(", "/api/readiness",
+                     "/api/events", "connectEvents(", "/api/readiness",
                      "/identity", "/api/commons/pins", "renderCard(",
                      'id="teammates"', "files=1", "threadDlg(", "planDlg(",
                      "/self", "loadSelf(", "/knowledge", "loadKnowledge(",

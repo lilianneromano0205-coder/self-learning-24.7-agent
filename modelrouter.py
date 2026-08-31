@@ -54,6 +54,7 @@ def record(root, task, provider, model, cost=0.0):
     input routing is ever allowed to use."""
     rec = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"),
            "task": task.get("id"), "role": task.get("role"),
+           "task_class": task.get("task_class") or task.get("kind") or "general",
            "provider": provider, "model": model,
            "status": task.get("status"),
            "verified": bool(task.get("done_check")),
@@ -83,6 +84,7 @@ def record_served(root, task, servedmap):
         n = int(v.get("steps") or 0)
         rec = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"),
                "task": task.get("id"), "role": task.get("role"),
+               "task_class": task.get("task_class") or task.get("kind") or "general",
                "provider": v.get("provider") or "unknown",
                "model": v.get("model") or "unknown",
                "status": task.get("status"),
@@ -134,11 +136,13 @@ def _replay_agreement(root):
     return {k: round(v[0] / v[1], 3) for k, v in agree.items() if v[1]}
 
 
-def profiles(root, role=None):
+def profiles(root, role=None, task_class=None):
     """-> {"provider:model": {n, pass_rate, verified_pass_rate, avg_cost...}}"""
     agg = {}
     for r in outcomes(root):
         if role and r.get("role") != role:
+            continue
+        if task_class and r.get('task_class', 'general') != task_class:
             continue
         key = f"{r.get('provider')}:{r.get('model')}"
         a = agg.setdefault(key, {"key": key, "provider": r.get("provider"),
@@ -196,11 +200,48 @@ def candidates(rc):
     return out
 
 
-def choose(agent, role):
+def choose(agent, role, task=None):
     """-> (provider, model, decision). Never raises: the static setting is
     always a valid answer, and it is what an unproven candidate falls back to."""
     rc = agent.role_cfg(role)
     static = (rc.get("provider"), rc.get("model"))
+    try:
+        from evaluation_policy import disabled
+        if disabled(agent.cfg, 'routing'):
+            return *static, {'routed': False, 'rule': 'ablation', 'why': 'routing disabled for controlled evaluation'}
+    except ImportError:
+        pass
+    policy = (agent.cfg.get('agent', {}).get('scheduler', {}) or {})
+    if task and policy.get('enabled'):
+        import scheduler
+        decision = scheduler.plan(agent, task)
+        task['scheduler_decision'] = decision
+        selected = decision.get('strategy') or {}
+        if selected.get('provider') and selected.get('model'):
+            return selected['provider'], selected['model'], {
+                'routed': True, 'rule': decision['rule'], 'chosen': selected['id'],
+                'why': decision['why'], 'scheduler': decision}
+        if decision.get('stop'):
+            # A REFUSAL IS AN ANSWER, NOT AN EXCEPTION. Raising here
+            # contradicted this function's own promise never to raise, and
+            # its only caller (loop._route_for) catches Exception and
+            # degrades to "router error" + the static pair — so the
+            # scheduler's fail-closed stop silently became fail-open, and
+            # the over-budget task ran anyway. Carried as data instead, and
+            # call_model refuses it.
+            return *static, {'routed': False, 'rule': 'scheduler-stop',
+                             'stop': True, 'why': decision['why'],
+                             'scheduler': decision}
+    elif task and policy.get('shadow', True):
+        # SHADOW MODE (default on): the planner decides, logs its decision,
+        # and routes NOTHING — the loop later records the real outcome
+        # against it. This is how a learned scheduler earns evidence before
+        # anyone hands it routing authority; disable with shadow = false.
+        try:
+            import scheduler
+            task['scheduler_shadow'] = scheduler.plan(agent, task)
+        except Exception:
+            pass
     if str(rc.get("route", "")).lower() != "auto":
         return static[0], static[1], {"routed": False, "rule": "static",
                                       "why": "this role is not on auto routing"}
@@ -211,7 +252,8 @@ def choose(agent, role):
             "why": "route = auto but no route_candidates were listed"}
     min_pass = float(rc.get("route_min_pass", DEFAULT_MIN_PASS))
     min_n = int(rc.get("route_min_n", DEFAULT_MIN_N))
-    prof = profiles(agent.root, role)
+    prof = profiles(agent.root, role,
+                    (task.get('task_class') or task.get('kind') or 'general') if task else None)
 
     # EXPLORATION — without it this whole module was inert.
     #

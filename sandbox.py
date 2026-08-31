@@ -130,7 +130,7 @@ def _cfg(cfg):
 
 
 def backend_name(cfg):
-    b = str(_cfg(cfg).get("sandbox", "host") or "host").strip().lower()
+    b = str(_cfg(cfg).get("sandbox", "docker") or "docker").strip().lower()
     return b
 
 
@@ -138,7 +138,11 @@ def available(cfg):
     """-> (ok, why). Never raises; used by doctor and the harness manifest."""
     b = backend_name(cfg)
     if b == "host":
-        return True, "commands run on this machine under policy.py"
+        if _cfg(cfg).get("allow_unsafe_host") is not True:
+            return False, ('host is UNSAFE/developer-only; autonomous shell '
+                           'work requires Docker isolation. An owner may explicitly '
+                           'set allow_unsafe_host = true for trusted development fixtures')
+        return True, "UNSAFE developer host: no filesystem or descendant containment"
     if b not in BACKENDS:
         return False, (f"unknown sandbox backend '{b}' "
                        f"(choose one of: {', '.join(BACKENDS)})")
@@ -264,12 +268,11 @@ def _docker(cmd, root, env, timeout, cfg):
     # the boundary is the kernel's rather than a check's — which is the whole
     # reason to prefer this backend. On `host` there is no equivalent, and
     # controlplane.py reverts instead; see its docstring for that distinction.
-    try:
-        import controlplane
-        for host_path, container_path in controlplane.readonly_mounts(root):
-            argv += ["-v", f"{host_path}:{container_path}:ro"]
-    except Exception:                       # pragma: no cover — defensive
-        pass
+    import controlplane
+    for host_path, container_path in controlplane.readonly_mounts(root):
+        argv += ["-v", f"{host_path}:{container_path}:ro"]
+    argv += ["--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+             "--read-only", "--tmpfs", "/tmp:rw,nosuid,nodev,size=256m"]
     if os.name != "nt":
         # Files created in a bind mount belong to the user INSIDE the
         # container, and with no --user that user is root. On Linux — where
@@ -363,16 +366,29 @@ def _hosted(kind, cmd, root, env, timeout, cfg):
 def run(cmd, root, env=None, timeout=300, cfg=None):
     """Run one command in the configured backend. Returns (rc, out, err).
     Never raises for a backend problem — it reports it as a refusal."""
+    if cfg is None:
+        import tomllib
+        try:
+            with open(os.path.join(root, "settings.toml"), "rb") as f:
+                cfg = tomllib.loads(f.read().decode("utf-8-sig"))
+        except FileNotFoundError:
+            cfg = {}
+        except (OSError, ValueError) as e:
+            return 127, "", f"sandbox configuration cannot be read: {e}"
     b = backend_name(cfg)
+    if b in HOSTED and _cfg(cfg).get("sandbox_workload", "workspace") != "stateless":
+        return 127, "", (f"sandbox '{b}' has no authorized workspace round-trip "
+                         "implementation. Workspace execution is refused; no remote "
+                         "or local command ran. Stateless execution must be explicit.")
     ok, why = available(cfg)
     if not ok:
         return 127, "", (f"sandbox '{b}' unavailable: {why}. Nothing was run "
-                         f"on the host: fix the backend or set "
-                         f"[agent] sandbox = \"host\" deliberately.")
+                         f"on the host: fix the configured backend.")
     env, dropped = scrub_env({**os.environ, **(env or {})}, cfg, cmd)
     env["AGENT_ENV_SCRUBBED"] = str(len(dropped))
     if b == "host":
         rc, out, err = _host(cmd, root, env, timeout)
+        err += "\n[UNSAFE developer host: descendants and authority files are NOT isolated.]"
     elif b == "docker":
         try:
             rc, out, err = _docker(cmd, root, env, timeout, cfg)

@@ -334,7 +334,10 @@ const ICONS = {home:"🏠",work:"🎯",agents:"🤖",resources:"📚",
 const S = {view:"home", sel:null, sub:"ov", hist:false, sys:null, map:null,
            mindPath:null, timer:null, blockedN:0};
 
-function token(){ return localStorage.getItem("fleet_token") || ""; }
+// Credentials stay in this page's memory, never URLs or persistent storage.
+let panelToken = "";
+try { localStorage.removeItem("fleet_token"); } catch(e) {}
+function token(){ return panelToken; }
 async function api(url, opt){
   opt = opt || {};
   opt.headers = Object.assign({}, opt.headers);
@@ -347,7 +350,7 @@ async function api(url, opt){
     const r = await fetch(url, opt);
     if (r.status === 401){
       const t = prompt("This panel is token-guarded. Paste the access token:");
-      if (t){ localStorage.setItem("fleet_token", t.trim()); return api(url, opt); }
+      if (t){ panelToken = t.trim(); return api(url, opt); }
     }
     return await r.json();
   }catch(e){ return {error: String(e)}; }
@@ -4094,7 +4097,7 @@ async function renderSystem(m, nested){
     <p style="font-size:13px"><b>Anywhere access:</b>
       <span class="mono">python ui.py --host 0.0.0.0 --token YOURTOKEN</span> behind
       Tailscale (<span class="mono">setup-remote.sh</span>) → this exact panel, private
-      HTTPS, no open ports. The panel asks for the token once and remembers it.</p>
+      HTTPS, no open ports. The panel asks for the token and keeps it only until this page closes or reloads.</p>
     <p style="font-size:13px"><b>24/7:</b> <span class="mono">setup-vps.sh</span> installs
     systemd units so loops and this panel restart on boot and after crashes; state
     survives kill −9 with at most one step lost.</p>
@@ -5033,23 +5036,49 @@ const EV_KINDS = ["task_start","tool_call","task_end","done_refused",
   "approval_required","prospective_fired","escalated","retry_queued",
   "premise_warning","model_routed","ui_card","health_ritual","stop_condition",
   "gotcha_filed","failure_recurred","skill_status","budget_exceeded"];
-function connectEvents(){
-  if (!window.EventSource || S.es) return;
-  const t = token();
-  let url = '/api/events'; if (t) url += '?token='+encodeURIComponent(t);
-  let es;
-  try { es = new EventSource(url); } catch(e){ return; }
-  S.es = es;
+async function connectEvents(){
+  if (!window.fetch || !window.ReadableStream || S.es) return;
+  const controller = new AbortController();
+  S.es = {close: ()=>controller.abort()};
   S.live = [];
-  const push = (ev)=>{
-    try { const row = JSON.parse(ev.data); S.live.unshift(row);
-      S.live = S.live.slice(0,60); S.streamed = true; paintLive(row);
-    } catch(e){}
-  };
-  EV_KINDS.forEach(k=>es.addEventListener(k, push));
-  es.addEventListener("ready", ()=>{ S.streamOn = true; paintLive(null); });
-  es.onerror = ()=>{ S.streamOn = false; try{es.close();}catch(e){} S.es=null;
-    setTimeout(connectEvents, 5000); };
+  let reader;
+  try {
+    const response = await fetch('/api/events', {
+      headers: token() ? {Authorization: 'Bearer '+token()} : {},
+      signal: controller.signal, cache: 'no-store', credentials: 'omit',
+      redirect: 'error', referrerPolicy: 'no-referrer'});
+    if (!response.ok || !response.body) return;
+    reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let pending = '';
+    while (!controller.signal.aborted) {
+      const {value, done} = await reader.read();
+      if (done) break;
+      pending += decoder.decode(value, {stream:true});
+      if (pending.length > 1000000) throw new Error('event frame too large');
+      let boundary;
+      while ((boundary = pending.indexOf('\n\n')) >= 0) {
+        const frame = pending.slice(0,boundary); pending = pending.slice(boundary+2);
+        let kind = 'message'; const data = [];
+        frame.split('\n').forEach(line=> {
+          if (line.startsWith('event:')) kind = line.slice(6).trim();
+          if (line.startsWith('data:')) data.push(line.slice(5).trimStart());
+        });
+        if (kind === 'ready') { S.streamOn = true; paintLive(null); }
+        else if (EV_KINDS.includes(kind)) {
+          try { const row = JSON.parse(data.join('\n')); S.live.unshift(row);
+            S.live = S.live.slice(0,60); S.streamed = true; paintLive(row);
+          } catch(e) {}
+        }
+      }
+    }
+  } catch(e) { /* REST polling continues while the stream reconnects. */ }
+  finally {
+    controller.abort();
+    if (reader) reader.releaseLock();
+    S.streamOn = false; S.es = null;
+    setTimeout(connectEvents, 5000);
+  }
 }
 function feedRowHtml(r){
   return `<div class="frow"><span class="fdot ${esc(r.severity||"info")}"></span>
@@ -5069,9 +5098,15 @@ function paintLive(row){
   }
 }
 (function boot(){
-  const h = new URLSearchParams(location.hash.slice(1));
-  if (h.get("t")) { localStorage.setItem("fleet_token", h.get("t"));
-    history.replaceState(null,"",location.pathname); }
+  // Discard legacy credential links without importing their bearer token.
+  const legacyHash = new URLSearchParams(location.hash.slice(1));
+  const legacyQuery = new URLSearchParams(location.search);
+  if (legacyHash.has('t') || legacyQuery.has('token')) {
+    legacyQuery.delete('token');
+    const q = legacyQuery.toString();
+    history.replaceState(null, '', location.pathname+(q?'?'+q:'')+
+      (legacyHash.has('t')?'':location.hash));
+  }
   applyHash();               // a pasted deep link opens that exact screen
   render();
   connectEvents();

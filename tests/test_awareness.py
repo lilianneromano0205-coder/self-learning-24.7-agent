@@ -96,11 +96,26 @@ def main():
     for i in range(3):
         skills.record_use(root, ["skills/guess-the-spacing.md"],
                           f"t-loss-{i}", success=False)
+    assert skills.status_of(root, "skills/guess-the-spacing.md") == "candidate", \
+        "co-occurrence losses alone must not quarantine"
+    # quarantine is now an ablation verdict: the same cases run with and
+    # without the skill, and only measured harm earns "do NOT use"
+    os.makedirs(os.path.join(root, "skills"), exist_ok=True)
+    with open(os.path.join(root, "skills", "guess-the-spacing.md"), "w",
+              encoding="utf-8") as f:
+        f.write("KEYWORDS: spacing\nguess the spacing by eye\n")
+    harm_cases = [{"id": f"sp-{i}", "input": {"x": i}, "expected": i * 2}
+                  for i in range(1, 7)]
+    skills.run_ablation(
+        root, "skills/guess-the-spacing.md", harm_cases,
+        lambda case, wd, injected, seed: case["input"]["x"] * (1 if injected else 2),
+        lambda case, out: out == case["expected"], seed=5)
     assert skills.status_of(root, "skills/guess-the-spacing.md") == "quarantined"
     block3 = selfmodel.render(selfmodel.build(root))
     assert "quarantined playbooks (do NOT use): guess-the-spacing" in block3
     print("[evidence] one lucky success is reported as insufficient evidence, "
-          "and a playbook that lost three times is named as do-not-use")
+          "and a playbook whose ablation showed measured harm is named "
+          "do-not-use — losses alone no longer convict")
 
     # --- 4. the constraints of this run
     n = selfmodel.build(root, role="tester",

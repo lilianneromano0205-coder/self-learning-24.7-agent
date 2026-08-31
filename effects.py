@@ -17,6 +17,13 @@ gets the answer it needs, the world is not hit twice. Replays are labelled
 so the agent knows; a caller can force a fresh call when the tool is known
 to be pure (reads) and staleness matters.
 
+Known-completed effects are never automatically repeated; ambiguous effects
+halt for reconciliation instead of being replayed blindly. This does not
+provide external transactional exactly-once delivery: a service may succeed
+before the local result is durably recorded. Explicit --fresh is an owner/
+caller request to repeat a completed call; it never bypasses an unresolved
+intent. Server errors also need service-specific reconciliation.
+
 The ledger is append-only JSONL under logs/effects.jsonl — an audit trail
 of every external effect the agent ever caused, by task, by tool.
 """
@@ -81,7 +88,7 @@ def begin(root, key, task_id, server, tool, arguments):
 
     `call -> record` left a window: a crash between the two meant the effect
     had happened and nothing knew, so the next run repeated it. That made the
-    guarantee at-least-once while the docs said exactly-once. An intent line
+    behavior vulnerable to duplicate delivery. An intent line
     written first closes it — after a crash the ledger still says "this call
     was started and never finished", which is the truth a retry needs.
     """

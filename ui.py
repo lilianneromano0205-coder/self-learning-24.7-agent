@@ -815,6 +815,12 @@ class Handler(BaseHTTPRequestHandler):
     home = HOME
     token = None  # when set, every /api request must carry it
 
+    def end_headers(self):
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        super().end_headers()
+
     def log_message(self, *a):  # quiet
         pass
 
@@ -870,8 +876,6 @@ class Handler(BaseHTTPRequestHandler):
         header = self.headers.get("Authorization", "")
         if header.startswith("Bearer "):
             presented = header[7:]
-        elif query.get("token", [""])[0]:
-            presented = query.get("token", [""])[0]
         self.actor, member = self._resolve_actor(presented)
         if not self.token:
             return True
@@ -2530,14 +2534,14 @@ def main():
         # cannot forget the mode
         import credentials as _cred
         _cred.write_secret(tok_path, token + "\n")
-        print(f"access token generated (saved to {tok_path}):\n  {token}\n")
+        print(f"access token saved to owner-only file: {tok_path}")
         if shared and not exposed:
             print("this fleet belongs to an organization, so the panel needs "
                   "a token to tell members apart.")
             print("Give each member their own:  python org.py token <email> "
                   "--as you@example.com")
-            print("Keep the one above to yourself — it resolves to the owner "
-                  "and grants everything.")
+            print("The token in ui-token.txt is yours alone — it resolves "
+                  "to the owner and grants everything.")
             print()
     Handler.token = token
     srv = ThreadingHTTPServer((args.host, args.port), Handler)

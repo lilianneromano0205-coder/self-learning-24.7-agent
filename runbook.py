@@ -109,6 +109,8 @@ def _dir(root):
 
 
 def path(root, name):
+    if not _slug_ok(name):
+        raise RunbookError("runbook name must be a contained short slug")
     return os.path.join(_dir(root), f"{name}.json")
 
 
@@ -176,6 +178,9 @@ def validate(rb):
         out.append(f"{len(steps)} steps; more than {MAX_STEPS} means this is "
                    f"several procedures wearing one name")
     else:
+        if rb.get("procedure_version"):
+            import procedure
+            return out + procedure.validate(rb)
         for i, st in enumerate(steps, 1):
             if not isinstance(st, dict):
                 out.append(f"step {i} is not an object")
@@ -230,10 +235,27 @@ def status(root, name):
     A field inside the runbook file itself is ignored: the author does not
     get a vote on whether the author is trusted."""
     rec = _trust(root).get(name) or {}
-    return rec.get("status", "candidate")
+    st = rec.get("status", "candidate")
+    if st == "candidate":
+        return st
+    # THE BINDING IS MANDATORY, NOT OPT-IN. A record that claims trust while
+    # carrying no content_hash cannot say WHICH bytes earned it, so the file
+    # may have been rewritten under it — and an unbound entry is exactly what
+    # a ledger written before the binding existed looks like. Grandfathering
+    # those would leave every pre-existing "proven" runbook forgeable by
+    # anything that can write the file. An unbound claim is a candidate.
+    if not rec.get("content_hash"):
+        return "candidate"
+    try:
+        import procedure
+        if procedure.digest(load(root, name)) != rec["content_hash"]:
+            return "candidate"
+    except (OSError, ValueError, RunbookError):
+        return "candidate"
+    return st
 
 
-def record(root, name, won, why="", accepted=False):
+def record(root, name, won, why="", accepted=False, evidence=None):
     """The HARNESS records an outcome. Nothing else may — trust.json is
     CONTROL-zoned against the worker's file tools, and this function is the
     single writer the platform uses.
@@ -254,26 +276,49 @@ def record(root, name, won, why="", accepted=False):
     nobody is working."""
     import locks
     with locks.holding(os.path.join(root, TRUST), timeout=10.0, stale=8.0):
-        return _record_locked(root, name, won, why, accepted)
+        return _record_locked(root, name, won, why, accepted, evidence)
 
 
-def _record_locked(root, name, won, why="", accepted=False):
+def _record_locked(root, name, won, why="", accepted=False, evidence=None):
+    import procedure
     t = _trust(root)
+    rb = load(root, name)
+    content_hash = procedure.digest(rb)
+    previous = t.get(name, {})
+    if previous.get("content_hash") and previous["content_hash"] != content_hash:
+        t.pop(name, None)
     rec = t.setdefault(name, {"status": "candidate", "wins": 0,
                               "accepted_wins": 0, "losses": 0,
                               "streak_losses": 0, "history": []})
     rec.setdefault("accepted_wins", 0)     # ledgers written before this field
+    rec["content_hash"] = content_hash
+    receipt = procedure.accepted_evidence(root, name, evidence) if evidence else None
+    if rb.get("procedure_version"):
+        accepted = bool(accepted and receipt)
+    rec.setdefault("evidence_ids", [])
+    if receipt and receipt["id"] in rec["evidence_ids"]:
+        return rec["status"]
+    rec.setdefault("observations", [])
     if won:
         rec["wins"] += 1
         rec["streak_losses"] = 0
         if accepted:
             rec["accepted_wins"] += 1
+            if receipt:
+                rec["evidence_ids"].append(receipt["id"])
+                rec["observations"].append({key: receipt[key] for key in (
+                    "task_id", "input_hash", "environment", "family", "parameter_hashes", "edge")})
+        observations = rec["observations"]
+        diverse = (len({o["task_id"] for o in observations}) >= PROMOTE_WINS and
+                   len({o["input_hash"] for o in observations}) >= PROMOTE_WINS and
+                   any(o["edge"] for o in observations))
         # PROMOTION READS accepted_wins, not wins. A procedure whose steps
         # verify while the caller's graders reject its output is a procedure
         # that reliably does the wrong thing, and counting that as evidence
         # is how "proven" stops meaning anything.
         if rec["status"] == "candidate" and \
-                rec["accepted_wins"] >= PROMOTE_WINS:
+                rec["accepted_wins"] >= PROMOTE_WINS and \
+                (not rb.get("procedure_version") or diverse):
             rec["status"] = "proven"
     else:
         rec["losses"] += 1
@@ -282,6 +327,19 @@ def _record_locked(root, name, won, why="", accepted=False):
             # a procedure that keeps failing is not tried a third time on
             # its own authority — same shape as goal oscillation
             rec["status"] = "quarantined"
+    observations = rec["observations"]
+    rec["envelope"] = {
+        "scope": "observed-inputs-and-environments" if observations else "exact-instance-only",
+        "distinct_tasks": len({o["task_id"] for o in observations}),
+        "distinct_inputs": len({o["input_hash"] for o in observations}),
+        "distinct_environments": len({o["environment"] for o in observations}),
+        "families": sorted({o["family"] for o in observations}),
+        "generalization_claim": False,
+        "root_hash": procedure.digest(os.path.realpath(root)),
+        "legacy_acceptance": not bool(observations)}
+    rec["reliability"] = {"accepted": rec["accepted_wins"],
+                          "attempts": rec["wins"] + rec["losses"],
+                          "evidence": "observed frequency, not a generalization guarantee"}
     rec["history"] = (rec.get("history") or [])[-19:] + [{
         "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "won": bool(won), "accepted": bool(won and accepted),
@@ -353,7 +411,7 @@ def match(root, goal_text, allow_candidates=False):
     return hits
 
 
-def applicable(root, name, cfg=None):
+def applicable(root, name, cfg=None, inputs=None, authority=None):
     """-> {"ok", "blocked_by": [...]}. Runs the runbook's `when.requires`
     observe-probes through the Execution Authority (as gates, like every
     verify). Matching says "this procedure is ABOUT this goal"; applicable
@@ -365,6 +423,18 @@ def applicable(root, name, cfg=None):
         rb = load(root, name)
     except (RunbookError, OSError, ValueError) as e:
         return {"ok": False, "blocked_by": [f"unloadable: {e}"[:160]]}
+    if rb.get("procedure_version"):
+        import operators
+        try:
+            operators.check_inputs(root, rb["operator"]["inputs"], inputs or {})
+            op = operators.bind(rb["operator"], inputs or {})
+            granted = set(["workspace-write"] if authority is None else authority)
+            blocked = ["required authority missing"] if not set(op["authority"]) <= granted else []
+            blocked.extend(str(item) for item in op["preconditions"] + op["invariants"]
+                           if not operators.observe(root, item))
+            return {"ok": not blocked, "blocked_by": blocked}
+        except Exception as exc:
+            return {"ok": False, "blocked_by": [str(exc)]}
     req = (rb.get("when") or {}).get("requires") or []
     cfg = cfg or _cfg(root)
     blocked = []
@@ -394,7 +464,7 @@ def _cfg(root):
 
 
 def run(root, name, allow_candidate=False, cfg=None, record_outcome=True,
-        accept=None, _stack=None):
+        accept=None, _stack=None, inputs=None, authority=None):
     """Execute one runbook, step by step, verifying each. ZERO model calls.
 
     `accept` is the CALLER'S independent acceptance test: a zero-argument
@@ -442,6 +512,23 @@ def run(root, name, allow_candidate=False, cfg=None, record_outcome=True,
                        f"caller's own acceptance test passed afterwards); "
                        f"pass allow_candidate to run it supervised"}
     cfg = cfg or _cfg(root)
+    if rb.get("procedure_version"):
+        import procedure
+        result = procedure.execute(root, rb, inputs or {}, authority=authority)
+        # Caller callbacks can report acceptance, but only sealed evaluation
+        # receipts earn generalized procedural trust.
+        if result["ok"] and accept is not None:
+            try:
+                result["accepted"] = bool(accept())
+            except Exception:
+                result["accepted"] = False
+        if record_outcome:
+            # the acceptance verdict travels — dropping it here silently
+            # zeroed accepted_wins for every compiled procedure, so the
+            # promotion gate could never be reached from this path
+            record(root, name, result["ok"], why=result["why"],
+                   accepted=bool(result.get("accepted")))
+        return result
     done, why, stopped = [], "", 0
     ok = True
     # A CHILD RUN IN PLACE IS FILED WITH THE PARENT'S VERDICT. Its outcome

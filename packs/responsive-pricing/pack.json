@@ -1,6 +1,6 @@
 {
   "name": "responsive-pricing",
-  "version": 1,
+  "version": 2,
   "domain": "accessible responsive pricing components",
   "competencies": {
     "semantic-structure": {
@@ -24,5 +24,7 @@
     "practice_pass": 0.75,
     "transfer_pass": 0.7,
     "note": "the bar is the validators' MECHANICAL FLOOR; excellence beyond the floor is not claimed by a MASTERED verdict"
-  }
+  },
+  "author": "owner",
+  "split_protocol": "independent-four-set-v1"
 }
