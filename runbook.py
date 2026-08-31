@@ -275,6 +275,13 @@ def record(root, name, won, why="", accepted=False, evidence=None):
     exactly the concurrency the swarm creates is a trust ledger only when
     nobody is working."""
     import locks
+    # The lock lives INSIDE runbooks/, and _record_locked is what would have
+    # created that directory — so recording an outcome before any runbook
+    # file existed died with FileNotFoundError on the lockfile itself.
+    # Observed intermittently, because whether the directory exists depends
+    # on what ran earlier: the failure moves between tests and looks like a
+    # race. Make the ledger's home before taking its lock.
+    os.makedirs(os.path.join(root, DIR), exist_ok=True)
     with locks.holding(os.path.join(root, TRUST), timeout=10.0, stale=8.0):
         return _record_locked(root, name, won, why, accepted, evidence)
 

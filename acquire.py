@@ -119,7 +119,26 @@ def _contained(base, target):
             if stat.S_ISLNK(info.st_mode) or getattr(info, 'st_file_attributes', 0) & 1024:
                 raise Refused('links and junctions are forbidden in acquisition paths')
         current = os.path.dirname(current)
-    if os.path.realpath(base) != base or os.path.commonpath([os.path.realpath(base), os.path.realpath(target)]) != os.path.realpath(base):
+    # THE BASE MUST NOT BE A REDIRECTION — but "not canonically spelled" is
+    # not a redirection. This used to demand `realpath(base) == base`, which
+    # refuses any root whose path contains a WINDOWS 8.3 SHORT NAME: realpath
+    # expands `RUNNER~1` to `runneradmin`, the strings differ, and a perfectly
+    # contained arena was reported as escaping its authority root. Every
+    # GitHub Windows runner has such a TEMP, and so does any profile name
+    # longer than eight characters (`Administrator` -> `ADMINI~1`), so
+    # acquisition could not run there at all. The repository has met this
+    # class before — a tilde mid-path is not a metacharacter, it is every
+    # Windows short name.
+    #
+    # What actually matters is asked directly: base itself must not be a link
+    # or junction, and the RESOLVED target must sit under the RESOLVED base.
+    # Intermediate components are already walked above.
+    if os.path.lexists(base):
+        info = os.lstat(base)
+        if stat.S_ISLNK(info.st_mode) or getattr(info, 'st_file_attributes', 0) & 1024:
+            raise Refused('the acquisition authority root is itself a link')
+    real_base, real_target = os.path.realpath(base), os.path.realpath(target)
+    if os.path.commonpath([real_base, real_target]) != real_base or real_target == real_base:
         raise Refused('resolved acquisition path escapes its authority root')
     return target
 

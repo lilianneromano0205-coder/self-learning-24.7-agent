@@ -81,13 +81,21 @@ def check_execution_catalogue():
     # sandbox and skipped the one flag nobody implemented — an enumeration
     # with a hole is how a declared control goes missing in plain sight.
     import tempfile
+    # This check is about the CATALOGUE's declared controls — policy,
+    # approval, argument type — not about which backend runs the command. It
+    # passed cfg={}, which now means the shipped default (docker), so on any
+    # machine without usable Linux containers "ordinary work must still flow"
+    # failed with rc 127 and the check reported a control problem that was
+    # really an absent daemon. It declares the trusted developer host, like
+    # every other fixture that needs to actually run something.
+    HOST = {"agent": {"sandbox": "host", "allow_unsafe_host": True}}
     for name, o in ops.items():
         if not o.get("approval"):
             continue
         probe = tempfile.mkdtemp(prefix="approval-inv-")
         consequential = "git push origin main"
         try:
-            execution.run(name, consequential, probe, cfg={},
+            execution.run(name, consequential, probe, cfg=HOST,
                           role="practitioner", timeout=5)
             raise AssertionError(
                 f"{name} declares approval:True and ran a consequential "
@@ -97,7 +105,7 @@ def check_execution_catalogue():
             assert "APPROVAL REQUIRED" in str(e), (
                 f"{name} refused {consequential!r} for the wrong reason: {e}")
         # and ordinary work must still flow, or the control is a brake
-        rc, _o, _e = execution.run(name, "echo ok", probe, cfg={},
+        rc, _o, _e = execution.run(name, "echo ok", probe, cfg=HOST,
                                    role="practitioner", timeout=30)
         assert rc == 0, f"{name} blocked ordinary work (rc={rc})"
 

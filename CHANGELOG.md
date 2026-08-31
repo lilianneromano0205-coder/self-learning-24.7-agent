@@ -146,6 +146,42 @@ skill and counting losses quarantines it. Neither is true any more, and neither
 should be: both verdicts are earned by a matched held-out ablation, and the
 tests now run one.
 
+### What the first CI run found, on machines this code had never touched
+
+The suite was green three times on the development machine and on all three
+Ubuntu runners, and failed on all three **Windows** runners. Two causes, both
+real:
+
+- **Acquisition was impossible on any Windows path with an 8.3 short name.**
+  `acquire._contained` demanded `realpath(base) == base`, which is false when
+  the root is addressed as `RUNNER~1` instead of `runneradmin` — realpath
+  expands the alias, the strings differ, and a properly contained arena was
+  refused as "escaping its authority root". Every GitHub Windows runner has
+  such a TEMP, and so does any profile name longer than eight characters
+  (`Administrator` → `ADMINI~1`). The check now asks what it actually means:
+  the base must not itself be a link or junction, and the RESOLVED target
+  must sit under the RESOLVED base. Spelling is not redirection. Reproduced
+  locally through `GetShortPathNameW`, and `tests/test_acquisition_arena.py`
+  now pins it along with the four escapes that must keep failing — it fails
+  on the pre-fix code with the exact CI error.
+
+- **Five fixtures inherited the new docker default on a machine that cannot
+  run Linux containers.** Docker Desktop in Windows-container mode answers
+  `docker info` perfectly and rejects every container this platform launches,
+  so `execution.run` returned 127 and tests reported a control problem that
+  was really an absent daemon. Each fixture now declares the trusted
+  developer host it always meant to use, as `tests/common.py` does.
+
+Also fixed while reproducing: `runbook.record` took its lock **inside**
+`runbooks/`, which `_record_locked` was what created — so recording an
+outcome before any runbook existed died on the lockfile itself, appearing as
+an intermittent failure that moved between tests.
+
+The lesson is the one this repository keeps re-learning: the development
+machine agrees with you. `AGENT_TEST_TMP` pointed at an 8.3 short name and
+`DOCKER_HOST` pointed at nothing now reproduce both classes locally, in
+minutes rather than a CI round trip.
+
 ### Stated plainly, because a reviewer will ask
 
 `tests/common.seal_variant_protocol` sets `MIN_REGRESSION_DELAY = 0` and

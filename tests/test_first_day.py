@@ -267,8 +267,18 @@ def _point_at(root, base_url, key_env):
                                    for k, x in v.items()) + "}"
         return json.dumps(str(v))
 
+    agent_table = dict(cfg.get("agent") or {})
+    # The fixture's subject is bootstrap -> key -> first task, not the
+    # execution backend. The shipped default is `docker`, which is right for
+    # a real install and unavailable on any machine without usable Linux
+    # containers (every GitHub Windows runner) — there the first task fails
+    # with rc 127 and this file reports "the first real task did not
+    # complete", which names the wrong thing. It declares the trusted
+    # developer host, as every other keyless fixture here does.
+    agent_table["sandbox"] = "host"
+    agent_table["allow_unsafe_host"] = True
     lines = ["[agent]"]
-    for k, v in (cfg.get("agent") or {}).items():
+    for k, v in agent_table.items():
         lines.append(f"{k} = {emit(v)}")
     lines += ["", "[providers.deepseek]", f'base_url = {emit(base_url)}',
               f'api_key_env = {emit(key_env)}', ""]

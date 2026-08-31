@@ -95,5 +95,73 @@ class ArenaTests(unittest.TestCase):
             self.assertTrue((root / 'capabilities' / 'arenaexample' / 'arenaexample' / '__init__.py').exists())
             self.assertFalse(arena.exists())
 
+
+class ContainmentSpellingTests(unittest.TestCase):
+    """A path that is merely spelled differently is not an escape.
+
+    `_contained` demanded `realpath(base) == base`, which is false for any
+    root holding a WINDOWS 8.3 SHORT NAME — realpath expands `RUNNER~1` to
+    `runneradmin`. Every acquisition on a GitHub Windows runner was refused
+    as "escaping its authority root", and so was every acquisition for a user
+    whose profile name exceeds eight characters. The four real escapes below
+    must keep failing, which is what makes the first assertion safe.
+    """
+
+    def _short_name_base(self, parent):
+        """A directory addressed by its 8.3 alias, or None if unavailable."""
+        if os.name != 'nt':
+            return None
+        import ctypes
+        long_dir = os.path.join(parent, 'acquirecontainmentprobe')
+        os.makedirs(long_dir, exist_ok=True)
+        buf = ctypes.create_unicode_buffer(1024)
+        if not ctypes.windll.kernel32.GetShortPathNameW(long_dir, buf, 1024):
+            return None
+        short = buf.value
+        return short if os.path.abspath(short) != os.path.abspath(long_dir) else None
+
+    def test_a_short_name_root_is_contained_not_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            base = self._short_name_base(d)
+            if base is None:
+                self.skipTest('no 8.3 short name available here (not Windows, '
+                              'or 8dot3 name creation is disabled on this '
+                              'volume) — run on Windows to exercise it')
+            sub = os.path.join(base, 'arena')
+            os.makedirs(sub, exist_ok=True)
+            self.assertNotEqual(os.path.realpath(base), os.path.abspath(base),
+                                'fixture is not exercising a spelling difference')
+            self.assertEqual(acquire._contained(base, sub), sub)
+
+    def test_every_real_escape_is_still_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            base = os.path.join(d, 'base')
+            os.makedirs(os.path.join(base, 'arena'))
+            for label, target in (
+                    ('a sibling outside the root', os.path.join(d, 'elsewhere')),
+                    ('the root itself', base),
+                    ('a parent traversal', os.path.join(base, '..', 'x'))):
+                with self.assertRaises(acquire.Refused, msg=label):
+                    acquire._contained(base, target)
+
+    def test_a_linked_root_or_component_is_still_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            real = os.path.join(d, 'real')
+            os.makedirs(os.path.join(real, 'arena'))
+            link = os.path.join(d, 'linked-root')
+            try:
+                if os.name == 'nt':
+                    import subprocess
+                    if subprocess.run(['cmd', '/c', 'mklink', '/J', link, real],
+                                      capture_output=True).returncode != 0:
+                        self.skipTest('cannot create a junction here')
+                else:
+                    os.symlink(real, link)
+            except (OSError, NotImplementedError):
+                self.skipTest('cannot create a link here')
+            with self.assertRaises(acquire.Refused):
+                acquire._contained(link, os.path.join(link, 'arena'))
+
+
 if __name__ == '__main__':
     unittest.main()
