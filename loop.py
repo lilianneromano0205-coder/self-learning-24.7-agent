@@ -2939,12 +2939,13 @@ class Agent:
             procedure.compile(self.root, name,
                               [r["task_id"] for r in rows], [family])
             self.log.info(json.dumps({
-                "event": "procedure_compiled", "runbook": name,
-                "family": family, "trajectories": len(rows)}))
+                "event": "procedure_compiled", "task": task["id"],
+                "runbook": name, "family": family,
+                "trajectories": len(rows)}))
         except Exception as e:
             self.log.info(json.dumps({
-                "event": "procedure_compile_refused", "family": family,
-                "why": str(e)[:200]}))
+                "event": "procedure_compile_refused", "task": task["id"],
+                "family": family, "why": str(e)[:200]}))
             return
         try:
             suites = procedure.sealed_suites(self.root, family)
@@ -2954,13 +2955,15 @@ class Agent:
             try:
                 verdict = procedure.evaluate(self.root, name, suite_id)
                 self.log.info(json.dumps({
-                    "event": "procedure_evaluated", "runbook": name,
-                    "suite": suite_id, "accepted": bool(verdict.get("accepted")),
+                    "event": "procedure_evaluated", "task": task["id"],
+                    "runbook": name, "suite": suite_id,
+                    "accepted": bool(verdict.get("accepted")),
                     "status": verdict.get("status")}))
             except Exception as e:
                 self.log.info(json.dumps({
-                    "event": "procedure_evaluation_refused", "runbook": name,
-                    "suite": suite_id, "why": str(e)[:200]}))
+                    "event": "procedure_evaluation_refused", "task": task["id"],
+                    "runbook": name, "suite": suite_id,
+                    "why": str(e)[:200]}))
 
     def _file_memory(self, task):
         """Every finished task files institutional memory: a structured,

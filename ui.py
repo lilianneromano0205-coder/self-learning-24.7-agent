@@ -645,6 +645,24 @@ FEED_EVENTS = {
     "stop_condition":   ("gate",  "warn", "stopped on the task's own stop condition"),
     "health_ritual":    ("run",   "info", "harness health check at loop start"),
     "tool_results_cleared": ("link", "info", "cleared old tool output to a pointer"),
+    # THE PROCEDURAL LOOP. Without these rows the panel drops every event the
+    # loop emits while turning verified work into a reusable procedure — the
+    # manual tells the owner to watch for `procedure_route`, and the pulse
+    # would have shown nothing, forever, with no error. An allowlist that
+    # silently discards the newest half of the system is the same defect this
+    # release was written to fix, one layer out.
+    "trajectory_opened":  ("skill", "info", "opened a judged trajectory — this work may become a procedure"),
+    "trajectory_closed":  ("skill", "info", "closed a judged trajectory; the sealed judge decided"),
+    "trajectory_refused": ("gap",   "warn", "could not open a judged trajectory"),
+    "trajectory_close_failed": ("gap", "warn", "a judged trajectory could not be closed"),
+    "procedure_compiled": ("skill", "ok",   "compiled a procedure from repeated verified work"),
+    "procedure_compile_refused": ("gap", "info", "declined to induce a procedure — the evidence was not independent enough"),
+    "procedure_evaluated": ("exam", "ok",   "ran a compiled procedure against sealed fresh instances"),
+    "procedure_evaluation_refused": ("gap", "warn", "a sealed evaluation refused to run"),
+    "procedure_route":    ("run",   "ok",   "ran a PROVEN procedure — no model call"),
+    "procedure_route_rejected": ("gate", "warn", "a procedure ran but the task's own gate refused the result"),
+    "procedure_route_skipped":  ("link", "info", "a matching procedure did not fit this task's inputs"),
+    "scheduler_record_failed":  ("gap", "warn", "a routing outcome could not be recorded"),
 }
 
 

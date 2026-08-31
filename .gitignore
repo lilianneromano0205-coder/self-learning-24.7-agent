@@ -81,3 +81,6 @@ docs/implementation-receipts/
 # .mutbak in the tree, and `git add -A` would publish it — or worse, publish
 # the file it was taken from while still mutated. Never versioned.
 *.mutbak
+
+# proof.py --refresh transcript: a run artifact, like the suite logs
+proof-refresh.log

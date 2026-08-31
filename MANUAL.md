@@ -159,7 +159,7 @@ one is still routed **and** still reachable from something a person can click.
   use each), **Tools**, **Knowledge** (the fleet map, failures, competence,
   retired agents) and **Skills**.
 - **Proof** — *Work proof* (every mission's criteria and their evidence) and
-  *Platform proof* (fifteen capabilities, each with its level 0–5, the reason,
+  *Platform proof* (19 capabilities, each with its level 0–5, the reason,
   the invariants, the code hash the evidence is bound to, and the exact command
   that reproduces it). **No endpoint can set a level.**
 - **Admin** — *Health* (doctor, harness manifest, pulses, tool error rates,
@@ -302,7 +302,8 @@ reflect_after = ["practitioner"]
 exam_threshold = 90
 reexam_days = [7, 30, 90]
 retain_finished_tasks = 150
-sandbox = "host"                # host | docker | e2b | daytona
+sandbox = "docker"              # docker | host | e2b | daytona
+allow_unsafe_host = false       # `host` is REFUSED unless this is true
 sandbox_network = false         # docker: default-deny egress
 sandbox_image = "python:3.12-slim"
 
@@ -402,6 +403,15 @@ Everything under `/api` honours `--token` as an `Authorization: Bearer` header. 
 `budget_exceeded` `task_cost_ceiling` `provider_failure` `state_corrupt`
 `task_unblocked` `agent_start`.
 
+The procedural loop — verified work becoming a reusable procedure, and
+that procedure later running instead of a model (§11b):
+
+`trajectory_opened` `trajectory_closed` `trajectory_refused`
+`trajectory_close_failed` `procedure_compiled` `procedure_compile_refused`
+`procedure_evaluated` `procedure_evaluation_refused` `procedure_route`
+`procedure_route_rejected` `procedure_route_skipped`
+`scheduler_record_failed`.
+
 ---
 
 ## 11. Skills: the open format and its trust tiers
@@ -425,10 +435,15 @@ Three provenance tiers gate what a skill may do:
 | `owner` | imported and explicitly trusted by you | full, incl. bundled scripts |
 | `community` | imported from a third party | injected with a warning banner; **bundled scripts refused** until you promote it |
 
-Independently, the skill **graph** grades every playbook on evidence:
-candidate → proven (3 distinct wins, ≥1 gate-verified) → quarantined (3
-losses and more losses than wins). Provenance is where it came from; status
-is what it has earned (`tests/test_skillmd.py`).
+Independently, the skill **graph** grades every playbook on evidence, and
+the bar is CAUSAL: a skill becomes **proven** only when a matched held-out
+ablation — the same cases run with and without it, scored by an independent
+grader — shows a positive effect, and **quarantined** when one shows harm.
+Counting wins promotes nothing, because a skill being loaded when a task
+succeeded is not evidence that it caused the success. Run one with
+`skills.run_ablation`; until then a skill stays **candidate** however often
+it was loaded. Provenance is where it came from; status is what it has
+earned (`tests/test_skill_attribution.py`).
 
 ---
 

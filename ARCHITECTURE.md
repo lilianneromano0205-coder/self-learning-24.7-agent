@@ -2,7 +2,7 @@
 
 **What this is.** A file-backed, stdlib-only platform for building expert AI
 agents that work continuously, prove what they did, and remember what they
-learned. 85 Python modules, 117 acceptance tests, one HTML control panel, no
+learned. 104 Python modules, 136 acceptance tests, one HTML control panel, no
 database, no framework, no build step. Python 3.11+ and your own API keys.
 
 **Who this document is for.** Somebody who has just been handed the
@@ -340,8 +340,12 @@ The boundary is the feature.
 ```mermaid
 flowchart TD
     Q["task queued in state.json"] --> C{"claim_task<br/>under a cross-process lock"}
-    C -->|"atomic queued→running"| CTX["context.compile()"]
+    C -->|"atomic queued→running"| PROC{"a PROVEN compiled procedure<br/>matches, and its typed inputs fit?"}
     C -->|"already claimed"| SKIP["another loop has it"]
+    PROC -->|yes| DET["execute it deterministically —<br/>ZERO model calls; the task's own<br/>gate still decides acceptance"]
+    PROC -->|"no, or the gate refused it"| CTX["context.compile()"]
+    DET -->|gate passed| DONE2["done"]
+    DET -->|gate refused| CTX
 
     CTX --> M1["per-source token budgets<br/>mission · self · gotchas · skills ·<br/>commons · course · premise"]
     M1 --> M2["manifest written beside the transcript:<br/>what was included, what was cut, why"]
@@ -643,7 +647,7 @@ last one is the only one produced on a computer this project does not own.
 
 ### 10.1 The suite passes — the weakest claim
 
-112 acceptance tests, green on Windows under Python 3.14 and on Linux under
+136 acceptance tests, green on Windows and Linux under
 Python 3.11 and 3.13. Each test prints a sentence describing what it
 observed, and those sentences are the report — `EVIDENCE.md` quotes them
 verbatim rather than summarising.
@@ -883,8 +887,38 @@ practice → sealed exam → diagnose → verdict → distill → retest)
 
 **Control plane** — `ui.py` `ui.html` `chief.py` `uicards.py`
 
-Full detail for each is in [REFERENCE.md](REFERENCE.md) — 1,800 lines
-covering every module, every setting, every endpoint and every event name.
+**Procedural learning** — `procedure.py` (judged trajectory capture,
+cross-trajectory induction, sealed evaluation) `operators.py` (typed
+predicates, binding, composition search) `capability_graph.py` (the joined
+view of what an expert can actually do) `runbook.py` (trust and deterministic
+execution) `scheduler.py` (contextual expected-utility routing, shadow by
+default) `verification.py` (the layered verifier, L0 supreme)
+`calibration.py` (reliability curves; no production caller yet, and it says
+so) `retrieval.py` (hybrid recall) `evaluation_policy.py` (module ablation)
+`memory_policy.py` `memory_benchmarks.py` `adaptation.py`
+`trainer_integration.py` `learning_authority.py` (sealed learning records)
+`evaluation_workspace.py` `evaluation_corpus.py` `discovery_web.py`
+`research_plan.py`
+
+### Work that has been done before does not get done again
+
+The branch at the top of that chart is the economic claim of the whole
+platform. When a family of work has been done and independently judged more
+than once, `procedure.py` induces an executable procedure from those
+trajectories — separating what stayed constant from what varied, inferring
+the typed inputs, the preconditions and the effects — and that procedure
+earns PROVEN only by passing an owner-sealed suite of instances it has never
+seen. From then on a matching task runs it directly: no model call, and the
+task's own gate still decides whether the result is acceptable, so a
+procedure is never the judge of its own replay. `metrics.py` reports the
+consequence as **Amortization**: earlier versus later model steps per
+verified success, by family. The operator-facing walkthrough is
+[MANUAL.md §11b](MANUAL.md).
+
+Full detail for most is in [REFERENCE.md](REFERENCE.md), which covers every
+module, setting, endpoint and event name it has caught up with — the
+procedural-learning group above is documented in
+[MANUAL.md §11b](MANUAL.md) and in each module's own docstring.
 
 ---
 
@@ -909,7 +943,7 @@ python loop.py run --drain --root experts/<slug>    # work the queue
 
 ```bash
 python demo.py            # the whole platform, keyless, in one run
-python tests/run_all.py   # 112 acceptance tests
+python tests/run_all.py   # 136 acceptance tests
 python proof.py           # what is proven, and to what level
 python evidence.py        # why we believe it, and where belief runs out
 python metrics.py         # is it working — and the numbers we refuse to invent

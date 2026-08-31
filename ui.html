@@ -1434,17 +1434,20 @@ function renderGuide(m){
     from anywhere import directly (Overview → Skills → <b>import a SKILL.md</b>). An
     imported skill arrives as <b>community</b>: injected with a warning and its bundled
     scripts refused until you press <b>trust</b>. What it has <i>earned</i> is separate:
-    3 distinct gate-verified wins makes it PROVEN.</p>
+    a matched held-out ablation — the same cases run with and without it, scored by an independent grader — is what makes it PROVEN. Wins alone never do.</p>
     <p>When a task worked, open it and press <b>save as routine</b>: the steps that
     actually worked become a skill, and a schedule (or an event) re-runs them —
     carrying the same definition of done. Show it once; it keeps happening.</p>
   </div></div>
 
   <div class="card"><h3>10 · Where commands run</h3><div class="body">
-    <p><span class="mono">[agent] sandbox = "host"</span> is this machine, gated by
-    policy. Set <span class="mono">"docker"</span> and every command runs in a throwaway
-    container with <b>no network</b>; <span class="mono">"e2b"</span> or
-    <span class="mono">"daytona"</span> run it in a hosted microVM behind your key.</p>
+    <p><span class="mono">[agent] sandbox = "docker"</span> is the default: every
+    command runs in a throwaway container with <b>no network</b>.
+    <span class="mono">"e2b"</span> or <span class="mono">"daytona"</span> run it in a
+    hosted microVM behind your key. <span class="mono">"host"</span> is this machine
+    and is <b>refused</b> unless you also set
+    <span class="mono">allow_unsafe_host = true</span> — it is not isolation, and a
+    detached child outlives the check that would have caught it.</p>
     <p>If the chosen backend is not available the command is <b>refused</b> and says why —
     it never quietly falls back to your laptop.</p>
   </div></div>
@@ -2309,8 +2312,8 @@ async function loadSkills(){
         onclick="trustSkill('${esc(x.skill)}')">trust</button>`:""}`).join(" ");
   const n=(sgr.proven||[]).length+(sgr.candidate||[]).length+(sgr.quarantined||[]).length;
   el.innerHTML = n? `<div class="row">${row(sgr.proven,"ok","PROVEN")}${row(sgr.candidate,"queued","candidate")}${row(sgr.quarantined,"bad","quarantined")}</div>
-    <p class="muted" style="font-size:11.5px;margin:8px 0 0">PROVEN = 3 distinct gate-verified wins.
-    Quarantined = failed more than it worked (kept, never auto-loaded). Written by the Reflector, graded by outcomes.
+    <p class="muted" style="font-size:11.5px;margin:8px 0 0">PROVEN = a matched held-out ablation showed a positive effect.
+    Quarantined = an ablation showed harm (kept, never auto-loaded). Counting wins promotes nothing: loaded-during-success is not caused-success.
     <b>community</b> skills come from outside: injected with a warning, scripts disabled until you press trust.</p>
     <div class="row" style="margin-top:8px"><button class="btn sm" onclick="dlgSkillImport()">＋ import a SKILL.md</button></div>`
    : `<span class="muted">no skills yet — they are written after real work and earn their status</span>
@@ -3027,7 +3030,8 @@ async function doTask(){
 const SHORTCUTS = [["courses","📚 notes"],["skills","🧩 skills"],
   ["contexts","💬 transcripts"],["contexts/archive","🗄 archived turns"],
   ["workspace","✏ drafts"],["out","📦 deliverables"],["logs","📜 logs"],
-  ["briefing","⚡ briefing"],["inbox","📥 inbox"]];
+  ["briefing","⚡ briefing"],["inbox","📥 inbox"],
+  ["runbooks","⚙ procedures"]];
 /* One file tree, two homes: the Skills tab and §5's Advanced -> Raw files.
    Two copies of this markup would drift the first time a class changed, and
    the second copy is exactly the one nobody would remember to fix. */
@@ -3062,6 +3066,10 @@ async function renderMind(b){
     <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:12px">
       compiled per task, budgeted per source</span></h3>
   <div class="body" id="ctxwins"><span class="muted">loading…</span></div></div>
+  <div class="card"><h3>Procedures — work it can now do without a model
+    <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:12px">
+      trust is earned on sealed fresh instances, never on repetition</span></h3>
+  <div class="body" id="procBody"><span class="muted">loading…</span></div></div>
   <div class="card"><h3>Mind — everything it knows and everything it did
     <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:12px">
       read-only; agents own their files</span></h3>
@@ -3076,7 +3084,7 @@ async function renderMind(b){
         transcripts are complete conversations; nothing here is ever silently deleted</div></div>
     </div>
   </div></div>`;
-  loadCtxWindows(); loadSelf(); loadKnowledge();
+  loadCtxWindows(); loadSelf(); loadKnowledge(); loadProcedures();
   if (S.mindPath) openFile(S.mindPath);
 }
 async function loadSelf(){
@@ -3101,6 +3109,42 @@ async function loadSelf(){
       <th>exam</th><th>sources</th><th></th></tr></thead><tbody>${studied}</tbody></table></div>`
       :`<span class="muted">nothing studied yet</span>`}
     <pre class="out" style="margin-top:8px">${esc(r.block||"")}</pre>`;
+}
+/* PROCEDURES. /api/runbooks has always returned this — status, trust,
+   envelope, provenance — and nothing in the panel called it, while the guide
+   pointed the owner at this very page to see "procedures the fleet has
+   proven". A route with no caller is the defect this platform exists to
+   catch, so it is worth catching on its own panel. */
+async function loadProcedures(){
+  const el = document.getElementById('procBody'); if (!el) return;
+  const d = await api('/api/runbooks?expert='+encodeURIComponent(S.sel));
+  const rows = (d && d.runbooks) || [];
+  if (!rows.length){ el.innerHTML = `<span class="muted">nothing compiled yet —
+    a procedure is induced from repeated verified work, then must pass sealed
+    fresh instances before it may run on its own</span>`; return; }
+  const cls = s => s==="proven"?"ok":(s==="quarantined"?"bad":"queued");
+  el.innerHTML = `<div class="tablewrap"><table><thead><tr>
+    <th>procedure</th><th>status</th><th>kind</th><th>fires on</th>
+    <th>steps</th><th>accepted</th><th>scope</th></tr></thead><tbody>` +
+    rows.map(r => {
+      const t = r.trust || {}, env = t.envelope || {}, rel = t.reliability || {};
+      const compiled = !!(r.provenance && r.provenance.compiled);
+      return `<tr>
+        <td class="mono">${esc(r.name)}${r.draft?' <span class="muted">(draft)</span>':''}</td>
+        <td><span class="tag ${cls(r.status)}">${esc(r.status||"candidate")}</span></td>
+        <td>${compiled?'induced — runs with <b>no model call</b>':'<span class="muted">owner-written steps</span>'}</td>
+        <td class="muted">${esc((r.triggers||[]).slice(0,4).join(", "))||"—"}</td>
+        <td>${(r.steps||[]).length}</td>
+        <td>${rel.accepted!==undefined?`${rel.accepted}/${rel.attempts}`:'<span class="muted">—</span>'}</td>
+        <td class="muted">${esc(env.scope||"—")}${env.distinct_inputs?
+          ` · ${env.distinct_tasks} task(s), ${env.distinct_inputs} input(s)`:''}</td>
+      </tr>`;
+    }).join("") + `</tbody></table></div>
+    <p class="muted" style="font-size:11.5px;margin:8px 0 0">A procedure earns
+    PROVEN only by passing an owner-sealed suite of instances it has never seen,
+    including an edge case — repetition alone earns nothing. Its scope is stated
+    rather than assumed: nothing here claims to generalise beyond what was
+    observed.</p>`;
 }
 async function loadKnowledge(){
   const el = document.getElementById("knowBody"); if(!el) return;
@@ -4729,6 +4773,10 @@ async function renderMetrics(b){
     if (typeof m.value === "boolean") return m.value ? "holds" : "does not hold";
     if (m.unit === "USD") return usd(m.value);
     if (m.unit === "count") return String(m.value);
+    /* a RATIO is not a rate: amortization returns 2.0 meaning "half the model
+       steps it used to take", and the percent branch below rendered that as
+       "200%", which reads like a success rate going impossibly well */
+    if (m.unit === "ratio") return (Math.round(m.value * 100) / 100) + "×";
     return Math.round(m.value * 1000) / 10 + "%";
   };
   b.innerHTML = `
@@ -5035,7 +5083,15 @@ async function renderMission(m){
 const EV_KINDS = ["task_start","tool_call","task_end","done_refused",
   "approval_required","prospective_fired","escalated","retry_queued",
   "premise_warning","model_routed","ui_card","health_ritual","stop_condition",
-  "gotcha_filed","failure_recurred","skill_status","budget_exceeded"];
+  "gotcha_filed","failure_recurred","skill_status","budget_exceeded",
+  // the procedural loop — kept in step with FEED_EVENTS in ui.py, which is
+  // the server-side allowlist this mirrors. A name missing from EITHER list
+  // is a line the owner never sees.
+  "trajectory_opened","trajectory_closed","trajectory_refused",
+  "trajectory_close_failed","procedure_compiled","procedure_compile_refused",
+  "procedure_evaluated","procedure_evaluation_refused","procedure_route",
+  "procedure_route_rejected","procedure_route_skipped",
+  "scheduler_record_failed"];
 async function connectEvents(){
   if (!window.fetch || !window.ReadableStream || S.es) return;
   const controller = new AbortController();

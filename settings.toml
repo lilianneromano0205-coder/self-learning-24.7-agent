@@ -39,6 +39,77 @@ candidates_max = 5                  # test-time compute: attempts to score
 candidates_on_gate_failure = true   # escalate n on a refused finish_task
 design_gate = true                  # interface deliverables must pass designcheck
 
+# --- ADAPTIVE TEST-TIME COMPUTE (candidates.py). After every refused
+# --- finish_task the loop asks whether another attempt is worth its cost.
+# --- These are the terms of that arithmetic, and an operator who cannot see
+# --- them cannot see why their fleet stopped trying.
+candidate_recovery_prior = 0.2      # P(another sample fixes it) before evidence
+candidate_min_observations = 5      # development rows needed to replace the prior
+candidate_model_cost_usd = 0.01     # assumed cost of one more attempt
+candidate_verifier_cost_usd = 0.001 # assumed cost of scoring it
+candidate_latency_cost_usd = 0.0    # priced waiting, if you price waiting
+candidate_budget_usd = 1.0          # ceiling when the task declares none
+candidate_task_value_usd = 1.0      # what a verified success is worth here
+# Sampling stops when expected benefit <= cost, or at max_done_rejects.
+
+# --- GLOBAL CONTEXT BUDGET (context.py). The absolute ceiling on a compiled
+# --- window: the model's context limit, minus what the answer needs, minus
+# --- the tool schemas, minus a safety margin. Exceeding it REFUSES rather
+# --- than silently truncating, so these numbers decide what the model can be
+# --- shown at all. Commented: each already has the code default written here,
+# --- and a per-model limit is better read from the provider block.
+# context_limit = 131072            # fallback when the provider declares none
+# context_completion_reserve = 4096 # tokens kept free for the reply
+# context_tool_schema_budget = 2048 # measured from the real tool JSON when it can be
+# context_safety_margin = 1024      # the "this is a byte upper bound" allowance
+# [agent.context_budget]            # per-source ceilings; omitted = the shipped
+#   memory_files = 12000            # defaults in context.DEFAULT_BUDGETS
+#   skills = 3000
+
+# --- SOURCE AUTHORITY (sources.py)
+# learn_min_tier = 3                # lowest source tier a course may learn from
+# source_tier = {}                  # owner overrides, by exact hostname
+
+# --- MEMORY ROUTING (memrouter.py)
+# [agent.memory_router]             # per-role overrides of which memory KINDS
+#   student = []                    # load; the student's closed-book rule is
+                                    # code, not config, and cannot be widened here
+
+# --- SECOND DISCOVERY LANE (discovery_web.py). Off unless an owner turns it
+# --- on AND supplies a credential-free endpoint; every result still passes
+# --- source classification, freshness and fencing.
+# [agent.discovery.general_web]
+#   enabled = false
+#   endpoint = "https://searx.example/search"
+#   max_age_days = 365
+
+# --- COST OF TRANSCRIPTION (ingest.py)
+# whisper_per_hour_usd = 0.0        # priced into the spend ledger when set
+
+# --- HARNESS
+# command_policy = "..."            # owner-supplied extra policy patterns,
+                                    # ADDED to the built-in REVIEW list
+
+# --- PARALLELISM (scheduler.py)
+# max_parallelism = 1               # ceiling the scheduler may propose; the
+                                    # swarm only ever parallelises DECLARED
+                                    # independent work regardless
+
+# --- LAYERED VERIFICATION (verification.py). Commented, because writing it
+# --- would CHANGE behaviour rather than describe it: the code default is
+# --- false, and setting it true declares every task high-value, so every
+# --- judged task then demands a judge from a different model family.
+# verification_require_distinct_family = false
+
+# --- EXECUTION (sandbox.py). Commented for the same reason, and this one
+# --- matters more: the default is "workspace", under which the hosted
+# --- backends (e2b/daytona) REFUSE to run, because no authorized way to send
+# --- a workspace out and bring artifacts back exists yet. Writing
+# --- "stateless" is you asserting the work needs no files back — it lifts a
+# --- fail-closed control, so it must be a deliberate sentence, never a
+# --- default someone inherited from a settings template.
+# sandbox_workload = "workspace"
+
 # WHERE model-written commands run, and WHAT they can see. Both the tool path
 # (run_command) and the verification path (done_check / spec CHECK: lines) go
 # through these — the gate used to bypass them and see the full environment.
@@ -74,6 +145,25 @@ command_env_allow = []              # env vars a command MAY see. Everything
 [agent.scheduler]
 enabled = false
 shadow = true
+# The utility terms it maximises: P(verified success) x value, minus model,
+# tool, verifier, latency and risk cost. Declared here so the arithmetic is
+# inspectable rather than buried.
+task_value_usd = 1.0                # what one verified success is worth
+budget_usd = 1.0                    # ceiling when the task declares none
+min_observations = 5                # similar verified rows before it trusts a rate
+latency_usd_per_second = 0.0        # priced waiting, if you price waiting
+risk_cost_usd = 0.0                 # priced failure, beyond its retry cost
+fallback_cost_usd = 0.01            # assumed cost of the role's configured pair
+# strategies = []                   # owner-declared executable strategies;
+                                    # a task payload can never introduce one
+
+# Module ablation, for experiments only. Named modules are switched OFF so a
+# delta can be attributed to them. Never a production setting.
+# [evaluation]
+# disabled_modules = ["memory", "skills", "runbooks", "candidates", "routing",
+#                     "confidence", "repair", "research_brief", "swarm",
+#                     "verification_tiers", "procedures"]
+# single_provider_attempt = false   # raw arm: no failover, one provider
 
 # Pipeline chaining: when the left role finishes a task, queue the right role
 # on the same course. Gaps feedback (the mandated edge) is automatic anyway.

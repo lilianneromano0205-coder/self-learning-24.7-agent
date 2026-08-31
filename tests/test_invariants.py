@@ -719,6 +719,101 @@ def check_sandbox_names_are_unique():
           f"directory is the failure that only shows up under load")
 
 
+def check_settings_keys_are_declared():
+    """EVERY [agent] key the code reads appears in settings.toml.
+
+    settings.toml already carries the scar: *"keys the code reads that this
+    file used to leave undeclared. An audit found ten of them; two decide
+    containment, so an operator reading only settings.toml could not see what
+    their fleet was actually doing."* The fix was a one-time sweep, and
+    nothing held it — seventeen more keys accumulated, including the seven
+    that decide WHEN A TASK STOPS RETRYING. A documented invariant with no
+    test is a comment.
+
+    Declaration includes a COMMENTED example: a key whose default must not be
+    written down (because writing it would change behaviour, as with
+    sandbox_workload) is still discoverable, which is the point.
+
+    The scan is AST-based and deliberately narrow — it follows the two shapes
+    the codebase actually uses to reach the agent table, so it reports keys
+    rather than guesses.
+    """
+    import ast
+    settings = io.open(os.path.join(AGENT_DIR, "settings.toml"),
+                       encoding="utf-8").read()
+
+    def unwrap(node):
+        """`(x or {})` and `(x if y else {})` still yield x."""
+        while isinstance(node, (ast.BoolOp, ast.IfExp)):
+            node = (node.values[0] if isinstance(node, ast.BoolOp)
+                    else node.body)
+        return node
+
+    def agent_table(node):
+        """Is this expression the [agent] table (or a table inside it)?
+
+        EXACTLY two shapes, matched structurally rather than by looking for
+        the word 'agent' anywhere in the dump — the loose version matched
+        `.get()` on task dicts and reported `args`, `goal` and `passed` as
+        undeclared settings. A checker that cannot tell a config read from a
+        dictionary lookup gets switched off, and then it protects nothing.
+        """
+        node = unwrap(node)
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "_cfg"):
+            return True                     # sandbox.py's accessor
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "get" and node.args
+                and isinstance(node.args[0], ast.Constant)):
+            if node.args[0].value == "agent":
+                return True
+            # [agent.scheduler] and friends: a sub-table of the agent table
+            return (node.args[0].value in ("scheduler", "memory_retrieval")
+                    and agent_table(node.func.value))
+        return False
+
+    found = {}
+    for mod in sorted(f for f in os.listdir(AGENT_DIR) if f.endswith(".py")):
+        try:
+            tree = ast.parse(io.open(os.path.join(AGENT_DIR, mod),
+                                     encoding="utf-8").read())
+        except (OSError, SyntaxError):
+            continue
+        aliases = set()
+        for node in ast.walk(tree):
+            # ag = (cfg or {}).get("agent", {}) ...  -> `ag` is the table
+            if isinstance(node, ast.Assign) and agent_table(node.value):
+                for t in node.targets:
+                    if isinstance(t, ast.Name):
+                        aliases.add(t.id)
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "get" and node.args):
+                continue
+            key = node.args[0]
+            if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
+                continue
+            recv = unwrap(node.func.value)
+            reaches_agent = ((isinstance(recv, ast.Name) and recv.id in aliases)
+                             or agent_table(recv))
+            if reaches_agent and key.value not in ("agent", "scheduler",
+                                                   "memory_retrieval"):
+                found.setdefault(key.value, mod)
+
+    missing = sorted((k, m) for k, m in found.items() if k not in settings)
+    assert not missing, (
+        "these [agent] settings are read by code and appear nowhere in "
+        "settings.toml, so an operator cannot discover them:\n  "
+        + "\n  ".join(f"{k}  (read by {m})" for k, m in missing)
+        + "\nDeclare each with its CODE DEFAULT, or as a commented example "
+          "where writing the value would change behaviour rather than "
+          "describe it.")
+    print(f"[settings] {len(found)} [agent] key(s) read across the modules, "
+          f"every one of them declared in settings.toml — the file an "
+          f"operator reads is the file the code obeys")
+
+
 def check_documented_cli_exists():
     """EVERY command the manual promises, not the ones we remembered to try.
 
@@ -1336,6 +1431,7 @@ def main():
     check_expert_birth_paths()
     check_exam_readers_agree(sb)
     check_sandbox_names_are_unique()
+    check_settings_keys_are_declared()
     check_documented_cli_exists()
     check_no_file_clock_comparisons()
     check_capability_report_matches_reality()

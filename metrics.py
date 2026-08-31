@@ -607,6 +607,11 @@ def amortization(home, slug=None):
                      "so this is evidence of cheaper work on similar tasks, "
                      "not proof of transfer",
             "source": "state.json task ledger (verified, gated tasks only)",
+            # A RATIO, NOT A RATE. Without this the panel's fallthrough branch
+            # rendered 2.0 as "200%", which reads as a success rate going
+            # impossibly well rather than "half the model steps it used to
+            # take". Both renderers key on this.
+            "unit": "ratio",
             "also": (f"{det_runs} of {det_total} verified success(es) used a "
                      f"proven procedure and took no model step at all"),
             "deterministic_share": _pct(det_runs, det_total),
@@ -681,6 +686,8 @@ def render(rep):
             shown = f"${v:,.4f}"
         elif r.get("unit") == "count":
             shown = f"{v:g}"
+        elif r.get("unit") == "ratio":
+            shown = f"{v:.2f}x"          # never a percentage
         elif r["denominator"] and r["numerator"] is not None \
                 and isinstance(v, float) and v <= 1:
             shown = f"{v:.1%}"
