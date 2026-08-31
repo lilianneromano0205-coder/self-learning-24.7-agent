@@ -223,18 +223,42 @@ def control_paths(root):
 # dirpath -> (mtime_ns, [root-relative file paths], [subdirectory paths])
 _LISTING_CACHE = {}
 
+# A DIRECTORY MODIFIED THIS RECENTLY IS NOT TRUSTED TO ITS mtime.
+#
+# Caching a listing on the directory's mtime assumes two different listings
+# always carry two different timestamps. They do not: filesystem timestamp
+# RESOLUTION is coarse — commonly ~10-16 ms on NTFS, and one second on some
+# filesystems — so a create, a delete and another create inside a single tick
+# are indistinguishable from no change at all. The cache then serves a stale
+# listing, and a file that exists in a CONTROL directory is never enumerated:
+# not reported as created, and therefore never reverted. The control plane
+# does not detect what it cannot list.
+#
+# Found by a CI failure that moved between Windows Python versions — the tell
+# that it was a race and not a version. A planted .pyc survived the bracket
+# because the enumeration that should have seen it reused a listing taken a
+# few milliseconds earlier.
+#
+# So a directory whose mtime is inside the uncertainty window is re-scanned
+# every time and never cached. Steady-state directories — which is nearly all
+# of them, nearly always — keep the whole saving; a directory being written
+# to right now pays a scandir, which is what correctness costs here.
+_MTIME_UNCERTAINTY_NS = 2_000_000_000        # 2s: coarser than any FS in use
+
 
 def _listing(base, root):
     """Walk `base`, reusing each directory's listing while its mtime holds."""
     out, stack = [], [base]
+    now_ns = time.time_ns()
     while stack:
         d = stack.pop()
         try:
             m = os.stat(d).st_mtime_ns
         except OSError:
             continue
+        settled = (now_ns - m) > _MTIME_UNCERTAINTY_NS
         hit = _LISTING_CACHE.get(d)
-        if hit and hit[0] == m:
+        if hit and hit[0] == m and settled:
             _mt, files, subs = hit
         else:
             files, subs = [], []
@@ -253,7 +277,10 @@ def _listing(base, root):
                 continue
             files.sort()
             subs.sort()
-            _LISTING_CACHE[d] = (m, files, subs)
+            if settled:          # never cache a listing that may still move
+                _LISTING_CACHE[d] = (m, files, subs)
+            else:
+                _LISTING_CACHE.pop(d, None)
         out.append((d, files))
         stack.extend(subs)
     return out

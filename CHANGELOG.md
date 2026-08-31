@@ -177,6 +177,19 @@ Also fixed while reproducing: `runbook.record` took its lock **inside**
 outcome before any runbook existed died on the lockfile itself, appearing as
 an intermittent failure that moved between tests.
 
+A fourth was hiding behind the flake, and it was the most serious thing in
+this release. `control_paths` caches each directory's listing on that
+directory's mtime, and filesystem timestamp RESOLUTION is coarse — 10-16 ms
+on NTFS, a full second elsewhere — so two different listings can carry the
+same mtime and the cache serves a stale one. A file created in a CONTROL
+directory inside that window is never enumerated: not reported as created,
+and therefore **never reverted**. The control plane cannot revert what it
+does not list. A directory whose mtime falls inside the uncertainty window is
+now re-scanned and never cached; settled directories keep the whole saving.
+Demonstrated deterministically by holding a directory's timestamp while a
+file lands in it — on the unfixed code the planted file survives the bracket,
+and `tests/test_controlplane.py` now pins that.
+
 A third defect surfaced as a FLAKE and was hardened rather than shrugged at:
 `controlplane.restore` deleted a reverted file in a single attempt, and on a
 loaded Windows runner a just-written `.pyc` can be briefly undeletable — so
