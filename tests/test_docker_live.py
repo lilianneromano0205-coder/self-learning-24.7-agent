@@ -43,15 +43,18 @@ import sandbox                 # noqa: E402
 
 
 def docker_ready():
-    if not shutil.which("docker"):
-        return False, "docker is not on PATH"
-    try:
-        r = subprocess.run(["docker", "info"], capture_output=True,
-                           timeout=25)
-    except Exception as e:
-        return False, f"docker is installed but not usable ({e})"
-    if r.returncode != 0:
-        return False, "the docker daemon is not running"
+    # ASK THE MODULE UNDER TEST WHETHER ITS BACKEND WORKS. This used to check
+    # `which("docker")` and `docker info`'s exit code, both of which SUCCEED
+    # against a Docker Desktop running in Windows-container mode — a daemon
+    # that answers every question and then rejects every container this
+    # platform launches, because --pids-limit is a Linux control. The suite
+    # then ran the docker tests and failed at exit 125 instead of skipping.
+    # sandbox.available() already knows the difference; a second, weaker
+    # readiness rule beside it is exactly the drift this repo keeps paying
+    # for.
+    ok, why = sandbox.available({"agent": {"sandbox": "docker"}})
+    if not ok:
+        return False, why
     img = sandbox.DOCKER_IMAGE
     have = subprocess.run(["docker", "image", "inspect", img],
                           capture_output=True, timeout=60)

@@ -481,7 +481,25 @@ def restore(root, before, violations):
             continue
         try:
             if what == "created":
-                os.remove(p)
+                # RETRY THE DELETE. On Windows a file that was written moments
+                # ago can be briefly undeletable — an antivirus scan, the
+                # search indexer, or a lagging handle from the writer — and
+                # os.remove raises PermissionError. A single attempt made this
+                # the one revert that could quietly fail under load: a planted
+                # .pyc surviving the bracket is precisely what this control
+                # exists to prevent, and it was seen doing so once on a loaded
+                # CI runner. Same shape as the retry loops in tests/common.py
+                # and evaluation_workspace.arena, for the same reason.
+                for attempt in range(5):
+                    try:
+                        os.remove(p)
+                        break
+                    except FileNotFoundError:
+                        break                    # already gone: the goal
+                    except OSError:
+                        if attempt == 4:
+                            raise
+                        time.sleep(0.1 * (attempt + 1))
                 continue
             blob = (files.get(rel) or {}).get("bytes")
             if blob is None:

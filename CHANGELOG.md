@@ -177,6 +177,17 @@ Also fixed while reproducing: `runbook.record` took its lock **inside**
 outcome before any runbook existed died on the lockfile itself, appearing as
 an intermittent failure that moved between tests.
 
+A third defect surfaced as a FLAKE and was hardened rather than shrugged at:
+`controlplane.restore` deleted a reverted file in a single attempt, and on a
+loaded Windows runner a just-written `.pyc` can be briefly undeletable — so
+the one revert that must never fail, quietly did. It now retries, like the
+teardown loops elsewhere. A planted `.pyc` surviving the bracket is exactly
+what that control exists to prevent, and "it passed on the re-run" is not a
+verdict. `tests/test_docker_live.py` also asked its own weaker readiness
+question instead of `sandbox.available()`, so it would have RUN the docker
+tests against a daemon that rejects every container; it now asks the module
+under test.
+
 The lesson is the one this repository keeps re-learning: the development
 machine agrees with you. `AGENT_TEST_TMP` pointed at an 8.3 short name and
 `DOCKER_HOST` pointed at nothing now reproduce both classes locally, in
