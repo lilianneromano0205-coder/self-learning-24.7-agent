@@ -146,6 +146,35 @@ skill and counting losses quarantines it. Neither is true any more, and neither
 should be: both verdicts are earned by a matched held-out ablation, and the
 tests now run one.
 
+### The engine could not start itself
+
+The loop that turns verified work into a free procedure required the owner to
+hand-write a sealed judge and typed inputs FOR EVERY TASK. Nothing created
+from the panel, a goal, a mission or a routine carries either, so on ordinary
+work no trajectory was ever opened and the compiler was reachable only from a
+staged demonstration. The economics were real and unreachable.
+
+Capture is now automatic on any task that carries its own definition of done.
+That gate is not the worker's opinion — a worker cannot write or edit its
+`done_check`, which is set when the task is created and lives in CONTROL
+state — so it is an external mechanical verdict, and it is already what this
+platform trusts to say a task succeeded.
+
+Because such tasks declare no typed inputs, the compiler now has to name what
+varied itself. It mints a parameter only for a value that genuinely differs
+across runs, is one simple type, and does not repeat; it records what it
+invented under `provenance.inferred_parameters`, so the generalisation can be
+read back. Two ordinary tasks writing two different weekly reports now
+produce a procedure with `{path, content}` inferred, with no one asking.
+
+**What did not change is the part that matters.** Gate-captured evidence can
+only ever produce a CANDIDATE. `proven` still requires `evaluate()` against an
+owner-sealed suite of fresh instances including an edge case. The system may
+now teach itself cheaply; it still cannot decide that it has learned. A gate
+that did not pass teaches nothing, and identical work repeated is one
+observation however many times it ran — otherwise a nightly routine would
+prove itself by monotony.
+
 ### What the first CI run found, on machines this code had never touched
 
 The suite was green three times on the development machine and on all three

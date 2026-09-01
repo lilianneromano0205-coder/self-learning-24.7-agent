@@ -98,13 +98,45 @@ def _sealed(state, section, identity):
     return record
 
 
-def begin_trajectory(root, task_id, judge_id, inputs, family="unspecified"):
+GATE_ACCEPTANCE = "harness_gate"
+
+
+def begin_trajectory(root, task_id, judge_id=None, inputs=None, family="unspecified",
+                     gate=None):
+    """Open a trajectory. Acceptance comes from ONE of two external judges.
+
+    `judge_id` names an owner-sealed grader — the strongest basis, and the
+    only one that existed at first. It required the owner to hand-write a
+    judge and typed inputs for every task, which meant that on ordinary work
+    — a task from the panel, a goal, a mission, a routine — no trajectory was
+    ever opened and the whole induction path was unreachable outside a demo.
+
+    `gate` is the task's OWN definition of done: the mechanical command the
+    harness runs through the execution authority to decide whether the work
+    counted. It is not the worker's opinion — a worker cannot write or edit
+    its `done_check`, which is set when the task is created and lives in
+    CONTROL-zoned state. So it is an external verdict, and it is already the
+    thing this platform trusts to say a task succeeded.
+
+    What a gate-based trajectory may NOT do is earn trust. It can produce a
+    CANDIDATE procedure and nothing more; `proven` still requires
+    `evaluate()` against an owner-sealed suite of fresh instances. That is
+    the division that makes automatic capture safe: the system may now teach
+    itself cheaply, and still cannot decide that it has learned.
+    """
+    inputs = {} if inputs is None else inputs
     def begin(state):
-        judge = _sealed(state, "judges", judge_id)
+        basis, judge_hash = GATE_ACCEPTANCE, None
+        if judge_id is not None:
+            judge_hash = _sealed(state, "judges", judge_id)["hash"]
+            basis = "sealed_judge"
+        elif not gate:
+            raise ProcedureError("a trajectory needs a sealed judge or a task gate")
         if task_id in state["trajectories"]:
             raise ProcedureError("trajectory identity already used")
         state["trajectories"][task_id] = {
-            "task_id": task_id, "judge_id": judge_id, "judge_hash": judge["hash"],
+            "task_id": task_id, "judge_id": judge_id, "judge_hash": judge_hash,
+            "acceptance_basis": basis, "gate_hash": digest(gate) if gate else None,
             "inputs": copy.deepcopy(inputs), "input_hash": digest(inputs),
             "environment": digest(os.path.realpath(root)), "family": family,
             "started": time.time(), "actions": [], "accepted": False, "closed": False}
@@ -207,17 +239,31 @@ def perform(root, task_id, action):
     return finish_action(root, task_id, token, True)
 
 
-def finish_trajectory(root, task_id):
+def finish_trajectory(root, task_id, gate_passed=None):
     def finish(state):
         trajectory = state["trajectories"].get(task_id)
         if not trajectory or trajectory["closed"]:
             raise ProcedureError("trajectory missing or already closed")
-        judge = _sealed(state, "judges", trajectory["judge_id"])
-        if judge["hash"] != trajectory["judge_hash"]:
-            raise ProcedureError("grader changed after execution began")
-        checks = [operators.observe(root, check) for check in judge["value"]]
+        if trajectory.get("acceptance_basis") == GATE_ACCEPTANCE:
+            # The harness's own gate verdict, passed in by the caller that
+            # ran it. `None` is not a pass: a trajectory whose gate never
+            # ran is closed unaccepted rather than given the benefit of the
+            # doubt, because "nobody checked" and "it worked" must never
+            # collapse into the same record.
+            checks = [gate_passed is True]
+        else:
+            judge = _sealed(state, "judges", trajectory["judge_id"])
+            if judge["hash"] != trajectory["judge_hash"]:
+                raise ProcedureError("grader changed after execution began")
+            checks = [operators.observe(root, check) for check in judge["value"]]
         trajectory["accepted"] = bool(trajectory["actions"]) and all(checks) and all(
             item.get("complete") and item.get("succeeded") for item in trajectory["actions"])
+        # WHAT THE WORK ACTUALLY WAS. Two trajectories that performed byte-
+        # identical actions are one piece of evidence, not two, however many
+        # times they ran. For auto-captured work this is the independence
+        # signal, because such tasks declare no typed inputs to differ by.
+        trajectory["work_hash"] = digest(
+            [[i["action"]["tool"], i["action"]["args"]] for i in trajectory["actions"]])
         trajectory["closed"] = True
         trajectory["checks"] = checks
         trajectory["digest"] = digest({k: v for k, v in trajectory.items() if k != "digest"})
@@ -225,14 +271,52 @@ def finish_trajectory(root, task_id):
     return _update(root, finish)
 
 
-def _infer(values, trajectories, schema, hint):
+_KINDS = {str: "string", bool: "boolean", int: "integer", float: "number"}
+
+
+def _infer(values, trajectories, schema, hint, minted=None):
+    """Constant, declared parameter, or — for auto-captured work — a new one.
+
+    Identical across every trajectory means CONSTANT: the step always did
+    that, so the procedure always will.
+
+    Otherwise the variation must be explained. A declared typed input that
+    tracks it exactly is the strongest explanation and is preferred.
+
+    Failing that, the value is PARAMETERISED: this is what varied, so it
+    becomes an argument the caller must supply. Refusing here instead — the
+    original behaviour — is why nothing captured from ordinary work could
+    ever compile: such tasks declare no typed inputs, so no declared input
+    could explain anything, and every induction died on the first argument
+    that differed.
+
+    Minting is deliberately narrow. It requires a value that genuinely
+    varies, of one simple type across every trajectory, and it names what it
+    invented so the owner can read the generalisation back. And it buys
+    nothing on its own: the result is a CANDIDATE, and only a sealed suite
+    of fresh instances can make it proven.
+    """
     if all(value == values[0] and type(value) is type(values[0]) for value in values):
         return copy.deepcopy(values[0])
     for key in schema:
         if all(t["inputs"].get(key) == value and type(t["inputs"].get(key)) is type(value)
                for t, value in zip(trajectories, values)):
             return {"input": key}
-    raise ProcedureError(f"unaligned {hint}: no declared typed input explains variation")
+    if minted is None:
+        raise ProcedureError(f"unaligned {hint}: no declared typed input explains variation")
+    kind = _KINDS.get(type(values[0]))
+    if kind is None or any(type(v) is not type(values[0]) for v in values):
+        raise ProcedureError(
+            f"unaligned {hint}: the values vary and are not one simple type, "
+            f"so what changed cannot be named")
+    if len(set(values)) < len(values):
+        raise ProcedureError(
+            f"unaligned {hint}: the values vary but repeat across trajectories, "
+            f"so the variation is not explained by one argument per run")
+    name = hint if hint not in schema else f"{hint}_{len(schema) + 1}"
+    schema[name] = kind
+    minted.append(name)
+    return {"input": name}
 
 
 def compile(root, name, trajectory_ids, triggers):
@@ -249,9 +333,27 @@ def compile(root, name, trajectory_ids, triggers):
             raise ProcedureError("unverified trajectory")
         if trajectory.get("digest") != digest({k: v for k, v in trajectory.items() if k != "digest"}):
             raise ProcedureError("tampered trajectory")
-        _sealed(state, "judges", trajectory["judge_id"])
+        if trajectory.get("acceptance_basis") != GATE_ACCEPTANCE:
+            _sealed(state, "judges", trajectory["judge_id"])
         trajectories.append(trajectory)
-    if len({t["input_hash"] for t in trajectories}) < 2 or len({t["judge_id"] for t in trajectories}) < 2:
+    # INDEPENDENCE, read differently for the two acceptance bases.
+    #
+    # A sealed-judge induction must span two distinct judges: the guarantee
+    # being bought is that no single grader can mint a procedure alone.
+    #
+    # Auto-captured work has no typed inputs to differ by and one gate per
+    # task, so that rule would refuse everything and the capture path would
+    # be decorative. What it can show instead is that the RUNS DIFFERED —
+    # distinct work, separately accepted by the harness's own mechanical
+    # gate. That is weaker, and it is priced accordingly: this route can
+    # only ever produce a candidate, and `evaluate()` against an owner's
+    # sealed suite of fresh instances remains the sole path to proven.
+    auto = all(t.get("acceptance_basis") == GATE_ACCEPTANCE for t in trajectories)
+    if auto:
+        if len({t.get("work_hash") for t in trajectories}) < 2:
+            raise ProcedureError("identical work repeated is not independent induction")
+    elif len({t["input_hash"] for t in trajectories}) < 2 or \
+            len({t["judge_id"] for t in trajectories}) < 2:
         raise ProcedureError("repeated identical evidence is not independent induction")
     if len({t["family"] for t in trajectories}) != 1:
         raise ProcedureError("cannot infer across unrelated task families")
@@ -262,6 +364,7 @@ def compile(root, name, trajectory_ids, triggers):
                                type(t["inputs"][key]) is not type(value) for t in trajectories):
             raise ProcedureError("incompatible typed input schemas")
         schema[key] = kind
+    minted = []
     # Reads are observations; all mutating/unknown tools must align in order.
     sequences = [[item for item in t["actions"] if item["action"]["tool"] != "read_file"] for t in trajectories]
     if not sequences[0] or any(len(s) != len(sequences[0]) for s in sequences):
@@ -274,7 +377,8 @@ def compile(root, name, trajectory_ids, triggers):
         if len(tools) != 1 or any(set(a["args"]) != set(actions[0]["args"]) for a in actions):
             raise ProcedureError("unaligned tool/argument sequence")
         tool = actions[0]["tool"]
-        args = {key: _infer([a["args"][key] for a in actions], trajectories, schema, key)
+        args = {key: _infer([a["args"][key] for a in actions], trajectories, schema,
+                            key, minted if auto else None)
                 for key in actions[0]["args"]}
         identity = f"step-{index + 1}"
         step = {"id": identity, "depends_on": [steps[-1]["id"]] if steps else [],
@@ -314,6 +418,8 @@ def compile(root, name, trajectory_ids, triggers):
                        "reversibility": "conditional", "authority": ["workspace-write"],
                        "reliability": {"source": "induction only; independent evaluation required"}},
           "provenance": {"compiled": True, "trajectory_ids": trajectory_ids,
+                         "acceptance_basis": ("harness_gate" if auto else "sealed_judge"),
+                         "inferred_parameters": list(minted),
                          "input_hashes": [t["input_hash"] for t in trajectories],
                          "family": trajectories[0]["family"], "alignment": "ordered complete mutating sequence"}}
     problems = runbook.validate(rb)
@@ -395,7 +501,9 @@ def accepted_trajectories(root, family):
                 and t.get("digest") == digest({k: v for k, v in t.items()
                                                if k != "digest"})):
             rows.append({"task_id": identity, "input_hash": t["input_hash"],
-                         "judge_id": t["judge_id"]})
+                         "judge_id": t["judge_id"],
+                         "work_hash": t.get("work_hash"),
+                         "acceptance_basis": t.get("acceptance_basis")})
     return rows
 
 

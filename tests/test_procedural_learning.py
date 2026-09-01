@@ -52,6 +52,68 @@ class ProceduralLearning(unittest.TestCase):
             "checks": [{"predicate": "file_equals", "path": {"input": "destination"},
                         "value": "WRONG" if bad else {"input": "value"}}]})
 
+    def gate_run(self, module, tid, path, value, gate="check.py out", passed=True):
+        """A trajectory captured the way ORDINARY work is: no sealed judge and
+        no typed inputs, accepted by the task's own mechanical gate."""
+        module.begin_trajectory(self.root, tid, None, None, family="weekly", gate=gate)
+        module.perform(self.root, tid, {"tool": "write_file",
+                                        "args": {"path": path, "content": value}})
+        return module.finish_trajectory(self.root, tid, gate_passed=passed)
+
+    def test_ordinary_gated_work_induces_a_candidate_and_names_what_it_invented(self):
+        """The economics only exist if the loop learns from work nobody staged.
+
+        Requiring a sealed judge and typed inputs per task meant nothing from
+        the panel, a goal, a mission or a routine was ever captured, so the
+        compiler was reachable only from a demo. Gate-captured work now
+        compiles — and because such tasks declare no inputs, the compiler has
+        to NAME what varied itself.
+        """
+        p = self.module()
+        self.assertTrue(self.gate_run(p, "wk1", "out/r-w1.md", "revenue w1")["accepted"])
+        self.assertTrue(self.gate_run(p, "wk2", "out/r-w2.md", "revenue w2")["accepted"])
+        rb = p.compile(self.root, "weekly", ["wk1", "wk2"], ["weekly"])
+        self.assertEqual(rb["operator"]["inputs"], {"path": "path", "content": "string"})
+        self.assertEqual(sorted(rb["provenance"]["inferred_parameters"]),
+                         ["content", "path"])
+        self.assertEqual(rb["provenance"]["acceptance_basis"], "harness_gate")
+        self.assertEqual([s["kind"] for s in rb["steps"]], ["deterministic"])
+        # AND IT IS NOT TRUSTED. Automatic induction buys a candidate and
+        # nothing else; only a sealed suite of fresh instances can promote.
+        self.assertEqual(runbook.status(self.root, "weekly"), "candidate")
+
+    def test_a_failed_gate_and_repeated_identical_work_teach_nothing(self):
+        """Two ways for automatic capture to become superstition, both shut.
+
+        A gate that did not pass is not evidence, and the same work repeated
+        is one observation however many times it ran — otherwise a routine
+        firing nightly would 'prove' itself by monotony.
+        """
+        p = self.module()
+        self.assertFalse(self.gate_run(p, "bad1", "out/x.md", "x", passed=False)["accepted"])
+        self.assertFalse(self.gate_run(p, "bad2", "out/y.md", "y", passed=None)["accepted"])
+        with self.assertRaises(p.ProcedureError):
+            p.compile(self.root, "weekly", ["bad1", "bad2"], ["weekly"])
+        self.gate_run(p, "same1", "out/same.md", "identical")
+        self.gate_run(p, "same2", "out/same.md", "identical")
+        with self.assertRaises(p.ProcedureError) as caught:
+            p.compile(self.root, "weekly", ["same1", "same2"], ["weekly"])
+        self.assertIn("identical work", str(caught.exception))
+
+    def test_invented_parameters_refuse_values_that_are_not_one_clean_thing(self):
+        """Minting is narrow on purpose: it names a variation, never guesses.
+
+        A value that varies but repeats across runs is not explained by one
+        argument per run, and mixed types are not one argument at all.
+        """
+        p = self.module()
+        self.gate_run(p, "m1", "out/a.md", "same-content")
+        self.gate_run(p, "m2", "out/b.md", "same-content")
+        rb = p.compile(self.root, "weekly", ["m1", "m2"], ["weekly"])
+        # content did not vary, so it stayed a CONSTANT and only path was named
+        self.assertEqual(rb["provenance"]["inferred_parameters"], ["path"])
+        self.assertEqual(rb["steps"][0]["action"]["args"]["content"], "same-content")
+
     def test_compiles_real_actions_infers_inputs_and_executes_fresh_values(self):
         p = self.candidate()
         rb = runbook.load(self.root, "report")

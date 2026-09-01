@@ -2787,17 +2787,28 @@ class Agent:
         the capture hooks in _exec_tool fire only inside one. A refusal
         (missing judge, reused identity) downgrades to ordinary execution —
         it never blocks the work itself."""
-        if not (task.get("judge_id") and isinstance(task.get("inputs"), dict)):
+        # EVERY GATED TASK IS CAPTURED. This used to require the owner to
+        # hand-write a sealed judge and typed inputs per task, so on ordinary
+        # work — the panel, a goal, a mission, a routine — nothing was ever
+        # captured and the induction path existed only for a demo. A task
+        # that carries its own definition of done already has an external,
+        # mechanical verdict; that is enough to REMEMBER what happened.
+        # It is not enough to trust it, and it does not become enough:
+        # gate-captured evidence can only ever yield a candidate.
+        if not (task.get("judge_id") or task.get("done_check")):
             return
         try:
             import procedure
             procedure.begin_trajectory(
-                self.root, task["id"], task["judge_id"], task["inputs"],
+                self.root, task["id"], task.get("judge_id"),
+                task.get("inputs") if isinstance(task.get("inputs"), dict) else None,
                 family=(task.get("family") or task.get("course")
-                        or task.get("task_class") or "unspecified"))
+                        or task.get("task_class") or "unspecified"),
+                gate=task.get("done_check"))
             self.log.info(json.dumps({
                 "event": "trajectory_opened", "task": task["id"],
-                "judge": task["judge_id"]}))
+                "judge": task.get("judge_id"),
+                "basis": "sealed_judge" if task.get("judge_id") else "harness_gate"}))
         except Exception as e:
             self.log.info(json.dumps({
                 "event": "trajectory_refused", "task": task["id"],
@@ -2811,9 +2822,15 @@ class Agent:
         own replay. Only PROVEN compiled procedures qualify — candidate
         trust is earned through sealed evaluation, not through live traffic.
         Every non-gated outcome falls through to the ordinary model path."""
-        if task.get("procedure_route_tried") or not task.get("done_check") \
-                or not isinstance(task.get("inputs"), dict):
+        # A task with no declared inputs is not disqualified: a procedure
+        # induced from work that never varied has an EMPTY input schema, and
+        # check_inputs below is what decides whether the task can satisfy it.
+        # Requiring typed inputs here meant the commonest repeated job — the
+        # same report, written the same way, every week — could never take
+        # the free path.
+        if task.get("procedure_route_tried") or not task.get("done_check"):
             return False
+        inputs = task.get("inputs") if isinstance(task.get("inputs"), dict) else {}
         task["procedure_route_tried"] = True
         try:
             from evaluation_policy import disabled
@@ -2839,8 +2856,7 @@ class Agent:
             if not rb.get("procedure_version"):
                 continue
             try:
-                operators.check_inputs(self.root, rb["operator"]["inputs"],
-                                       task["inputs"])
+                operators.check_inputs(self.root, rb["operator"]["inputs"], inputs)
             except Exception as e:
                 self.log.info(json.dumps({
                     "event": "procedure_route_skipped", "task": task["id"],
@@ -2848,7 +2864,7 @@ class Agent:
                 continue
             started = time.time()
             try:
-                result = procedure.execute(self.root, rb, task["inputs"])
+                result = procedure.execute(self.root, rb, inputs)
             except Exception as e:
                 self.log.info(json.dumps({
                     "event": "procedure_route_skipped", "task": task["id"],
@@ -2886,14 +2902,15 @@ class Agent:
         return False
 
     def _procedural_learning(self, task):
-        """Terminal-outcome learning step for judged trajectories: close the
-        trajectory (acceptance = the sealed judge re-observed, never the
-        worker's claim), and once a family holds >=2 accepted trajectories
-        with distinct inputs AND distinct judges, compile them into a
-        candidate procedure and run any owner-sealed evaluation suites.
-        Compile refusals are ordinary events — most experience should NOT
-        become a procedure."""
-        if not (task.get("judge_id") and isinstance(task.get("inputs"), dict)):
+        """Terminal-outcome learning step for captured trajectories.
+
+        Closes the trajectory against its EXTERNAL verdict — a sealed judge
+        re-observed, or the task's own mechanical gate — never the worker's
+        claim. Once a family holds two independent accepted trajectories,
+        they are compiled into a CANDIDATE procedure and any owner-sealed
+        suite is run against it. Compile refusals are ordinary events: most
+        experience should not become a procedure, and the refusal says why."""
+        if not (task.get("judge_id") or task.get("done_check")):
             return
         try:
             from evaluation_policy import disabled
@@ -2905,7 +2922,17 @@ class Agent:
             import procedure
             if not procedure.active_trajectory(self.root, task["id"]):
                 return
-            trajectory = procedure.finish_trajectory(self.root, task["id"])
+            # the gate verdict the harness itself recorded for this task —
+            # check_done's result, not anything the worker said about it
+            gate_passed = None
+            if task.get("done_check"):
+                # check_done files its verdict on the task; `passed` is what
+                # the verification authority decided, with L0 supreme
+                gate_passed = (task.get("verification") or {}).get("passed")
+                if gate_passed is None:
+                    gate_passed = task.get("status") == "done"
+            trajectory = procedure.finish_trajectory(self.root, task["id"],
+                                                     gate_passed=gate_passed)
         except Exception as e:
             self.log.info(json.dumps({
                 "event": "trajectory_close_failed", "task": task["id"],
@@ -2922,9 +2949,19 @@ class Agent:
             rows = procedure.accepted_trajectories(self.root, family)
         except Exception:
             return
-        if (len({r["input_hash"] for r in rows}) < 2
-                or len({r["judge_id"] for r in rows}) < 2):
-            return          # independence conditions not met yet — no learning
+        # The same independence rule compile() applies, asked here first so
+        # the loop does not call the compiler on evidence it will refuse.
+        # Sealed-judge evidence must span two judges; gate-captured evidence
+        # has one gate per task and no typed inputs, so what it must show is
+        # that the RUNS DIFFERED.
+        auto = all(r.get("acceptance_basis") == "harness_gate" for r in rows)
+        if auto:
+            independent = len({r.get("work_hash") for r in rows}) >= 2
+        else:
+            independent = (len({r["input_hash"] for r in rows}) >= 2
+                           and len({r["judge_id"] for r in rows}) >= 2)
+        if not independent:
+            return          # not yet two independent runs — nothing to learn
         name = "proc-" + (safe_course(family) or "unnamed")
         try:
             import runbook
