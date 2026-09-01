@@ -36,7 +36,23 @@ sys.path.insert(0, AGENT_DIR)
 import training             # noqa: E402
 
 
-def _seed(root, n=20):
+# The sealed evaluation contract needs >= 20 held-out tasks, and export()
+# holds out 20% — so 100 VERIFIED trajectories, which `verified=(i % 4 != 0)`
+# turns into at exactly n=134. The default holdout ratio stays exercised
+# rather than being widened to make the fixture cheap.
+BASELINE = "base-rev-0000000000000000"
+CANARY = [{"task": f"canary-{i}", "goal": f"fresh task {i}"} for i in range(20)]
+
+
+def _frozen_judge(model_reference, row, seed):
+    """The MECHANICAL grader, owner-supplied and blind to which side it is
+    scoring beyond the reference it was handed: the baseline reference fails
+    every row, a real checkpoint file passes. It returns an exact bool, which
+    is the only thing evaluate_checkpoint will accept."""
+    return model_reference != BASELINE
+
+
+def _seed(root, n=134):
     for i in range(n):
         training.capture(
             root,
@@ -77,8 +93,10 @@ def check_split_is_deterministic_and_clean(root):
     d = os.path.join(root, "training", "runs", a["id"])
     train_ids = {json.loads(l)["task"]
                  for l in open(os.path.join(d, "train.jsonl"), encoding="utf-8")}
-    hold_ids = {json.loads(l)["task"]
-                for l in open(os.path.join(d, "holdout.jsonl"), encoding="utf-8")}
+    # holdout rows no longer land on disk beside the trainer's input — export
+    # seals them into owner authority (test_advanced_learning asserts the
+    # file's ABSENCE); the manifest still names every held-out task id
+    hold_ids = set(a["holdout"]["task_ids"])
     assert train_ids and hold_ids
     assert not (train_ids & hold_ids), "benchmark contamination"
     print(f"[split] {len(train_ids)} train / {len(hold_ids)} held-out, "
@@ -175,27 +193,56 @@ def check_promotion_gate(root, man):
                              "a lucky initialisation")
     except training.Refused as e:
         assert "seed" in str(e)
-    # a genuine improvement, properly seeded
-    training.register(root, man["id"], "ckpt-good", 0.95,
+    # A DECLARED number can no longer promote anything. The trainer's own
+    # score is a claim; promotion now needs a policy sealed BEFORE the
+    # candidate existed, a paired multi-seed run of the owner's frozen
+    # evaluator over the sealed holdout, and a canary on fresh tasks.
+    training.register(root, man["id"], "ckpt-declared", 0.95,
                       verifier_hash=man["verifier_hash"], seeds=3,
-                      evidence=_evidence(root, "ckpt-good"))
-    p = training.promote(root, "ckpt-good", baseline_score=0.90)
+                      evidence=_evidence(root, "ckpt-declared"))
+    try:
+        training.promote(root, "ckpt-declared", baseline_score=0.90)
+        raise AssertionError("a self-declared score promoted a checkpoint")
+    except training.Refused as e:
+        assert "sealed evaluation and canary required" in str(e), str(e)
+
+    training.set_evaluation_policy(
+        root, man["id"], baseline_checkpoint=BASELINE, canary_tasks=CANARY,
+        seeds=(0, 1, 2), threshold=0.02)
+    ck = os.path.join(root, "ckpt-good.bin")
+    with open(ck, "wb") as f:
+        f.write(b"weights")
+    ev = training.evaluate_checkpoint(root, man["id"], "ckpt-good", ck,
+                                      _frozen_judge)
+    assert ev["candidate"]["score_origin"] == "sealed_paired_evaluation", ev
+    assert ev["candidate"]["eval_score"] == 1.0 and ev["baseline_score"] == 0.0, ev
+    cy = training.canary(root, "ckpt-good", _frozen_judge)
+    assert cy["passed"] is True, cy
+    p = training.promote(root, "ckpt-good", baseline_score=ev["baseline_score"])
     assert p["checkpoint"] == "ckpt-good"
-    assert p["score_origin"] == "declared" and p["evidence_sha256"], p
+    assert p["score_origin"] == "sealed_paired_evaluation", p
+    assert p["evidence_sha256"], p
     assert p["verifier_hash"] == man["verifier_hash"], p
     assert p["holdout_hash"] == man["holdout"]["hash"], p
-    print("[gate] a change below its declared threshold and a single-seed "
-          "result were both refused; a +0.05 improvement over three seeds "
-          "was promoted, and the promotion record carries the four things "
-          "that make the number re-checkable — checkpoint, verifier hash, "
-          "holdout hash and the evidence sha256 — plus the word DECLARED")
+    print("[gate] a change below its declared threshold, a single-seed "
+          "result and a self-declared score were all refused; promotion "
+          "required a policy sealed before the candidate existed, a paired "
+          "three-seed run of the owner's frozen evaluator over 20 sealed "
+          "held-out tasks, and an all-must-pass canary on 20 fresh ones — "
+          "and the record carries checkpoint, verifier hash, holdout hash "
+          "and evidence sha256, with the score marked SEALED, not DECLARED")
 
 
 def check_rollback_is_mandatory(root, man):
-    training.register(root, man["id"], "ckpt-next", 0.97,
-                      verifier_hash=man["verifier_hash"], seeds=2,
-                      evidence=_evidence(root, "ckpt-next"))
-    p = training.promote(root, "ckpt-next", baseline_score=0.95)
+    # the second promotion goes through the same sealed path; the policy
+    # sealed for this run is reused (authority refuses a duplicate key)
+    ck = os.path.join(root, "ckpt-next.bin")
+    with open(ck, "wb") as f:
+        f.write(b"newer weights")
+    ev = training.evaluate_checkpoint(root, man["id"], "ckpt-next", ck,
+                                      _frozen_judge)
+    assert training.canary(root, "ckpt-next", _frozen_judge)["passed"] is True
+    p = training.promote(root, "ckpt-next", baseline_score=ev["baseline_score"])
     assert p["rollback_to"] == "ckpt-good", (
         "every promotion must record what it replaced")
     back = training.rollback(root, why="regression in production")

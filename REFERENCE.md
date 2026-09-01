@@ -7,8 +7,8 @@ logic it runs, how you interact with it, and what it does **not** do.
 written by reading the code, not from memory; where a claim could rot, the
 test that keeps it honest is named.
 
-**Scale, so you know what you are reading about:** 58 Python modules,
-one HTML file for the whole UI, 81 acceptance tests, zero third-party
+**Scale, so you know what you are reading about:** 105 Python modules,
+one HTML file for the whole UI, 139 acceptance tests, zero third-party
 dependencies. Python 3.11+ and your own API keys.
 
 ---
@@ -419,9 +419,11 @@ over notes themselves. (`test_memcheck.py`, `test_consult.py`)
 lifecycle enforced by outcomes, never by opinion:
 
 - **candidate** — injected with a hypothesis banner: use, but verify
-- **proven** — ≥3 **distinct** tasks succeeded with it loaded, ≥1
-  gate-verified, wins > losses
-- **quarantined** — ≥3 losses and more losses than wins; never auto-injected
+- **proven** — a matched held-out ablation showed a positive effect: the
+  same cases run with and without the skill, arms shuffled per case, scored
+  by a grader that never sees which arm it is grading. Co-occurrence —
+  however many wins — promotes nothing
+- **quarantined** — an ablation showed HARM; never auto-injected
   again, still on disk. One verified win redeems it to candidate
 
 Skills compose: `USES: a, b` or `[[name]]` pulls sub-skills one hop.
@@ -1025,7 +1027,7 @@ Two tabs.
 **Work proof** — every mission with its criteria, the evidence behind each met
 one, and which are still open.
 
-**Platform proof** — fifteen capabilities, each with its level (0 SPEC → 5
+**Platform proof** — 19 capabilities, each with its level (0 SPEC → 5
 PRODUCTION PROVEN), the reason for that level, what a user can actually do
 with it, the invariants it must hold, the code hash the evidence is bound to,
 and the exact `python tests/…` command that reproduces it.
@@ -1178,12 +1180,18 @@ prices. Live catalogue browsing from the panel.
 
 ## 13. Where commands run
 
-`[agent] sandbox = "host" | "docker" | "e2b" | "daytona"`.
+`[agent] sandbox = "docker" | "host" | "e2b" | "daytona"`.
 
 - **host** — this machine, under `policy.py`
 - **docker** — a throwaway container at `/work`, `--network none` by default,
   1GB memory, 256 pids
 - **e2b / daytona** — hosted microVM sandboxes behind their API keys
+
+**`host` is refused by default.** It is not isolation — a model-authored
+process reaches the whole machine, and a detached child outlives the check
+that would have caught it. An owner who wants it for a trusted development
+fixture must also write `allow_unsafe_host = true`; every refusal names
+that key.
 
 **Fail closed.** A configured-but-unavailable backend returns exit 127 with
 the reason and runs **nothing** on the host. Policy runs first in every
@@ -1287,7 +1295,8 @@ max_done_rejects = 6
 escalate_after_errors = 3
 max_output_tokens = 0               # 0 = provider default
 retain_finished_tasks = 150
-sandbox = "host"                    # host | docker | e2b | daytona
+sandbox = "docker"                  # docker | host | e2b | daytona
+allow_unsafe_host = false           # `host` is REFUSED unless this is true
 sandbox_network = false             # docker egress
 sandbox_image = "python:3.12-slim"
 command_env_allow = []              # named keys a command may see
@@ -1474,7 +1483,7 @@ Derived from `ui.py`, not from memory — 51 read routes, 18 write routes and
   request whether or not a token is set (`test_csrf.py`).
 
 All of it is guarded by the same token when you start the panel with
-`--token`; the SSE stream accepts it as `?token=` because `EventSource`
+`--token`, as an `Authorization: Bearer` header. The stream is read with `fetch` rather than `EventSource`
 cannot send headers.
 
 ---
@@ -1491,6 +1500,11 @@ Written as JSON lines to `logs/agent.log`, streamed to the panel:
 `skill_record_failed` `failure_recurred` `memory_file_failed` `gotcha_filed`
 `gotcha_failed` `premise_warning` `model_routed` `route_record_failed`
 `compaction_incomplete` `tool_results_cleared` `health_ritual`
+`trajectory_opened` `trajectory_closed` `trajectory_refused`
+`trajectory_close_failed` `procedure_compiled` `procedure_compile_refused`
+`procedure_evaluated` `procedure_evaluation_refused` `procedure_route`
+`procedure_route_rejected` `procedure_route_skipped`
+`scheduler_record_failed`
 `health_ritual_failed` `harness_manifest_failed` `state_corrupt`
 `state_trimmed` `archive_failed` `lock_break` `inbox_scanned`
 `exam_dispatched` `reexam_queued` `reexam_scheduled` `gaps_queued`

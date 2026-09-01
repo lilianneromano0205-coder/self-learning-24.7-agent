@@ -21,7 +21,8 @@ import json
 import os
 import sys
 
-from common import AGENT_DIR, api, make_sandbox, start_panel, stop_panel
+from common import AGENT_DIR, api, make_sandbox, seal_variant_protocol, \
+    start_panel, stop_panel
 
 sys.path.insert(0, AGENT_DIR)
 import fleet
@@ -95,6 +96,10 @@ def main():
     V.spawn(root, "v-careful", "practitioner",
             "# ROLE: practitioner\nverify before finishing\n", "fewer refusals",
             {"metric": "gate_rejects", "expected_delta": -2})
+    # promotion additionally requires the sealed three-battery protocol;
+    # the fixture seals it (and its hidden-phase receipts) through the same
+    # owner authority production uses — see common.seal_variant_protocol
+    seal_variant_protocol(root, "v-careful")
     m = V.load_manifest(root)
     tr2 = trial_record(base_passes=1, var_passes=3, base_rej=3, var_rej=0)
     m["v-careful"]["trials"] = tr2

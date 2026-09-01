@@ -59,6 +59,9 @@ SLOPPY3 = [
 ]
 
 SETTINGS = """[agent]
+# trusted keyless fixture: gates carry this host's python path (common.py:21)
+sandbox = "host"
+allow_unsafe_host = true
 poll_interval_seconds = 1
 max_task_usd = 0
 reflect_after = []

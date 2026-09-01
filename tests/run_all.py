@@ -48,7 +48,17 @@ TESTS = ["test_resume.py", "test_lock.py", "test_json_toolcall.py",
          "test_runbook.py", "test_repair.py", "test_swarm.py",
          "test_sources.py", "test_mastery.py", "test_steer.py",
          "test_freshness.py", "test_contract_model.py",
-         "test_subquery.py", "test_frontier.py", "test_frontier_live.py"]
+         "test_subquery.py", "test_frontier.py", "test_frontier_live.py",
+         "test_execution_containment.py", "test_acquisition_arena.py",
+         "test_mcp_hardening.py", "test_ui_auth_hardening.py",
+         "test_measurement_integrity.py", "test_procedural_learning.py",
+         "test_scheduler_verifier.py", "test_memory_hybrid.py",
+         "test_memory_benchmarks.py", "test_memory_policy.py",
+         "test_skill_attribution.py", "test_advanced_learning.py",
+         "test_research_discovery.py", "test_release_checks.py",
+         "test_loop_learning_controls.py", "test_capability_graph.py",
+         "test_use_cases.py", "test_tabular.py",
+         "test_vision_preservation.py"]
 
 
 def main():

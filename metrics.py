@@ -509,6 +509,119 @@ def harness_contribution(home, slug=None):
     }
 
 
+def _family_of(task):
+    return (task.get("family") or task.get("course")
+            or task.get("task_class") or "general")
+
+
+def amortization(home, slug=None):
+    """THE LEARNING CLAIM, AS A NUMBER: does the second encounter with a
+    family of work cost less than the first?
+
+    This is the objective the whole architecture is pointed at — expensive
+    reasoning on novel work, converging on cheap deterministic execution once
+    the work is understood — and until now nothing measured it. A system that
+    accumulates knowledge without this number can only assert that it is
+    learning.
+
+    Method: gated tasks that a gate PASSED, grouped by family, in the order
+    they were created, split into an earlier and a later half. The ratio is
+    earlier-mean / later-mean, so a value above 1 means the later work was
+    cheaper. Families with fewer than 2*MIN_HALF verified successes are not
+    split at all — half of two tasks is one task, and one task is an anecdote.
+
+    THE UNIT IS MODEL STEPS, not dollars, and that is deliberate. Steps are
+    observed for every task on every provider; spend is only observed when
+    the provider carries prices, and a free or mock provider reports 0.0,
+    which would make every ratio either 1.0 or a division by zero. Spend is
+    reported ALONGSIDE, and is None when nothing was metered rather than 0 —
+    an unmeasured cost is not a free one.
+
+    What it cannot tell you: whether the later tasks were EASIER. Families
+    group by name, not by difficulty, so a ratio above 1 is evidence of
+    cheaper work on similar-shaped tasks, not proof of transfer. That is why
+    `deterministic_share` is reported separately: a verified success that took
+    zero model steps is the one case where cheapness is not a judgement call.
+    """
+    MIN_HALF = 3
+    families, det_runs, det_total = {}, 0, 0
+    metered = False
+    for e in _experts(home):
+        if slug and e["name"] != slug:
+            continue
+        rows = sorted(_tasks(e["root"]),
+                      key=lambda t: (t.get("created") or "", t.get("id") or ""))
+        for t in rows:
+            if not t.get("done_check") or t.get("status") != "done":
+                continue          # only VERIFIED work — a cheap failure is
+            fam = _family_of(t)   # not a saving
+            steps = len(t.get("steps") or [])
+            try:
+                cost = float(t.get("cost_usd") or 0)
+            except (TypeError, ValueError):
+                cost = 0.0
+            metered = metered or cost > 0
+            families.setdefault(fam, []).append({"steps": steps, "cost": cost})
+            det_total += 1
+            if t.get("procedure_routed"):
+                det_runs += 1
+
+    per_family, ratios = [], []
+    for fam, rows in sorted(families.items()):
+        row = {"family": fam, "verified": len(rows), "split": False}
+        if len(rows) >= 2 * MIN_HALF:
+            half = len(rows) // 2
+            early, late = rows[:half], rows[half:]
+            e_steps = sum(r["steps"] for r in early) / len(early)
+            l_steps = sum(r["steps"] for r in late) / len(late)
+            row.update(
+                split=True,
+                early_steps=round(e_steps, 3), later_steps=round(l_steps, 3),
+                step_ratio=(round(e_steps / l_steps, 3) if l_steps else None),
+                cheaper=(l_steps < e_steps))
+            if l_steps:
+                ratios.append(e_steps / l_steps)
+            elif e_steps:
+                row["step_ratio"] = None
+                row["note"] = ("later work took zero model steps — the ratio "
+                               "is unbounded, which is the intended end state "
+                               "and not a number to average")
+            if metered:
+                e_cost = sum(r["cost"] for r in early) / len(early)
+                l_cost = sum(r["cost"] for r in late) / len(late)
+                row.update(early_cost_usd=round(e_cost, 6),
+                           later_cost_usd=round(l_cost, 6),
+                           cost_ratio=(round(e_cost / l_cost, 3)
+                                       if l_cost else None))
+        per_family.append(row)
+
+    split = [r for r in per_family if r["split"]]
+    value = round(sum(ratios) / len(ratios), 3) if ratios else None
+    return {"metric": "Amortization (earlier / later model steps per "
+                      "verified success)",
+            "value": value,
+            "numerator": len(split), "denominator": len(per_family),
+            "enough": len(split) >= 1 and len(ratios) >= 1,
+            "means": "above 1.0 means repeated work of the same shape now "
+                     "costs fewer model steps; families are grouped by name, "
+                     "so this is evidence of cheaper work on similar tasks, "
+                     "not proof of transfer",
+            "source": "state.json task ledger (verified, gated tasks only)",
+            # A RATIO, NOT A RATE. Without this the panel's fallthrough branch
+            # rendered 2.0 as "200%", which reads as a success rate going
+            # impossibly well rather than "half the model steps it used to
+            # take". Both renderers key on this.
+            "unit": "ratio",
+            "also": (f"{det_runs} of {det_total} verified success(es) used a "
+                     f"proven procedure and took no model step at all"),
+            "deterministic_share": _pct(det_runs, det_total),
+            "spend_measured": metered or None,
+            "spend_note": (None if metered else
+                           "no task carried a metered cost, so the dollar "
+                           "ratio is NOT MEASURED — not zero"),
+            "families": per_family}
+
+
 # ------------------------------------------------------ the ones we will not
 
 NOT_MEASURABLE = [
@@ -536,7 +649,7 @@ NOT_MEASURABLE = [
 
 ALL = (verified_success, false_success, recovery, goal_fidelity, autonomy,
        interruptions, cost_per_verified, repeat_failure, acquisition,
-       calibration, harness_contribution)
+       calibration, harness_contribution, amortization)
 
 
 def report(home, slug=None):
@@ -573,6 +686,8 @@ def render(rep):
             shown = f"${v:,.4f}"
         elif r.get("unit") == "count":
             shown = f"{v:g}"
+        elif r.get("unit") == "ratio":
+            shown = f"{v:.2f}x"          # never a percentage
         elif r["denominator"] and r["numerator"] is not None \
                 and isinstance(v, float) and v <= 1:
             shown = f"{v:.1%}"

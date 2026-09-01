@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Mechanical spec verification — layer 1 of the hierarchy (Part 8).
+"""Mechanical spec verification — L0 of the verification hierarchy.
 
 Spec items in courses/<name>/spec.md may carry an embedded check command:
 
@@ -54,8 +54,7 @@ def run_checks(items, root, timeout):
     model-authored, so they run under the same containment as any other
     model-authored command: policy screens them, and the sandbox scrubs the
     environment so a spec item cannot read the harness's provider keys.
-    Falls back to a plain run only if those modules are unavailable (verify.py
-    is also used standalone, outside an expert)."""
+    Missing execution authority fails closed, including standalone use."""
     results = []
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     cfg = {}

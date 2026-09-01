@@ -115,7 +115,8 @@ def cfg_for(root, kind, url=None):
     p = os.path.join(root, "settings.toml")
     with io.open(p, encoding="utf-8") as f:
         text = f.read()
-    drop = ("sandbox =", "sandbox_network =", "e2b_url =", "daytona_url =")
+    drop = ("sandbox =", "sandbox_network =", "sandbox_workload =",
+            "e2b_url =", "daytona_url =")
     lines = [l for l in text.splitlines()
              if not l.strip().startswith(drop)]
     out = []
@@ -123,6 +124,10 @@ def cfg_for(root, kind, url=None):
         out.append(l)
         if l.strip() == "[agent]":
             out.append(f'sandbox = "{kind}"')
+            # The fake endpoint exercises only the explicitly stateless
+            # client contract. Workspace-bearing hosted jobs fail closed
+            # until a real upload/download round trip exists.
+            out.append('sandbox_workload = "stateless"')
             if url:
                 out.append(f'{kind}_url = "{url}"')
     with io.open(p, "w", encoding="utf-8") as f:

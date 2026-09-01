@@ -334,7 +334,10 @@ const ICONS = {home:"🏠",work:"🎯",agents:"🤖",resources:"📚",
 const S = {view:"home", sel:null, sub:"ov", hist:false, sys:null, map:null,
            mindPath:null, timer:null, blockedN:0};
 
-function token(){ return localStorage.getItem("fleet_token") || ""; }
+// Credentials stay in this page's memory, never URLs or persistent storage.
+let panelToken = "";
+try { localStorage.removeItem("fleet_token"); } catch(e) {}
+function token(){ return panelToken; }
 async function api(url, opt){
   opt = opt || {};
   opt.headers = Object.assign({}, opt.headers);
@@ -347,7 +350,7 @@ async function api(url, opt){
     const r = await fetch(url, opt);
     if (r.status === 401){
       const t = prompt("This panel is token-guarded. Paste the access token:");
-      if (t){ localStorage.setItem("fleet_token", t.trim()); return api(url, opt); }
+      if (t){ panelToken = t.trim(); return api(url, opt); }
     }
     return await r.json();
   }catch(e){ return {error: String(e)}; }
@@ -1431,17 +1434,20 @@ function renderGuide(m){
     from anywhere import directly (Overview → Skills → <b>import a SKILL.md</b>). An
     imported skill arrives as <b>community</b>: injected with a warning and its bundled
     scripts refused until you press <b>trust</b>. What it has <i>earned</i> is separate:
-    3 distinct gate-verified wins makes it PROVEN.</p>
+    a matched held-out ablation — the same cases run with and without it, scored by an independent grader — is what makes it PROVEN. Wins alone never do.</p>
     <p>When a task worked, open it and press <b>save as routine</b>: the steps that
     actually worked become a skill, and a schedule (or an event) re-runs them —
     carrying the same definition of done. Show it once; it keeps happening.</p>
   </div></div>
 
   <div class="card"><h3>10 · Where commands run</h3><div class="body">
-    <p><span class="mono">[agent] sandbox = "host"</span> is this machine, gated by
-    policy. Set <span class="mono">"docker"</span> and every command runs in a throwaway
-    container with <b>no network</b>; <span class="mono">"e2b"</span> or
-    <span class="mono">"daytona"</span> run it in a hosted microVM behind your key.</p>
+    <p><span class="mono">[agent] sandbox = "docker"</span> is the default: every
+    command runs in a throwaway container with <b>no network</b>.
+    <span class="mono">"e2b"</span> or <span class="mono">"daytona"</span> run it in a
+    hosted microVM behind your key. <span class="mono">"host"</span> is this machine
+    and is <b>refused</b> unless you also set
+    <span class="mono">allow_unsafe_host = true</span> — it is not isolation, and a
+    detached child outlives the check that would have caught it.</p>
     <p>If the chosen backend is not available the command is <b>refused</b> and says why —
     it never quietly falls back to your laptop.</p>
   </div></div>
@@ -2306,8 +2312,8 @@ async function loadSkills(){
         onclick="trustSkill('${esc(x.skill)}')">trust</button>`:""}`).join(" ");
   const n=(sgr.proven||[]).length+(sgr.candidate||[]).length+(sgr.quarantined||[]).length;
   el.innerHTML = n? `<div class="row">${row(sgr.proven,"ok","PROVEN")}${row(sgr.candidate,"queued","candidate")}${row(sgr.quarantined,"bad","quarantined")}</div>
-    <p class="muted" style="font-size:11.5px;margin:8px 0 0">PROVEN = 3 distinct gate-verified wins.
-    Quarantined = failed more than it worked (kept, never auto-loaded). Written by the Reflector, graded by outcomes.
+    <p class="muted" style="font-size:11.5px;margin:8px 0 0">PROVEN = a matched held-out ablation showed a positive effect.
+    Quarantined = an ablation showed harm (kept, never auto-loaded). Counting wins promotes nothing: loaded-during-success is not caused-success.
     <b>community</b> skills come from outside: injected with a warning, scripts disabled until you press trust.</p>
     <div class="row" style="margin-top:8px"><button class="btn sm" onclick="dlgSkillImport()">＋ import a SKILL.md</button></div>`
    : `<span class="muted">no skills yet — they are written after real work and earn their status</span>
@@ -3024,7 +3030,8 @@ async function doTask(){
 const SHORTCUTS = [["courses","📚 notes"],["skills","🧩 skills"],
   ["contexts","💬 transcripts"],["contexts/archive","🗄 archived turns"],
   ["workspace","✏ drafts"],["out","📦 deliverables"],["logs","📜 logs"],
-  ["briefing","⚡ briefing"],["inbox","📥 inbox"]];
+  ["briefing","⚡ briefing"],["inbox","📥 inbox"],
+  ["runbooks","⚙ procedures"]];
 /* One file tree, two homes: the Skills tab and §5's Advanced -> Raw files.
    Two copies of this markup would drift the first time a class changed, and
    the second copy is exactly the one nobody would remember to fix. */
@@ -3059,6 +3066,10 @@ async function renderMind(b){
     <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:12px">
       compiled per task, budgeted per source</span></h3>
   <div class="body" id="ctxwins"><span class="muted">loading…</span></div></div>
+  <div class="card"><h3>Procedures — work it can now do without a model
+    <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:12px">
+      trust is earned on sealed fresh instances, never on repetition</span></h3>
+  <div class="body" id="procBody"><span class="muted">loading…</span></div></div>
   <div class="card"><h3>Mind — everything it knows and everything it did
     <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:12px">
       read-only; agents own their files</span></h3>
@@ -3073,7 +3084,7 @@ async function renderMind(b){
         transcripts are complete conversations; nothing here is ever silently deleted</div></div>
     </div>
   </div></div>`;
-  loadCtxWindows(); loadSelf(); loadKnowledge();
+  loadCtxWindows(); loadSelf(); loadKnowledge(); loadProcedures();
   if (S.mindPath) openFile(S.mindPath);
 }
 async function loadSelf(){
@@ -3098,6 +3109,42 @@ async function loadSelf(){
       <th>exam</th><th>sources</th><th></th></tr></thead><tbody>${studied}</tbody></table></div>`
       :`<span class="muted">nothing studied yet</span>`}
     <pre class="out" style="margin-top:8px">${esc(r.block||"")}</pre>`;
+}
+/* PROCEDURES. /api/runbooks has always returned this — status, trust,
+   envelope, provenance — and nothing in the panel called it, while the guide
+   pointed the owner at this very page to see "procedures the fleet has
+   proven". A route with no caller is the defect this platform exists to
+   catch, so it is worth catching on its own panel. */
+async function loadProcedures(){
+  const el = document.getElementById('procBody'); if (!el) return;
+  const d = await api('/api/runbooks?expert='+encodeURIComponent(S.sel));
+  const rows = (d && d.runbooks) || [];
+  if (!rows.length){ el.innerHTML = `<span class="muted">nothing compiled yet —
+    a procedure is induced from repeated verified work, then must pass sealed
+    fresh instances before it may run on its own</span>`; return; }
+  const cls = s => s==="proven"?"ok":(s==="quarantined"?"bad":"queued");
+  el.innerHTML = `<div class="tablewrap"><table><thead><tr>
+    <th>procedure</th><th>status</th><th>kind</th><th>fires on</th>
+    <th>steps</th><th>accepted</th><th>scope</th></tr></thead><tbody>` +
+    rows.map(r => {
+      const t = r.trust || {}, env = t.envelope || {}, rel = t.reliability || {};
+      const compiled = !!(r.provenance && r.provenance.compiled);
+      return `<tr>
+        <td class="mono">${esc(r.name)}${r.draft?' <span class="muted">(draft)</span>':''}</td>
+        <td><span class="tag ${cls(r.status)}">${esc(r.status||"candidate")}</span></td>
+        <td>${compiled?'induced — runs with <b>no model call</b>':'<span class="muted">owner-written steps</span>'}</td>
+        <td class="muted">${esc((r.triggers||[]).slice(0,4).join(", "))||"—"}</td>
+        <td>${(r.steps||[]).length}</td>
+        <td>${rel.accepted!==undefined?`${rel.accepted}/${rel.attempts}`:'<span class="muted">—</span>'}</td>
+        <td class="muted">${esc(env.scope||"—")}${env.distinct_inputs?
+          ` · ${env.distinct_tasks} task(s), ${env.distinct_inputs} input(s)`:''}</td>
+      </tr>`;
+    }).join("") + `</tbody></table></div>
+    <p class="muted" style="font-size:11.5px;margin:8px 0 0">A procedure earns
+    PROVEN only by passing an owner-sealed suite of instances it has never seen,
+    including an edge case — repetition alone earns nothing. Its scope is stated
+    rather than assumed: nothing here claims to generalise beyond what was
+    observed.</p>`;
 }
 async function loadKnowledge(){
   const el = document.getElementById("knowBody"); if(!el) return;
@@ -4094,7 +4141,7 @@ async function renderSystem(m, nested){
     <p style="font-size:13px"><b>Anywhere access:</b>
       <span class="mono">python ui.py --host 0.0.0.0 --token YOURTOKEN</span> behind
       Tailscale (<span class="mono">setup-remote.sh</span>) → this exact panel, private
-      HTTPS, no open ports. The panel asks for the token once and remembers it.</p>
+      HTTPS, no open ports. The panel asks for the token and keeps it only until this page closes or reloads.</p>
     <p style="font-size:13px"><b>24/7:</b> <span class="mono">setup-vps.sh</span> installs
     systemd units so loops and this panel restart on boot and after crashes; state
     survives kill −9 with at most one step lost.</p>
@@ -4726,6 +4773,10 @@ async function renderMetrics(b){
     if (typeof m.value === "boolean") return m.value ? "holds" : "does not hold";
     if (m.unit === "USD") return usd(m.value);
     if (m.unit === "count") return String(m.value);
+    /* a RATIO is not a rate: amortization returns 2.0 meaning "half the model
+       steps it used to take", and the percent branch below rendered that as
+       "200%", which reads like a success rate going impossibly well */
+    if (m.unit === "ratio") return (Math.round(m.value * 100) / 100) + "×";
     return Math.round(m.value * 1000) / 10 + "%";
   };
   b.innerHTML = `
@@ -5032,24 +5083,58 @@ async function renderMission(m){
 const EV_KINDS = ["task_start","tool_call","task_end","done_refused",
   "approval_required","prospective_fired","escalated","retry_queued",
   "premise_warning","model_routed","ui_card","health_ritual","stop_condition",
-  "gotcha_filed","failure_recurred","skill_status","budget_exceeded"];
-function connectEvents(){
-  if (!window.EventSource || S.es) return;
-  const t = token();
-  let url = '/api/events'; if (t) url += '?token='+encodeURIComponent(t);
-  let es;
-  try { es = new EventSource(url); } catch(e){ return; }
-  S.es = es;
+  "gotcha_filed","failure_recurred","skill_status","budget_exceeded",
+  // the procedural loop — kept in step with FEED_EVENTS in ui.py, which is
+  // the server-side allowlist this mirrors. A name missing from EITHER list
+  // is a line the owner never sees.
+  "trajectory_opened","trajectory_closed","trajectory_refused",
+  "trajectory_close_failed","procedure_compiled","procedure_compile_refused",
+  "procedure_evaluated","procedure_evaluation_refused","procedure_route",
+  "procedure_route_rejected","procedure_route_skipped",
+  "scheduler_record_failed"];
+async function connectEvents(){
+  if (!window.fetch || !window.ReadableStream || S.es) return;
+  const controller = new AbortController();
+  S.es = {close: ()=>controller.abort()};
   S.live = [];
-  const push = (ev)=>{
-    try { const row = JSON.parse(ev.data); S.live.unshift(row);
-      S.live = S.live.slice(0,60); S.streamed = true; paintLive(row);
-    } catch(e){}
-  };
-  EV_KINDS.forEach(k=>es.addEventListener(k, push));
-  es.addEventListener("ready", ()=>{ S.streamOn = true; paintLive(null); });
-  es.onerror = ()=>{ S.streamOn = false; try{es.close();}catch(e){} S.es=null;
-    setTimeout(connectEvents, 5000); };
+  let reader;
+  try {
+    const response = await fetch('/api/events', {
+      headers: token() ? {Authorization: 'Bearer '+token()} : {},
+      signal: controller.signal, cache: 'no-store', credentials: 'omit',
+      redirect: 'error', referrerPolicy: 'no-referrer'});
+    if (!response.ok || !response.body) return;
+    reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let pending = '';
+    while (!controller.signal.aborted) {
+      const {value, done} = await reader.read();
+      if (done) break;
+      pending += decoder.decode(value, {stream:true});
+      if (pending.length > 1000000) throw new Error('event frame too large');
+      let boundary;
+      while ((boundary = pending.indexOf('\n\n')) >= 0) {
+        const frame = pending.slice(0,boundary); pending = pending.slice(boundary+2);
+        let kind = 'message'; const data = [];
+        frame.split('\n').forEach(line=> {
+          if (line.startsWith('event:')) kind = line.slice(6).trim();
+          if (line.startsWith('data:')) data.push(line.slice(5).trimStart());
+        });
+        if (kind === 'ready') { S.streamOn = true; paintLive(null); }
+        else if (EV_KINDS.includes(kind)) {
+          try { const row = JSON.parse(data.join('\n')); S.live.unshift(row);
+            S.live = S.live.slice(0,60); S.streamed = true; paintLive(row);
+          } catch(e) {}
+        }
+      }
+    }
+  } catch(e) { /* REST polling continues while the stream reconnects. */ }
+  finally {
+    controller.abort();
+    if (reader) reader.releaseLock();
+    S.streamOn = false; S.es = null;
+    setTimeout(connectEvents, 5000);
+  }
 }
 function feedRowHtml(r){
   return `<div class="frow"><span class="fdot ${esc(r.severity||"info")}"></span>
@@ -5069,9 +5154,15 @@ function paintLive(row){
   }
 }
 (function boot(){
-  const h = new URLSearchParams(location.hash.slice(1));
-  if (h.get("t")) { localStorage.setItem("fleet_token", h.get("t"));
-    history.replaceState(null,"",location.pathname); }
+  // Discard legacy credential links without importing their bearer token.
+  const legacyHash = new URLSearchParams(location.hash.slice(1));
+  const legacyQuery = new URLSearchParams(location.search);
+  if (legacyHash.has('t') || legacyQuery.has('token')) {
+    legacyQuery.delete('token');
+    const q = legacyQuery.toString();
+    history.replaceState(null, '', location.pathname+(q?'?'+q:'')+
+      (legacyHash.has('t')?'':location.hash));
+  }
   applyHash();               // a pasted deep link opens that exact screen
   render();
   connectEvents();

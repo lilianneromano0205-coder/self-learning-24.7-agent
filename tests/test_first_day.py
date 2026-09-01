@@ -134,9 +134,22 @@ def check_a_bad_key_says_so(home, slug, srv):
     assert r.returncode != 0, (
         "a failing probe must exit non-zero, or a setup script cannot branch "
         "on it")
-    # …and no key at all is a different message, naming the variable
-    r2 = run(["loop.py", "check", "--root", root], cwd=AGENT_DIR, timeout=180,
-             env={"DEEPSEEK_API_KEY": ""})
+    # …and no key at all is a different message, naming the variable.
+    # "No key at all" must mean no key in ANY declared source. The canonical
+    # resolver (credentials.resolve) rightly falls back to the expert's own
+    # agent.env when the environment variable is empty — fleet.create copies
+    # the fleet's env file into every expert root. This check used to pass
+    # only because the loop's private resolver modeled fewer sources than
+    # the runtime; encoding that fork here is how it survived. So empty the
+    # file source too, not just the variable.
+    env_file = os.path.join(root, "agent.env")
+    held = env_file + ".hold"
+    os.replace(env_file, held)
+    try:
+        r2 = run(["loop.py", "check", "--root", root], cwd=AGENT_DIR,
+                 timeout=180, env={"DEEPSEEK_API_KEY": ""})
+    finally:
+        os.replace(held, env_file)
     out2 = r2.stdout + r2.stderr
     assert "FAIL" in out2 and "DEEPSEEK_API_KEY" in out2, out2[-400:]
     assert "no API key" in out2, out2[-400:]
@@ -267,8 +280,18 @@ def _point_at(root, base_url, key_env):
                                    for k, x in v.items()) + "}"
         return json.dumps(str(v))
 
+    agent_table = dict(cfg.get("agent") or {})
+    # The fixture's subject is bootstrap -> key -> first task, not the
+    # execution backend. The shipped default is `docker`, which is right for
+    # a real install and unavailable on any machine without usable Linux
+    # containers (every GitHub Windows runner) — there the first task fails
+    # with rc 127 and this file reports "the first real task did not
+    # complete", which names the wrong thing. It declares the trusted
+    # developer host, as every other keyless fixture here does.
+    agent_table["sandbox"] = "host"
+    agent_table["allow_unsafe_host"] = True
     lines = ["[agent]"]
-    for k, v in (cfg.get("agent") or {}).items():
+    for k, v in agent_table.items():
         lines.append(f"{k} = {emit(v)}")
     lines += ["", "[providers.deepseek]", f'base_url = {emit(base_url)}',
               f'api_key_env = {emit(key_env)}', ""]

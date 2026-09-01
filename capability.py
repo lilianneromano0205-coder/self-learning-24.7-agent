@@ -62,6 +62,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 
@@ -81,7 +82,13 @@ class PackError(Exception):
 # ------------------------------------------------------------------- paths
 
 def pack_dir(home, name):
-    return os.path.join(home, PACKS_DIR, str(name))
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,100}", str(name)):
+        raise PackError("invalid pack name")
+    base = os.path.realpath(os.path.join(home, PACKS_DIR))
+    path = os.path.join(base, str(name))
+    if os.path.realpath(path) != os.path.abspath(path):
+        raise PackError("pack path must not be a symlink")
+    return path
 
 
 def _read_json(path):
@@ -112,6 +119,14 @@ def transfer_tasks(home, name):
     resolve. Nothing in the platform ever injects these into a study
     context, and test_mastery asserts both properties."""
     return _tasks_in(os.path.join(pack_dir(home, name), "transfer"))
+
+
+def baseline_tasks(home, name):
+    return _tasks_in(os.path.join(pack_dir(home, name), "baseline"))
+
+
+def retention_tasks(home, name):
+    return _tasks_in(os.path.join(pack_dir(home, name), "retention"))
 
 
 def load(home, name):
@@ -170,39 +185,52 @@ def validate(home, name, pk=None):
             out.append(f"mastery.{k} must be a fraction in (0, 1] — a pack "
                        f"with no bar is an exam nobody can fail")
     author = pk.get("author")
-    if author is not None and (not isinstance(author, str)
-                               or not author.strip()):
-        out.append("author, when present, must name who wrote this exam — "
+    if not isinstance(author, str) or not author.strip():
+        out.append("author must name who wrote this exam — "
                    "provenance the student law checks against")
     ex = _tasks_in(os.path.join(d, "exercises"))
     tr = _tasks_in(os.path.join(d, "transfer"))
+    baseline = baseline_tasks(home, name)
+    retention = retention_tasks(home, name)
+    for label, group in (("baseline", baseline), ("retention", retention)):
+        if len(group) < MIN_TRANSFER:
+            out.append(f"{label} needs at least {MIN_TRANSFER} independent tasks")
     if not ex:
         out.append("no exercises — competence needs practice, not just facts")
     if len(tr) < MIN_TRANSFER:
         out.append(f"{len(tr)} transfer task(s); at least {MIN_TRANSFER} "
                    f"sealed unseen tasks are needed to show TRANSFER rather "
                    f"than memorisation")
-    if len(ex) + len(tr) > MAX_TASKS:
-        out.append(f"{len(ex) + len(tr)} tasks — this is several packs")
+    all_tasks = baseline + ex + tr + retention
+    if len(all_tasks) > MAX_TASKS:
+        out.append(f"{len(all_tasks)} tasks — this is several packs")
     seen = set()
     known = set((comps or {}).keys())
     for t in ex:
         out += _task_problems(t, "exercise", seen)
     for t in tr:
         out += _task_problems(t, "transfer", seen)
-    for t in ex + tr:
+    for label, group in (("baseline", baseline), ("retention", retention)):
+        for t in group:
+            out += _task_problems(t, label, seen)
+    prompts, instances = set(), set()
+    for t in all_tasks:
+        prompt = " ".join(str(t.get("goal", "")).lower().split())
+        instance = t.get("instance_id")
+        if prompt in prompts or (instance and instance in instances):
+            out.append(f"task {t.get('id')}: duplicate content or instance overlap")
+        prompts.add(prompt)
+        if instance:
+            instances.add(instance)
         for c in (t.get("competencies") or []):
             if known and c not in known:
                 out.append(f"task {t.get('id')}: unknown competency {c!r}")
     # every competency must be examined by at least one SEALED task, or
     # mastery in it would rest on practice alone — the student saw those
-    covered = set()
-    for t in tr:
-        covered.update(t.get("competencies") or [])
-    for c in known - covered:
-        out.append(f"competency {c!r} has no transfer task — nothing unseen "
-                   f"ever examines it, so 'mastery' of it would be "
-                   f"memorisation wearing a medal")
+    for label, group in (("baseline", baseline), ("transfer", tr), ("retention", retention)):
+        covered = {c for t in group for c in t.get("competencies", [])}
+        for c in known - covered:
+            out.append(f"competency {c!r} has no {label} task")
     return out
 
 
@@ -218,6 +246,8 @@ def _content_hash(home, name):
         dirs.sort()
         for fn in sorted(files):
             p = os.path.join(dirpath, fn)
+            if os.path.islink(p) or not os.path.isfile(p):
+                raise PackError("pack contains non-regular file")
             rel = os.path.relpath(p, d).replace(os.sep, "/")
             h.update(rel.encode("utf-8"))
             with open(p, "rb") as f:
@@ -234,6 +264,9 @@ def freeze(home, name):
         raise PackError("cannot freeze a malformed pack: "
                         + "; ".join(problems[:5]))
     digest = _content_hash(home, name)
+    existing = _sealed_hash(home, name)
+    if existing is not None and existing != digest:
+        raise PackError("seal conflict: publish a new pack version/name")
     sp = os.path.join(home, SEALS)
     os.makedirs(os.path.dirname(sp), exist_ok=True)
     try:
@@ -258,7 +291,10 @@ def _sealed_hash(home, name):
                 except ValueError:
                     continue
                 if row.get("pack") == str(name):
-                    found = row.get("hash")
+                    digest = row.get("hash")
+                    if found is not None and found != digest:
+                        raise PackError("conflicting pack seals: TAMPER")
+                    found = digest
     except OSError:
         pass
     return found
@@ -268,18 +304,24 @@ def verify_pack(home, name):
     """-> {"ok", "tamper", "why"}. A pack that no longer matches its seal
     grades nothing: a forged grader that executes is a forged grader that
     can pass — the same law contracts enforce, applied to the exam itself."""
-    sealed = _sealed_hash(home, name)
+    try:
+        sealed = _sealed_hash(home, name)
+    except PackError as exc:
+        return {"ok": False, "tamper": True, "why": str(exc)}
     if sealed is None:
         return {"ok": False, "tamper": False,
                 "why": f"pack {name!r} was never frozen; freeze it first "
                        f"(python capability.py freeze <home> {name})"}
-    current = _content_hash(home, name)
+    try:
+        current = _content_hash(home, name)
+    except (PackError, OSError) as exc:
+        return {"ok": False, "tamper": True, "why": str(exc)}
     if current != sealed:
         return {"ok": False, "tamper": True,
                 "why": f"pack {name!r} no longer matches its seal — its "
                        f"definition, tasks or validators were edited after "
                        f"freezing. Nothing will be graded against it."}
-    return {"ok": True, "tamper": False, "why": ""}
+    return {"ok": True, "tamper": False, "why": "", "hash": sealed}
 
 
 # ------------------------------------------------------- task -> contract
@@ -337,6 +379,8 @@ def draft(home, name, domain, competencies, author="owner"):
         raise PackError(f"pack {name!r} already exists — draft a new name")
     os.makedirs(os.path.join(d, "exercises"), exist_ok=True)
     os.makedirs(os.path.join(d, "transfer"), exist_ok=True)
+    os.makedirs(os.path.join(d, "baseline"), exist_ok=True)
+    os.makedirs(os.path.join(d, "retention"), exist_ok=True)
     os.makedirs(os.path.join(d, "validators"), exist_ok=True)
     pk = {"name": str(name), "version": 1, "domain": str(domain),
           "author": str(author),
@@ -357,13 +401,11 @@ def draft(home, name, domain, competencies, author="owner"):
               encoding="utf-8") as f:
         json.dump({"id": "e1", "goal": f"TODO: a practice task in {domain}",
                    "competencies": comps, "accept": stub_accept}, f, indent=1)
-    for i in range(1, MIN_TRANSFER + 1):
-        with open(os.path.join(d, "transfer", f"t{i}.json"), "w",
-                  encoding="utf-8") as f:
-            json.dump({"id": f"t{i}",
-                       "goal": f"TODO: an UNSEEN task examining {domain}",
-                       "competencies": comps, "accept": stub_accept},
-                      f, indent=1)
+    for split, prefix in (("baseline", "b"), ("transfer", "t"), ("retention", "r")):
+        for i in range(1, MIN_TRANSFER + 1):
+            with open(os.path.join(d, split, f"{prefix}{i}.json"), "w", encoding="utf-8") as f:
+                json.dump({"id": f"{prefix}{i}", "goal": f"TODO: independent {split} instance {i} examining {domain}",
+                           "competencies": comps, "accept": stub_accept}, f, indent=1)
     return {"pack": str(name), "dir": d, "author": str(author),
             "problems": validate(home, name)}
 

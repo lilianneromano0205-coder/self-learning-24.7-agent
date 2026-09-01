@@ -108,11 +108,19 @@ class RailError(Exception):
 
 
 def _get(url, timeout=TIMEOUT, accept="application/json"):
-    req = urllib.request.Request(url, headers={"User-Agent": UA,
-                                               "Accept": accept})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return r.read(4_000_000)
+        import ingest
+        ingest._check_scheme(url)
+        ingest._check_host(url)
+        req = urllib.request.Request(url, headers={"User-Agent": UA,
+                                                   "Accept": accept})
+        # Keep ingestion's host and redirect authority for both lanes. Never
+        # fall back to raw urlopen on a failed guard or endpoint failure.
+        with ingest._opener().open(req, timeout=timeout) as r:
+            data = r.read(4_000_001)
+        if len(data) > 4_000_000:
+            raise ValueError("discovery response exceeds byte limit")
+        return data
     except urllib.error.HTTPError as e:
         raise RailError(f"HTTP {e.code} {e.reason}") from e
     except Exception as e:
@@ -416,7 +424,7 @@ def _norm(url):
 
 
 def search(query, rails=None, limit=8, min_tier=None, cfg=None,
-           per_rail=None):
+           per_rail=None, *, general_web=False, as_of=None):
     """Find candidate sources. -> {"hits", "errors", "filtered", "rails"}
 
     Never raises for a rail failure: a discovery run with one dead rail is a
@@ -457,19 +465,40 @@ def search(query, rails=None, limit=8, min_tier=None, cfg=None,
             kind, tier, why = sources.classify(h["url"],
                                                kind_hint=h.pop("kind_hint", ""),
                                                cfg=cfg)
-            h.update({"kind": kind, "tier": tier, "why": why})
+            h.update({"kind": kind, "tier": tier, "why": why, "lane": "curated",
+                      "evidence_state": "retrieved", "established": False})
             hits.append(h)
     for u in unknown:
         errors.append({"rail": u, "error": "no such rail"})
 
-    bar = sources.LEARN_MIN_TIER if min_tier is None else int(min_tier)
+    lanes, rejected = ["curated"], []
+    if general_web:
+        import discovery_web
+        lanes.append("general_web")
+        try:
+            web_hits, rejected = discovery_web.search(asked, n, cfg, as_of, _json)
+            for h in web_hits:
+                key = _norm(h["url"])
+                if key in seen:
+                    continue
+                seen.add(key)
+                if not relevant(h["title"], wanted):
+                    off_topic += 1
+                    continue
+                hits.append(h)
+        except Exception as exc:
+            errors.append({"rail": "general_web", "error": f"{type(exc).__name__}: {str(exc)[:160]}"})
+    bar = sources.learn_bar(cfg, min_tier)[0]
     kept = [h for h in hits if h["tier"] <= bar]
+    review = [h for h in hits if h["tier"] > bar and h.get("lane") == "general_web"]
     filtered = len(hits) - len(kept)
     order = {r: i for i, r in enumerate(names)}
-    kept.sort(key=lambda h: (h["tier"], order.get(h["rail"], 99)))
+    kept.sort(key=lambda h: (h["tier"], order.get(h["rail"], 99),
+                             h["url"] if h.get("lane") == "general_web" else ""))
     return {"query": query, "asked": asked, "rails": names,
             "hits": kept[:limit], "errors": errors, "filtered": filtered,
-            "off_topic": off_topic, "found": len(hits), "min_tier": bar}
+            "off_topic": off_topic, "found": len(hits), "min_tier": bar,
+            "lanes": lanes, "review_candidates": review, "rejected_candidates": rejected}
 
 
 def add_url_commands(res, root=None):
@@ -501,6 +530,8 @@ def main():
                     help="print ingest.py add-url lines instead of a table")
     ap.add_argument("--root", help="expert root, for --commands")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--general-web", action="store_true", help="add owner-configured SearXNG candidate lane")
+    ap.add_argument("--as-of", help="ISO date for reproducible freshness checks")
     ap.add_argument("--list-rails", action="store_true")
     a = ap.parse_args()
 
@@ -517,8 +548,10 @@ def main():
         ap.error("a query is required (or --list-rails)")
 
     rails = [r.strip() for r in a.rails.split(",")] if a.rails else None
+    import sources
+    cfg = sources._root_cfg(os.path.abspath(a.root or "."))
     res = search(a.query, rails=rails, limit=a.limit, min_tier=a.min_tier,
-                 per_rail=a.per_rail)
+                 per_rail=a.per_rail, cfg=cfg, general_web=a.general_web, as_of=a.as_of)
 
     if a.json:
         print(json.dumps(res, indent=1))
@@ -540,10 +573,9 @@ def main():
             print(f"  rail '{e['rail']}' failed: {e['error']}")
     print()
     if not res["hits"]:
-        print("Nothing cleared the bar. That is a RESULT, not an error: these "
-              "catalogues do not index everything, and the alternative — "
-              "falling back to a web search — is what this module exists to "
-              "avoid.")
+        print("Nothing cleared the source bar. Curated coverage is limited; "
+              "the optional general-web lane requires owner configuration. "
+              "No source quality fallback was applied.")
         return 0
     for h in res["hits"]:
         extra = []

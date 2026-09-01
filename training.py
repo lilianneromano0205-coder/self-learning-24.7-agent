@@ -22,8 +22,10 @@ claim a level of the proof ladder it has not earned.
 
 So `run()` produces an exportable, hash-pinned training package and stops at
 the boundary, telling you exactly what an external trainer must do with it.
-`promote()` refuses a checkpoint whose DECLARED held-out score does not clear
-its declared bar, and every promotion records a rollback target.
+`promote()` refuses any candidate whose score_origin is not
+"sealed_paired_evaluation" — a merely DECLARED score can be registered and
+compared but can never promote — requires sealed evaluation and canary
+receipts, and every promotion records a rollback target.
 
 WHERE THE SCORE COMES FROM, SAID PLAINLY
 
@@ -64,6 +66,10 @@ import hashlib
 import json
 import os
 import time
+import uuid
+import math
+from pathlib import Path
+import learning_authority as authority
 
 DIR = "training"
 RUNS = os.path.join(DIR, "runs")
@@ -126,6 +132,7 @@ def capture(root, task, outcome, verified, criterion=None, evidence=""):
         "criterion": criterion, "evidence": str(evidence)[:500],
         "cost_usd": float(task.get("cost_usd") or 0.0),
     }
+    rec = _sanitise(rec)
     try:
         os.makedirs(os.path.dirname(_p(root, STORE)), exist_ok=True)
         with open(_p(root, STORE), "a", encoding="utf-8") as f:
@@ -177,8 +184,15 @@ def export(root, name, holdout_ratio=0.2, verified_only=True, tree=None):
     corpus produces the same split — an eval set that moves between runs
     cannot tell you whether the model improved.
     """
+    _owner_only("export sealed training dataset")
+    authority.identifier(name)
+    if not math.isfinite(holdout_ratio) or not 0 < holdout_ratio < 1:
+        raise Refused("holdout ratio must be strictly between zero and one")
     tree = tree or os.path.dirname(os.path.abspath(__file__))
-    rows = trajectories(root, verified_only=verified_only)
+    rows = [_sanitise({k: r.get(k) for k in EXPORT_FIELDS})
+            for r in trajectories(root, verified_only=verified_only)]
+    if any(not r.get("task") for r in rows):
+        raise Refused("every training trajectory needs a task identity")
     if len(rows) < 4:
         raise Refused(
             f"only {len(rows)} usable trajectory/trajectories. A training run "
@@ -189,20 +203,23 @@ def export(root, name, holdout_ratio=0.2, verified_only=True, tree=None):
     # but not PROPORTIONAL: with a small corpus it can put everything on one
     # side by chance, and a run that sometimes has no held-out set is a run
     # whose eval number sometimes means nothing.
-    ranked = sorted(rows, key=lambda r: hashlib.sha256(
-        str(r.get("task")).encode()).hexdigest())
-    n_hold = max(1, min(len(ranked) - 1, round(len(ranked) * holdout_ratio)))
-    holdout, train = ranked[:n_hold], ranked[n_hold:]
+    task_ids = sorted({r["task"] for r in rows}, key=lambda t: hashlib.sha256(str(t).encode()).hexdigest())
+    if len(task_ids) < 4:
+        raise Refused("at least four independent trajectory task identities required")
+    n_hold = max(1, min(len(task_ids) - 1, round(len(task_ids) * holdout_ratio)))
+    held_ids = set(task_ids[:n_hold])
+    holdout = [r for r in rows if r["task"] in held_ids]
+    train = [r for r in rows if r["task"] not in held_ids]
     train_ids = {r["task"] for r in train}
     hold_ids = {r["task"] for r in holdout}
     overlap = train_ids & hold_ids
     if overlap:
         raise Refused(f"benchmark contamination: {len(overlap)} task(s) are "
                       f"in both sets")
-    rid = f"{name}-{time.strftime('%Y%m%d-%H%M%S')}"
+    rid = f"{name}-{uuid.uuid4().hex[:16]}"
     d = _p(root, os.path.join(RUNS, rid))
     os.makedirs(d, exist_ok=True)
-    for fn, rows_ in (("train.jsonl", train), ("holdout.jsonl", holdout)):
+    for fn, rows_ in (("train.jsonl", train),):
         with open(os.path.join(d, fn), "w", encoding="utf-8") as f:
             for r in rows_:
                 f.write(json.dumps({k: r.get(k) for k in EXPORT_FIELDS},
@@ -212,7 +229,7 @@ def export(root, name, holdout_ratio=0.2, verified_only=True, tree=None):
         "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "train": {"n": len(train), "hash": _hash_rows(train)},
         "holdout": {"n": len(holdout), "hash": _hash_rows(holdout),
-                    "task_ids": sorted(hold_ids)},
+                    "task_ids": sorted(hold_ids), "storage": "owner_authority"},
         "verified_only": verified_only,
         "verifier_hash": _verifier_hash(tree),
         "boundary": (
@@ -230,6 +247,8 @@ def export(root, name, holdout_ratio=0.2, verified_only=True, tree=None):
     }
     with open(os.path.join(d, "manifest.json"), "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=1, ensure_ascii=False)
+    authority.store(root, "training-run", rid, {"manifest": manifest, "holdout": holdout,
+                    "train_hash": authority.digest(train)})
     return manifest
 
 
@@ -267,12 +286,18 @@ def register(root, run_id, checkpoint, eval_score, verifier_hash,
     field `score_origin` says "declared" so the record cannot be mistaken for
     an observation this platform made.
     """
+    _owner_only("register")
+    authority.identifier(run_id)
+    authority.identifier(checkpoint)
     d = _p(root, os.path.join(RUNS, run_id))
     try:
         with open(os.path.join(d, "manifest.json"), encoding="utf-8") as f:
             man = json.load(f)
     except OSError:
         raise Refused(f"no training run {run_id!r}")
+    sealed = authority.load(root, "training-run", run_id)
+    if man != sealed["manifest"]:
+        raise Refused("TAMPER: changed training manifest")
     if verifier_hash != man["verifier_hash"]:
         raise Refused(
             "this checkpoint was evaluated with a DIFFERENT verifier than the "
@@ -302,6 +327,8 @@ def register(root, run_id, checkpoint, eval_score, verifier_hash,
     if not blob.strip():
         raise Refused(f"the evidence file {evidence!r} is empty")
     reg = _registry(root)
+    if any(c["checkpoint"] == checkpoint for c in reg["candidates"]):
+        raise Refused("checkpoint identity is immutable; choose a new candidate")
     reg["candidates"].append({
         "run": run_id, "checkpoint": checkpoint,
         "eval_score": score, "eval_detail": str(eval_detail)[:400],
@@ -325,6 +352,9 @@ def promote(root, checkpoint, baseline_score, threshold=0.02, by="owner"):
     candidate — see the module docstring. What this gate enforces is that the
     declaration is complete, pinned to an evidence artifact, and clears a bar
     fixed before the comparison."""
+    _owner_only("promote")
+    if not all(math.isfinite(float(v)) for v in (baseline_score, threshold)) or not 0 <= float(baseline_score) <= 1 or threshold < 0.02:
+        raise Refused("invalid baseline or promotion threshold")
     reg = _registry(root)
     cand = next((c for c in reversed(reg["candidates"])
                  if c["checkpoint"] == checkpoint), None)
@@ -347,6 +377,19 @@ def promote(root, checkpoint, baseline_score, threshold=0.02, by="owner"):
             f"{baseline_score:.3f} = {delta:+.3f}, below the {threshold:+.3f} "
             f"bar. Not promoted: a change that cannot clear its own declared "
             f"threshold is not an improvement.")
+    if cand.get("score_origin") != "sealed_paired_evaluation":
+        raise Refused("declared evidence is not promotable: sealed evaluation and canary required")
+    receipt = authority.load(root, "training-eval", checkpoint)
+    canary = authority.load(root, "training-canary", checkpoint)
+    policy = authority.load(root, "training-policy", cand["run"])
+    if receipt["candidate"] != cand or not canary["passed"] or canary["checkpoint_sha256"] != cand["checkpoint_sha256"]:
+        raise Refused("TAMPER or failing canary")
+    if float(baseline_score) != receipt["baseline_score"] or threshold != policy["threshold"]:
+        raise Refused("promotion criteria differ from sealed policy")
+    if _verifier_hash(policy["tree"]) != cand["verifier_hash"]:
+        raise Refused("verifier changed after evaluation")
+    if hashlib.sha256(Path(cand["checkpoint_path"]).read_bytes()).hexdigest() != cand["checkpoint_sha256"]:
+        raise Refused("checkpoint changed after evaluation")
     previous = reg.get("promoted")
     cand["promoted"] = True
     reg["promoted"] = {"checkpoint": checkpoint, "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -363,6 +406,7 @@ def promote(root, checkpoint, baseline_score, threshold=0.02, by="owner"):
 
 
 def rollback(root, by="owner", why=""):
+    _owner_only("rollback")
     reg = _registry(root)
     cur = reg.get("promoted")
     if not cur:
@@ -376,6 +420,117 @@ def rollback(root, by="owner", why=""):
                            "to": target, "by": by, "why": why})
     _save_registry(root, reg)
     return reg["promoted"]
+
+
+def set_evaluation_policy(root, run_id, *, baseline_checkpoint, canary_tasks,
+                          seeds=(0, 1, 2), threshold=0.02, tree=None):
+    """Freeze criteria BEFORE importing a trained candidate; owner callbacks judge.
+
+    baseline_checkpoint is an immutable model revision/reference chosen by the
+    owner. A score supplied by the external trainer is never the evaluator.
+    """
+    _owner_only("set evaluation policy")
+    sealed = authority.load(root, "training-run", run_id)
+    tree = os.path.abspath(tree or os.path.dirname(__file__))
+    if _verifier_hash(tree) != sealed["manifest"]["verifier_hash"]:
+        raise Refused("verifier changed since export")
+    if len(set(seeds)) < 3 or any(type(s) is not int or s < 0 for s in seeds):
+        raise Refused("three distinct nonnegative seeds required")
+    if not math.isfinite(threshold) or threshold < 0.02 or threshold > 1:
+        raise Refused("invalid promotion threshold")
+    if not baseline_checkpoint:
+        raise Refused("immutable baseline reference required")
+    ids = [str(r.get("task", "")) for r in canary_tasks]
+    held = {str(r["task"]) for r in sealed["holdout"]}
+    training_ids = {str(r["task"]) for r in _training_rows(root, run_id)}
+    if len(ids) < 20 or len(set(ids)) != len(ids) or "" in ids or set(ids) & (held | training_ids):
+        raise Refused("canary requires 20 distinct fresh tasks outside train and holdout")
+    if len(held) < 20:
+        raise Refused("sealed evaluation requires at least 20 distinct holdout tasks")
+    return authority.store(root, "training-policy", run_id,
+        {"baseline_checkpoint": baseline_checkpoint, "canary_tasks": canary_tasks,
+         "seeds": list(seeds), "threshold": threshold, "tree": tree,
+         "verifier_hash": sealed["manifest"]["verifier_hash"]})
+
+
+def _training_rows(root, run_id):
+    sealed = authority.load(root, "training-run", run_id)
+    path = Path(root) / RUNS / authority.identifier(run_id) / "train.jsonl"
+    if path.is_symlink():
+        raise Refused("redirected training dataset")
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+    if authority.digest(rows) != sealed["train_hash"]:
+        raise Refused("TAMPER: training dataset changed")
+    return rows
+
+
+def evaluate_checkpoint(root, run_id, checkpoint, checkpoint_path, evaluator):
+    """Trusted owner evaluator(model_reference, heldout_row, seed) -> exact bool.
+
+    External training is never run here. The evaluator adapter must itself
+    keep graders out of the trainee's input and maintain execution isolation.
+    Passing a callable is owner code execution, never a worker tool.
+    """
+    _owner_only("evaluate checkpoint")
+    authority.identifier(checkpoint)
+    sealed = authority.load(root, "training-run", run_id)
+    policy = authority.load(root, "training-policy", run_id)
+    if _verifier_hash(policy["tree"]) != policy["verifier_hash"]:
+        raise Refused("verifier changed")
+    path = Path(checkpoint_path).resolve(strict=True)
+    if not path.is_file() or Path(checkpoint_path).is_symlink():
+        raise Refused("checkpoint must be a regular immutable file")
+    ck_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+    records = []
+    for seed in policy["seeds"]:
+        for row in sealed["holdout"]:
+            base = evaluator(policy["baseline_checkpoint"], dict(row), seed)
+            result = evaluator(str(path), dict(row), seed)
+            if type(base) is not bool or type(result) is not bool:
+                raise Refused("evaluator must return a mechanical boolean")
+            records.append({"task": row["task"], "seed": seed, "base": base, "candidate": result})
+    if hashlib.sha256(path.read_bytes()).hexdigest() != ck_hash or _verifier_hash(policy["tree"]) != policy["verifier_hash"]:
+        raise Refused("checkpoint/verifier mutated during evaluation")
+    n = len(records)
+    score = sum(r["candidate"] for r in records) / n
+    baseline = sum(r["base"] for r in records) / n
+    candidate = {"run": run_id, "checkpoint": checkpoint, "checkpoint_path": str(path),
+        "checkpoint_sha256": ck_hash, "eval_score": score, "score_origin": "sealed_paired_evaluation",
+        "seeds": len(policy["seeds"]), "verifier_hash": policy["verifier_hash"],
+        "holdout_hash": sealed["manifest"]["holdout"]["hash"],
+        "evidence_sha256": authority.digest(records), "promoted": False}
+    reg = _registry(root)
+    if any(c["checkpoint"] == checkpoint for c in reg["candidates"]):
+        raise Refused("checkpoint identity already registered")
+    authority.store(root, "training-eval", checkpoint,
+                    {"candidate": candidate, "baseline_score": baseline, "records": records})
+    reg["candidates"].append(candidate)
+    _save_registry(root, reg)
+    return {"candidate": candidate, "baseline_score": baseline}
+
+
+def canary(root, checkpoint, evaluator):
+    _owner_only("canary evaluation")
+    receipt = authority.load(root, "training-eval", checkpoint)
+    cand = receipt["candidate"]
+    policy = authority.load(root, "training-policy", cand["run"])
+    if _verifier_hash(policy["tree"]) != cand["verifier_hash"]:
+        raise Refused("verifier changed")
+    path = Path(cand["checkpoint_path"])
+    if hashlib.sha256(path.read_bytes()).hexdigest() != cand["checkpoint_sha256"]:
+        raise Refused("checkpoint changed")
+    records = []
+    for row in policy["canary_tasks"]:
+        base = evaluator(policy["baseline_checkpoint"], dict(row), policy["seeds"][0])
+        result = evaluator(str(path), dict(row), policy["seeds"][0])
+        if type(base) is not bool or type(result) is not bool:
+            raise Refused("canary evaluator must return mechanical booleans")
+        records.append({"task": row["task"], "base": base, "candidate": result})
+    if hashlib.sha256(path.read_bytes()).hexdigest() != cand["checkpoint_sha256"] or _verifier_hash(policy["tree"]) != cand["verifier_hash"]:
+        raise Refused("checkpoint/verifier mutated during canary")
+    passed = all(r["candidate"] for r in records)
+    return authority.store(root, "training-canary", checkpoint,
+        {"passed": passed, "records": records, "checkpoint_sha256": cand["checkpoint_sha256"]})
 
 
 def _owner_only(cmd):

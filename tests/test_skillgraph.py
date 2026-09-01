@@ -40,39 +40,66 @@ def main():
     sb = make_sandbox("skillgraph", providers={"m": {"script": "s.json"}},
                       roles={"tester": "m"}, scripts={"s.json": []})
 
-    # --- 1. the promotion gate
+    # --- 1. the promotion gate. Co-occurrence — however many wins — never
+    # promotes: loaded-when-it-worked is not caused-it-to-work. Only a
+    # matched held-out ablation, where the same cases run WITH and WITHOUT
+    # the skill and an independent grader scores both, earns "proven".
     write_skill(sb, "seo-audit", "steps...\n", "audit, seo")
     rel = "skills/seo-audit.md"
     sg.record_use(sb, [rel], "t1", success=True, verified=True)
     sg.record_use(sb, [rel], "t2", success=True, verified=False)
-    assert sg.status_of(sb, rel) == "candidate", \
-        "two wins must NOT promote — that is how superstitions form"
-    # the SAME task again adds no distinct evidence
     sg.record_use(sb, [rel], "t2", success=True, verified=False)
-    assert sg.status_of(sb, rel) == "candidate", \
-        "a repeated task id is one piece of evidence, not two"
     changed = sg.record_use(sb, [rel], "t3", success=True, verified=False)
-    assert changed.get("seo-audit") == ("candidate", "proven"), changed
-    assert sg.status_of(sb, rel) == "proven"
-    print("[gate] promotion required 3 DISTINCT winning tasks (1 verified); "
-          "duplicates and premature wins were refused")
+    assert changed == {}, changed
+    assert sg.status_of(sb, rel) == "candidate", \
+        "co-occurrence wins must NOT promote — that is how superstitions form"
 
-    # --- 2. quarantine and redemption
+    def helps(case, workdir, injected, seed):
+        return case["input"]["x"] * (2 if injected else 1)
+
+    def grade(case, out):
+        return out == case["expected"]
+
+    held = [{"id": f"held-{i}", "input": {"x": i}, "expected": i * 2}
+            for i in range(1, 7)]
+    rec = sg.run_ablation(sb, rel, held, helps, grade, seed=7)
+    assert rec["status"] == "COMPLETE", rec
+    assert sg.status_of(sb, rel) == "proven"
+    print("[gate] co-occurrence wins stayed candidate; only a matched "
+          "held-out ablation (6 discordant pairs, sign test) earned PROVEN")
+
+    # --- 2. quarantine and redemption — both are ablation verdicts now
     write_skill(sb, "flaky-trick", "bad advice\n", "flaky")
     frel = "skills/flaky-trick.md"
     for i in range(3):
         sg.record_use(sb, [frel], f"f{i}", success=False)
+    assert sg.status_of(sb, frel) == "candidate", \
+        "co-occurrence losses do not quarantine — same rule as promotion"
+
+    def harms(case, workdir, injected, seed):
+        return case["input"]["x"] * (1 if injected else 2)
+
+    harm_cases = [{"id": f"harm-{i}", "input": {"x": i}, "expected": i * 2}
+                  for i in range(1, 7)]
+    sg.run_ablation(sb, frel, harm_cases, harms, grade, seed=11)
     assert sg.status_of(sb, frel) == "quarantined"
     assert os.path.exists(os.path.join(sb, frel)), \
         "quarantine is a verdict, not a deletion"
-    sg.record_use(sb, [frel], "f9", success=True, verified=True)
+
+    def tie(case, workdir, injected, seed):
+        return case["input"]["x"] * 2
+
+    tie_cases = [{"id": f"tie-{i}", "input": {"x": i}, "expected": i * 2}
+                 for i in range(1, 7)]
+    sg.run_ablation(sb, frel, tie_cases, tie, grade, seed=13)
     assert sg.status_of(sb, frel) == "candidate", \
-        "one verified win redeems a quarantined skill to candidate"
-    for i in range(4):
-        sg.record_use(sb, [frel], f"g{i}", success=False)
+        "a contradictory (non-significant) ablation redeems to candidate"
+    harm2 = [{"id": f"again-{i}", "input": {"x": i}, "expected": i * 2}
+             for i in range(1, 7)]
+    sg.run_ablation(sb, frel, harm2, harms, grade, seed=17)
     assert sg.status_of(sb, frel) == "quarantined"
-    print("[quarantine] 3 losses quarantined the skill; a verified win "
-          "redeemed it; further losses re-quarantined it")
+    print("[quarantine] a harm-showing ablation quarantined the skill; a "
+          "contradictory one redeemed it; fresh harm evidence re-quarantined")
 
     # --- 3. graph-aware selection: order, exclusion, one-hop composition
     write_skill(sb, "find-competitors", "how to find them\n", "competitors")
@@ -95,7 +122,7 @@ def main():
 
     # --- status banners on injected blocks
     b = sg.annotate(sb, rel, "=== skills/seo-audit.md ===\nsteps...")
-    assert "PROVEN" in b and "3 distinct tasks" in b, b
+    assert "PROVEN" in b and "matched held-out ablation" in b, b
     b2 = sg.annotate(sb, "skills/competitive-analysis.md",
                      "=== skills/competitive-analysis.md ===\nx")
     assert "CANDIDATE" in b2 and "verify each step" in b2, b2

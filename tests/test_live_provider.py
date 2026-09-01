@@ -46,7 +46,10 @@ import modelgateway            # noqa: E402
 
 def settings(root, blocks, roles, extra="", timeout=8):
     """Write a settings.toml with LIVE providers — no mock anywhere."""
-    body = ["[agent]", "poll_interval_seconds = 1", "max_task_usd = 5.0",
+    # a trusted keyless fixture: its gates carry this host's python path, and
+    # the subject of this file is the HTTP client, not the execution backend
+    body = ["[agent]", 'sandbox = "host"', "allow_unsafe_host = true",
+            "poll_interval_seconds = 1", "max_task_usd = 5.0",
             "daily_budget_usd = 50.0", f"model_timeout_seconds = {timeout}",
             "reflect_after = []", extra, ""]
     body += blocks

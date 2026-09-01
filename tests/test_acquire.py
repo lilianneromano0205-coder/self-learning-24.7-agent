@@ -376,7 +376,7 @@ def check_ladder_and_rollback(sb):
     got = next(r for r in acquire.load(sb) if r["id"] == rec["id"])
     assert got["worker"], "the worker it installed into is recorded"
     assert got["install_evidence"]["zone"] == "isolated"
-    acquire.capability_test(sb, rec["id"], True, "ran the smoke test: exit 0")
+    acquire.capability_test(sb, rec["id"])
     acquire.promote(sb, rec["id"], by="owner", permissions=["read:files"])
     final = next(r for r in acquire.load(sb) if r["id"] == rec["id"])
     assert final["stage"] == "trusted"
@@ -415,7 +415,7 @@ def check_staging_never_control(sb):
     p = os.path.join(sb, "settings.toml")
     with open(p, "r", encoding="utf-8-sig") as f:
         original = f.read()
-    text = original if "sandbox = " in original else \
+    text = original.replace('sandbox = "host"', 'sandbox = "docker"') if "sandbox = " in original else \
         original.replace("[agent]", "[agent]\n" + 'sandbox = "docker"', 1)
     with open(p, "w", encoding="utf-8") as f:
         f.write(text)
@@ -451,9 +451,10 @@ def check_staging_never_control(sb):
         f"path — every sandbox binds the control zone read-only, so that "
         f"install can only fail")
     assert rec["stage"] == "installed", rec
-    assert os.path.exists(os.path.join(sb, "capabilities", "stageprobe",
+    assert os.path.exists(os.path.join(sb, rec['install_path'],
                                        "stageprobe", "__init__.py")), \
-        "the host process must promote the staged install into capabilities/"
+        "validated bytes remain staged until the real probe passes"
+    assert not os.path.exists(os.path.join(sb, "capabilities", "stageprobe"))
     assert not os.path.isdir(os.path.join(sb, "tmp",
                                           "acquire-stage-stageprobe")), \
         "staging must not survive promotion"

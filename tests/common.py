@@ -18,6 +18,9 @@ PY = sys.executable
 
 BASE_SETTINGS = """\
 [agent]
+# Trusted keyless test fixtures deliberately exercise the developer backend.
+sandbox = "host"
+allow_unsafe_host = true
 max_steps = 50
 command_timeout_seconds = 30
 poll_interval_seconds = 1
@@ -130,6 +133,61 @@ def make_sandbox(name, providers, roles, scripts, reflect_after="", extra="",
         with open(p, "w", encoding="utf-8") as f:
             json.dump(content, f)
     return sb
+
+
+def seal_variant_protocol(root, vid, dev_battery=None, pass_gate="true",
+                          seeds=(0, 1, 2), skip_dev_seed=None):
+    """Owner-side sealed three-battery protocol for variant fixtures.
+
+    The honest full battery — 42 distinct tasks x 3 seeds x 2 cloned arms,
+    plus a 24-hour regression delay — cannot fit an acceptance suite. So the
+    fixture fabricates the sealed RECEIPTS for the hidden phases through the
+    same owner authority the real trial writes them with; promote() then
+    verifies protocol hashes, receipt completeness, non-regression and the
+    paired significance test exactly as in production. Development receipts
+    can stay REAL: pass skip_dev_seed for the seed the test's own trial will
+    seal itself. MIN_REGRESSION_DELAY is module state read at call time —
+    the only seam — and shrinking it here changes no production default.
+
+    Returns the sealed development battery (the caller's tasks, given the
+    ids and families configure_evaluation demands)."""
+    import variants as V
+    import learning_authority as authority
+    V.MIN_REGRESSION_DELAY = 0
+    fams = ["fam-a", "fam-b", "fam-c", "fam-d", "fam-e"]
+    dev = []
+    for i, item in enumerate(dev_battery or
+                             [{"goal": f"sealed dev goal {i}",
+                               "done_check": pass_gate} for i in range(2)]):
+        row = dict(item)
+        row.setdefault("id", f"dev-{i}")
+        row.setdefault("family", fams[i % 5])
+        dev.append(row)
+
+    def hidden(tag, n):
+        return [{"id": f"{tag}-{i}", "goal": f"{tag} sealed goal {i}",
+                 "done_check": pass_gate, "family": fams[i % 5]}
+                for i in range(n)]
+
+    batteries = {"development": dev, "promotion": hidden("prm", 20),
+                 "regression": hidden("reg", 20)}
+    V.configure_evaluation(root, vid, batteries, seeds=list(seeds),
+                           delay_seconds=0)
+    protocol = authority.load(root, "variant-protocol", vid)
+    ph = authority.digest(protocol)
+    for phase in ("development", "promotion", "regression"):
+        n = len(batteries[phase])
+        for s in seeds:
+            if phase == "development" and s == skip_dev_seed:
+                continue
+            authority.store(root, "variant-result", f"{vid}-{phase}-{s}", {
+                "results": {
+                    "base": {"tasks": n, "passes": 0, "gate_rejects": n,
+                             "task_ids": [], "outcomes": [False] * n},
+                    "variant": {"tasks": n, "passes": n, "gate_rejects": 0,
+                                "task_ids": [], "outcomes": [True] * n}},
+                "completed": time.time(), "seed": s, "protocol_hash": ph})
+    return dev
 
 
 def free_port():

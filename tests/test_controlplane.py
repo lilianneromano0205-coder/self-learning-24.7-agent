@@ -127,6 +127,7 @@ def main():
     check_docker_mounts_the_control_plane_readonly()
     check_shell_capable_roles_are_the_ones_under_test()
     check_the_seal_stays_cheap_as_a_fleet_ages()
+    check_a_listing_is_not_trusted_to_a_coarse_clock()
     check_bytecode_is_cleansed_never_convicted()
     print("PASS test_controlplane")
 
@@ -531,6 +532,67 @@ def check_the_seal_stays_cheap_as_a_fleet_ages():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def check_a_listing_is_not_trusted_to_a_coarse_clock():
+    """A control file must not be able to hide in a filesystem timestamp.
+
+    control_paths caches each directory's listing on that directory's mtime.
+    Timestamp RESOLUTION is coarse — commonly 10-16 ms on NTFS, a full second
+    on some filesystems — so two different listings can carry the same mtime
+    and the cache then serves a stale one. A file created in a CONTROL
+    directory inside that window is never enumerated: not reported as
+    created, and so never reverted. The control plane cannot revert what it
+    does not list.
+
+    Written the way a coarse filesystem produces it, deterministically: a new
+    file lands and the directory's timestamp is held where it was. On the
+    unfixed code the planted file SURVIVES the bracket.
+
+    Found because CI failed on windows-latest and the failure MOVED between
+    Python versions — the tell that it was a race and not a version.
+    """
+    import shutil
+    import tempfile
+    import controlplane
+    root = tempfile.mkdtemp(prefix="cp-clock-")
+    try:
+        pkg = os.path.join(root, "capabilities", "cap", "cap")
+        os.makedirs(pkg)
+        src = os.path.join(pkg, "__init__.py")
+        io.open(src, "w").write("V='1'\n")
+        io.open(os.path.join(root, "settings.toml"), "w").write("[agent]\n")
+        cache_dir = os.path.join(pkg, "__pycache__")
+        os.makedirs(cache_dir)
+        io.open(os.path.join(cache_dir, "first.pyc"), "wb").write(b"\x00one")
+
+        # warm the listing cache for this directory
+        before = controlplane.seal(root)
+        controlplane.enforce(root, before, op="model_command",
+                             command="warm", role="t")
+        held = os.stat(cache_dir).st_mtime_ns
+
+        # a new file lands, and the clock does not move
+        before = controlplane.seal(root)
+        planted = os.path.join(cache_dir, "planted.pyc")
+        io.open(planted, "wb").write(b"\x00planted")
+        io.open(src, "w").write("V='EVIL'\n")
+        os.utime(cache_dir, ns=(held, held))
+
+        clean, msg = controlplane.enforce(root, before, op="model_command",
+                                          command="poison", role="t")
+        assert not os.path.exists(planted), (
+            "a file created in a CONTROL directory survived the bracket "
+            "because the directory's listing was reused on an unchanged "
+            "timestamp — the control plane cannot revert what it never "
+            "enumerated")
+        assert not clean and "TAMPER" in msg, msg
+        assert io.open(src).read() == "V='1'\n", "the source must revert too"
+        print("[clock] a directory changed inside the timestamp-uncertainty "
+              "window is re-scanned rather than served from cache, so a "
+              "control file cannot hide in the resolution of the clock")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def check_bytecode_is_cleansed_never_convicted():
     """Importing an adopted capability is not tampering; planting bytecode
     still buys nothing.
@@ -560,7 +622,16 @@ def check_bytecode_is_cleansed_never_convicted():
         before = controlplane.seal(root)
         pyc_dir = os.path.join(pkg, "__pycache__")
         os.makedirs(pyc_dir)
-        pyc = os.path.join(pyc_dir, "__init__.cpython-314.pyc")
+        # NAMED FOR THE RUNNING INTERPRETER, not for the one this file was
+        # written on. A hardcoded `cpython-314` plants an artifact no other
+        # Python would ever produce, so the check drifts out of reality
+        # every release — and when it failed on a 3.13 runner the message
+        # named a file that interpreter could not have written.
+        import importlib.util
+        pyc = importlib.util.cache_from_source(
+            os.path.join(pkg, "__init__.py"))
+        pyc_dir = os.path.dirname(pyc)
+        os.makedirs(pyc_dir, exist_ok=True)
         io.open(pyc, "wb").write(b"\x00planted")
         clean, msg = controlplane.enforce(root, before, op="model_command",
                                           command="import cap", role="t")
@@ -578,7 +649,11 @@ def check_bytecode_is_cleansed_never_convicted():
                                           command="poison", role="t")
         assert not clean and "TAMPER" in msg, msg
         assert io.open(src).read() == "VERSION='1'\n", "source must revert"
-        assert not os.path.exists(pyc), "the .pyc reverts in the same pass"
+        left = ([os.path.basename(x) for x in os.listdir(pyc_dir)]
+                if os.path.isdir(pyc_dir) else [])
+        assert not os.path.exists(pyc), (
+            f"the .pyc reverts in the same pass; __pycache__ still holds "
+            f"{left} (planted {os.path.basename(pyc)!r})")
         print("[bytecode] an import's __pycache__ under capabilities/ is "
               "reverted without failing the command; a planted .pyc never "
               "survives the bracket; a source edit beside it still convicts")

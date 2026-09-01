@@ -1,0 +1,888 @@
+# Verified-learning and authority hardening — implementation directive
+#
+# The requirements this change was built against, kept verbatim from the
+# owner's brief. Preserved because a change is easier to review against
+# the thing it was asked to do than against its own summary.
+
+# Full implementation directive for `self-learning-24.7-agent`
+You are working on my own repository:
+`reda-baqechame/self-learning-24.7-agent`
+Your task is to implement the findings below completely, defensively, and with regression tests.
+## Operating rules
+This is an authorized defensive engineering task on my own codebase.
+Do not create offensive tooling, target external systems, access real credentials, weaken safeguards, or produce reusable exploit utilities.
+Where a security finding requires reproduction, reproduce it only against temporary local fixtures or disposable test environments sufficient to prove the bug and then implement the mitigation.
+Before modifying anything:
+1. Inspect the current repository and current `main`.
+2. Verify every finding against the current code.
+3. Do not blindly trust this audit if the code has changed.
+4. If a finding is already fixed, prove that with an existing test or add an invariant if coverage is weak.
+5. Preserve existing architecture wherever possible.
+6. Do not replace mechanical verification with LLM judgment.
+7. Do not weaken the rule that actors cannot edit their own judges.
+8. Do not weaken file, execution, credential, effect, model-gateway, or control-plane authorities to make tests pass.
+9. Prefer fail-closed behavior.
+10. Every bug fix must have a regression test that fails on the vulnerable/pre-fix behavior.
+11. Run the relevant focused tests after each change.
+12. Run the complete suite before completion.
+13. Run invariant/mutation checks where applicable.
+14. Do not claim a finding is fixed without executed evidence.
+15. Update documentation only after implementation and tests agree.
+---
+# PART I — SECURITY AND PLATFORM HARDENING
+## P0 — Investigate and eliminate detached-child escape from host execution
+Current concern:
+The default configuration uses:
+`sandbox = "host"`
+The host backend is not filesystem/process isolation. `controlplane.py` seals control files before a model-authored process and compares/reverts them afterward.
+This may leave a TOCTOU hole:
+* model-authored parent process launches a detached child;
+* parent exits;
+* control-plane comparison runs before the delayed child writes;
+* control plane reports CLEAN;
+* detached child later mutates protected state.
+### Required work
+Build a safe local regression fixture that attempts:
+1. spawn delayed/detached child;
+2. parent process exits;
+3. child waits;
+4. child attempts to alter `settings.toml` or another CONTROL file;
+5. test verifies the mutation cannot survive or cannot happen.
+Test multiple process-detachment mechanisms relevant to supported operating systems without creating general-purpose persistence tooling.
+If the current host backend cannot guarantee the invariant, do not patch it with command-string regexes.
+Preferred architectural solutions:
+* make Docker or an equivalent isolated backend mandatory for shell-capable autonomous work;
+* or introduce process-tree containment and filesystem restrictions that actually hold after the parent exits;
+* clearly classify `host` as unsafe/developer-only if it cannot provide the same security guarantee.
+The final invariant should be:
+> A model-authored process and every descendant process lose the ability to mutate protected authority state after the execution authority declares the operation finished.
+---
+## P0/P1 — Protect authority/seal state outside the expert root
+Goal contracts and some other authority records are deliberately sealed outside the expert working root.
+That architecture is strong under actual containment but potentially weak under unrestricted host execution because a process may be able to access both:
+* the in-expert contract;
+* the fleet-home seal ledger.
+Audit all files outside the expert root that affect:
+* verification;
+* ownership;
+* promotion;
+* capabilities;
+* contracts;
+* federation trust;
+* grants;
+* training promotion;
+* variant promotion;
+* proof status.
+### Specific contract issue
+Inspect `contract._sealed_hash()`.
+The contract system appears to use the last matching seal row as authoritative, while newer frontier code deliberately uses first-seal-wins plus conflict detection.
+Evaluate whether an attacker able to append a new matching seal could make a modified contract appear legitimate.
+### Required outcome
+Protected authority state must remain independent of a model-authored process even when that process attempts to modify both the working copy and the authority reference.
+Prefer:
+* kernel/container isolation;
+* immutable/owner-only authority storage;
+* first-seal-wins or explicit generation/version semantics where appropriate;
+* conflict -> TAMPER;
+* append-only ledgers that cannot make a later untrusted append authoritative.
+Add regression tests.
+---
+## P1 — Build an isolated acquisition arena
+Current acquisition staging improved by moving installation into temporary staging rather than directly into `capabilities/`.
+However, inspect whether the network-enabled package installer still receives the entire expert workspace through `/work`.
+If so, a malicious package/build backend may be able to read:
+* courses;
+* research;
+* memory;
+* artifacts;
+* task outputs;
+* customer/workspace data;
+and send those contents through network egress.
+Environment-secret scrubbing does not solve filesystem disclosure.
+### Required architecture
+Create a dedicated acquisition sandbox/arena such as:
+`tmp/acquire-arena-*/input`
+`tmp/acquire-arena-*/output`
+Only explicitly required package input should enter the network-enabled environment.
+The installer must not see the complete expert root.
+After installation:
+1. trusted host validates output;
+2. verify no forbidden symlinks/special files/path escapes;
+3. calculate hashes;
+4. run the sealed capability probe;
+5. atomically promote to `capabilities/<name>`;
+6. preserve provenance/version data.
+### Regression
+Plant a sentinel outside the acquisition arena and verify a package-build test fixture cannot read it.
+---
+## P1 — Fix hosted sandbox filesystem semantics
+Audit Docker, E2B, Daytona, Cloudflare, and any other execution backends.
+Docker has bind-mounted filesystem semantics.
+Hosted backends appear to execute remotely using a remote working directory but may not upload the local expert workspace or download generated files afterward.
+That means the common `sandbox.run()` interface may currently promise semantics that different backends do not actually share.
+### Required design
+Define the execution contract explicitly.
+For backends that support workspace-mutating workloads:
+1. create session;
+2. upload only authorized workspace subset;
+3. execute;
+4. collect declared artifacts;
+5. validate artifact paths/content;
+6. download;
+7. atomically apply to local workspace;
+8. destroy remote environment.
+Until implemented, fail closed for operations that require filesystem round-tripping.
+Do not report a remote operation as having modified the local expert when no artifact transfer occurred.
+---
+## P1 — MCP credential isolation
+Audit `mcp.py`.
+Current MCP server spawning may inherit all of `os.environ`.
+A third-party MCP server should not automatically receive unrelated:
+* model API keys;
+* cloud credentials;
+* repository tokens;
+* provider credentials;
+* other secrets.
+### Required design
+Implement least-privilege MCP environment construction.
+Default:
+* remove credential-shaped variables;
+* preserve only non-sensitive runtime variables required for execution.
+Allow explicit server configuration:
+`env_allow`
+or equivalent.
+Example:
+A GitHub MCP server may receive a GitHub credential if explicitly granted.
+A Playwright or filesystem MCP server should not receive unrelated model/provider keys.
+Add planted-secret regression tests.
+---
+## P1 — Pin MCP dependencies
+Audit the MCP catalog.
+Remove mutable dependencies such as:
+`@latest`
+and other floating package invocations where feasible.
+Use:
+* exact package versions;
+* lock/integrity data where practical;
+* controlled update process;
+* version recorded in configuration/evidence.
+A server update should be treated as changed executable code and should invalidate/re-run relevant trust evidence.
+---
+## P2 — Correct MCP 2026 protocol claims
+Keep legacy stdio compatibility.
+But do not claim full modern MCP 2026 compatibility unless the implementation really supports the current protocol/transport semantics.
+Implement current MCP transport as a separate proper code path if practical.
+Do not simulate modern compliance merely by:
+* retrying the legacy JSON-RPC path;
+* adding protocol metadata.
+Update documentation/tests so:
+* legacy stdio support is explicit;
+* modern protocol support is only claimed where actually implemented.
+---
+## P2 — Clarify/upgrade A2A interoperability
+Current federation has useful pairwise authenticated communication and may expose A2A-shaped discovery.
+Audit whether it actually implements current A2A task/message semantics.
+If not, document it precisely as:
+> A2A-discoverable/custom federation transport
+rather than full A2A compliance.
+If implementing proper A2A is reasonably isolated, add a standards-compliant adapter while preserving the current authenticated federation layer.
+This is not a Tier-0 intelligence priority, so do not destabilize the platform merely to add protocol branding.
+---
+## P1/P2 — Fix acquisition removal semantics
+Audit `acquire.remove()`.
+If it only changes the ledger to `stage = removed` while leaving installed bytes, that is deactivation, not removal.
+Choose one:
+### Option A — actual removal
+* safely resolve install path;
+* prove it is under the capability directory;
+* delete installed content;
+* verify absence;
+* then write `removed`.
+### Option B — rename operation
+Rename behavior to `deactivate` and document retained bytes.
+Do not claim removal if the filesystem still contains the capability.
+Regression must check the filesystem, not only the ledger.
+---
+## P2 — Make effect semantics precise
+The effects ledger has a good write-ahead design.
+However, without transactional support from an external service, strict exactly-once delivery is impossible across:
+remote side effect succeeds
+-> local process crashes before result is recorded
+The system correctly treats this as ambiguous and does not blindly retry.
+Keep that behavior.
+Change language from unconditional “exactly once” to a technically precise guarantee such as:
+> Known-completed effects are never automatically repeated; ambiguous effects halt for reconciliation instead of being replayed blindly.
+Do not weaken the mechanism.
+---
+## P2 — Repository governance
+Audit repository protection.
+Enable or document recommended:
+* protected `main`;
+* required CI;
+* no force pushes;
+* PR checks for protected branches;
+* signed release tags;
+* optional commit signing;
+* review requirements for security-critical files.
+Do not let the codebase's own trust architecture depend on an unprotected main branch.
+---
+## P2 — Pin GitHub Actions
+Where practical, pin GitHub Actions dependencies to immutable commit SHAs rather than only:
+`actions/checkout@v4`
+`actions/setup-python@v5`
+Preserve automated updateability through Dependabot/Renovate or documented maintenance.
+---
+## P2 — Deprecate bearer tokens in query strings
+Audit UI/API authentication.
+If `?token=` remains supported:
+* remove/deprecate query-token authentication;
+* prefer `Authorization: Bearer`;
+* ensure browser UI has a safe bootstrap mechanism;
+* avoid putting long-lived secrets into browser history/URLs/logs/referrers.
+Preserve current CSRF protections.
+---
+# PART II — INTELLIGENCE AND SELF-IMPROVEMENT
+The goal is NOT to claim that a small model becomes universally “100× smarter.”
+The measurable objective is:
+> maximize verified useful work per dollar, latency, and frontier-model inference.
+The system should eventually be able to produce >100× efficiency gains on selected repeatable/verifiable workloads by converting expensive reasoning into reusable deterministic or specialist capability.
+Do not claim this until experiments demonstrate it.
+---
+## INT-0 — Repair LIFT-001 experiment infrastructure
+Do not modify the historical preregistration silently.
+Current concern:
+* `LIFT-001.md` requires at least 20 TRAIN tasks across at least 5 capability families;
+* current eval corpus appears to have fewer TRAIN tasks;
+* `benchmark.py` appears to use a separate tiny toy suite rather than the preregistered TRAIN split.
+### Required work
+Create:
+`experiments/LIFT-001A.md`
+as a preregistered protocol amendment BEFORE running provider experiments.
+It should explain exactly why the amendment exists.
+Do not fabricate results.
+---
+## INT-1 — Build proper experimental arms
+At minimum support:
+### Arm A — Raw
+One model call, no harness.
+### Arm B — Minimal agent
+Same model with ordinary iterative tools / ReAct-like execution but without Expert Fleet's persistent intelligence systems.
+This is essential. Claude Code/Codex are not raw single-call systems.
+### Arm C — Harness without persistent learning
+Verification, execution authorities, retries, etc., but disable accumulated skills/runbooks/memory where experimentally possible.
+### Arm D — Full Expert Fleet
+All normal systems enabled.
+### Arm E — Reference frontier agent
+Optional external reference such as a strong coding/research agent, measured separately where reproducible.
+Every arm must use clean equivalent starting state.
+---
+## INT-2 — Build a serious benchmark corpus
+Do not use only simple file-writing tasks to make intelligence claims.
+Keep existing tests for CI.
+Create a separate evaluation corpus covering:
+1. terminal/system tasks;
+2. software engineering;
+3. browser/web workflows;
+4. deep research/evidence synthesis;
+5. long-term memory;
+6. repeated business workflows;
+7. failure recovery;
+8. planning under partial information;
+9. tool acquisition/use;
+10. multi-step cross-tool workflows.
+Use public external benchmarks where licensing/integration permits.
+Keep benchmark adapters separate from product logic.
+---
+## INT-3 — Measure the correct metrics
+For every experimental arm record:
+* verified task success;
+* cost per verified success;
+* total token input;
+* total token output;
+* model calls;
+* tool calls;
+* retries;
+* wall-clock time;
+* verifier failures;
+* false accepts;
+* false rejects;
+* human interventions;
+* frontier-model calls;
+* learned skill reuse;
+* runbook reuse;
+* regression rate.
+Primary system metric:
+`verified useful work per dollar`
+Also report:
+`frontier cognition consumed per verified success`
+where frontier cognition can be approximated by frontier-model token/call cost.
+---
+## INT-4 — Module ablation framework
+Add reproducible ablations for:
+* memory;
+* skills;
+* runbooks;
+* Best-of-N/candidates;
+* routing;
+* confidence/escalation;
+* repair;
+* research brief;
+* swarm;
+* verification tiers.
+Example:
+full system
+vs
+full minus memory
+Use the same clean tasks/seeds.
+Do not infer module value from mere presence.
+Produce causal deltas.
+---
+# PART III — FIX MASTERY EXPERIMENT LEAKAGE
+Current mastery architecture appears to use the same sealed transfer tasks for:
+* pretest;
+* exam;
+* retest.
+That means exam tasks are not actually unseen because the expert already saw them during pretest.
+This invalidates strong transfer-learning claims.
+## Required redesign
+Capability packs should support at minimum:
+### Baseline set A
+Used before study.
+### Practice set
+Available during learning.
+### Transfer set B
+Never shown before the final exam.
+### Retention set C
+Never shown during pretest, practice, or exam.
+Prefer task generators or matched task families where possible.
+Each set must have separate task IDs and distinct instances.
+### Contamination protection
+Do not allow:
+* baseline task content;
+* transfer task content;
+* retention answers;
+* grader implementation;
+to enter persistent training memory improperly.
+Record pack hashes.
+Tests should prove:
+* exam tasks differ from pretest tasks;
+* retention tasks differ from exam tasks;
+* task identities cannot overlap;
+* the student cannot author its own evaluation pack.
+Update mastery language to match what is actually proven.
+---
+# PART IV — BUILD THE MISSING PROCEDURAL LEARNING COMPILER
+This is one of the highest-priority intelligence upgrades.
+Current runbook drafting appears to preserve WHAT was verified but leaves HOW as TODO.
+That means successful model work is not yet automatically converted into reusable deterministic procedure.
+Implement a conservative cross-trajectory workflow/runbook induction system.
+## Input
+Multiple independently verified successful trajectories for related tasks.
+## Output
+A candidate executable reusable procedure.
+## Pipeline
+1. collect successful verified trajectories;
+2. normalize tool calls/actions;
+3. align repeated action sequences/subgraphs;
+4. identify constants vs variables;
+5. infer typed inputs;
+6. infer preconditions;
+7. infer effects;
+8. infer invariants;
+9. identify deterministic steps;
+10. identify judgment/model-required steps;
+11. construct executable DAG/runbook;
+12. generate fresh test instances;
+13. run candidate against sealed graders;
+14. run adversarial/edge-case variants;
+15. measure reliability;
+16. promote only after independent accepted wins.
+Do not simply ask a model:
+“write a runbook from these trajectories”
+and trust its output.
+A model may propose the abstraction, but the procedure earns trust only through execution and independent graders.
+---
+# PART V — ADD PRECONDITIONS / EFFECTS / WORLD STATE
+Current runbooks have matching and `when.requires`, plus composition.
+Extend this toward explicit operator semantics.
+Each reusable operation should support:
+* typed inputs;
+* preconditions;
+* effects;
+* estimated cost;
+* estimated latency;
+* reliability;
+* reversible/irreversible classification;
+* authority required.
+Example:
+```json
+{
+  "name": "build_python_package",
+  "inputs": ["repo"],
+  "preconditions": [
+    "repo exists",
+    "pyproject exists"
+  ],
+  "effects": [
+    "dist artifact exists"
+  ],
+  "cost_estimate": {},
+  "authority": "local-build"
+}
+```
+Then implement a conservative planner that can search composition of proven operators where state transitions are mechanically observable.
+Do not build an enormous symbolic-planning framework prematurely.
+Start with deterministic explicit state transitions.
+---
+# PART VI — UPGRADE MODEL ROUTING INTO A COGNITIVE SCHEDULER
+Current model routing uses historical role/model performance.
+Upgrade task representation.
+The scheduler should eventually choose among:
+* proven runbook;
+* tool/API;
+* cheap local model;
+* cheap hosted model;
+* strong model;
+* frontier model;
+* number of candidates;
+* parallelism;
+* verification depth;
+* escalation.
+Condition decisions on task features such as:
+* role;
+* task class;
+* complexity;
+* required tools;
+* prior failures;
+* context size;
+* memory coverage;
+* uncertainty;
+* availability of proven runbooks;
+* historical performance on similar tasks.
+Objective conceptually:
+`P(verified success | state,strategy) * task_value`
+minus
+`model cost + tool cost + latency cost + retry cost + risk cost`
+Start with interpretable empirical/contextual routing.
+Do not jump immediately to an opaque RL scheduler.
+Record enough data now that a learned scheduler can be trained later.
+---
+# PART VII — EXPECTED-VALUE TEST-TIME COMPUTE
+Current candidate escalation approximately follows fixed 1 -> 3 -> 5 behavior.
+Replace or augment with adaptive sequential stopping.
+After each attempt estimate whether another attempt is economically justified.
+Inputs may include:
+* current best mechanical score;
+* diversity between candidates;
+* historical probability another sample fixes this failure;
+* model cost;
+* verifier cost;
+* remaining task budget;
+* task value;
+* confidence/uncertainty.
+Continue only when:
+`expected marginal verified benefit > expected marginal compute cost`
+Keep hard global ceilings.
+Test against fixed Best-of-N using held-out tasks.
+---
+# PART VIII — VERIFICATION HIERARCHY
+Preserve the core invariant:
+> Mechanical/frozen graders remain supreme wherever they can decide the task.
+Add optional verification layers for open-ended tasks.
+Recommended hierarchy:
+### L0 — Mechanical/formal
+Tests, compiler, schema, deterministic checks, frozen acceptance.
+### L1 — Cheap specialist verifier
+Task-specific classifier/checker/PRM.
+### L2 — Adversarial verifier
+Search for counterexamples, missing requirements, contradictions, unsafe behavior.
+### L3 — Rubric/evidence verifier
+Generative verifier using explicit rubric and evidence.
+### L4 — Frontier verifier
+For high-value irreducibly subjective cases.
+Rules:
+* higher probabilistic/verbal layers never override a failing L0 mechanical test;
+* verifier outputs are logged separately from worker outputs;
+* verifier family should differ from actor family for high-value work when feasible;
+* measure verifier false-positive/false-negative rates.
+---
+# PART IX — CALIBRATE CONFIDENCE
+Current confidence derives from measured system signals, which is preferable to model self-confidence.
+But heuristic weights should not be called probabilistically calibrated confidence until measured.
+Add calibration evaluation:
+* bucket predicted confidence;
+* compare against actual held-out verified-success rates;
+* Brier score;
+* expected calibration error;
+* reliability curves;
+* calibration by task class.
+Use empirical calibration to tune thresholds.
+If insufficient data exist, label confidence as a heuristic score.
+---
+# PART X — CONTEXT BUDGETING
+Current context compilation uses per-source budgets but may not enforce a provider/model-specific global budget.
+Add:
+`provider context limit`
+minus
+`reserved completion tokens`
+minus
+`tool schema budget`
+minus
+`safety margin`
+===============
+`maximum compiled context`
+Then allocate budget across:
+* mission;
+* self-model;
+* relevant memory;
+* skills;
+* evidence;
+* task files.
+Optimize for performance on held-out tasks rather than raw retrieval volume.
+Do not remove the mission contract from its high-priority placement.
+---
+# PART XI — HYBRID MEMORY RETRIEVAL
+Keep the current institutional memory architecture.
+Do not replace it with generic vector RAG.
+Add hybrid retrieval:
+1. lexical/BM25-like or existing token overlap;
+2. local embedding similarity where available;
+3. metadata filtering;
+4. source authority;
+5. freshness;
+6. task type;
+7. contradiction/supersession state;
+8. lightweight reranking.
+All retrieved material must preserve:
+* provenance;
+* source tier;
+* timestamps;
+* validity;
+* retraction/supersession information.
+Add retrieval evaluations with paraphrases so semantic matches are tested.
+---
+# PART XII — MEMORY BENCHMARKING
+Add adapters where practical for strong memory benchmarks such as:
+* LongMemEval-V2;
+* MemoryAgentBench;
+* other current long-horizon agent-memory tests.
+Measure:
+* retrieval accuracy;
+* temporal state updates;
+* selective forgetting;
+* workflow recall;
+* environment gotchas;
+* premise awareness;
+* retention over long histories.
+Compare:
+* current lexical retrieval;
+* hybrid retrieval;
+* no memory;
+* simple RAG baseline.
+---
+# PART XIII — MEMORY ACTION POLICY RESEARCH BRANCH
+Do not make this production-critical yet.
+Create an experimental layer where the system can learn constrained choices among:
+* store;
+* retrieve;
+* update;
+* summarize;
+* discard.
+The deterministic institutional memory rules remain the safety floor.
+Any learned memory manager may optimize within those boundaries but may not:
+* erase protected evidence;
+* suppress retractions;
+* falsify provenance;
+* alter authority tiers.
+---
+# PART XIV — JitRL-LIKE TEST-TIME ADAPTATION BRANCH
+Only implement exact logit-level techniques for local/open models where logits are available.
+Do not claim exact JitRL behavior through closed APIs.
+Research path:
+* trajectory memory;
+* similar-state retrieval;
+* estimate action advantages;
+* use them to bias local model behavior;
+* evaluate against plain retrieval.
+For closed models, an approximation may use:
+* retrieve similar successful/failed trajectories;
+* generate multiple candidate actions;
+* rerank using external verification.
+Keep it experimental behind flags.
+---
+# PART XV — FIX SKILL ATTRIBUTION
+Do not assume:
+`skill loaded + task succeeded = skill caused success`
+Current success/failure updates may be confounded by multiple simultaneously loaded skills.
+Add richer instrumentation:
+* skills retrieved;
+* skills injected;
+* skills explicitly referenced;
+* steps influenced by each skill if traceable;
+* task outcome.
+For important skills, support controlled ablation:
+with skill
+vs
+without skill
+on matched held-out tasks.
+Promote/demote skills based on evidence stronger than co-occurrence.
+---
+# PART XVI — RUNBOOK TRUST GENERALIZATION
+Audit runbook promotion.
+Three accepted successes should not automatically imply broad generalization if all three runs are near-identical.
+Track diversity of evidence.
+Possible dimensions:
+* distinct task IDs;
+* distinct input hashes;
+* distinct environment instances;
+* distinct parameter values;
+* distinct task families.
+A runbook's trust record should state its observed applicability envelope.
+Example:
+`3 accepted wins across 3 distinct repositories`
+is stronger than:
+`same command succeeded three times on same repository`.
+Keep candidate/quarantine semantics.
+---
+# PART XVII — VARIANT EVOLUTION HARDENING
+Current variant trials can overfit tiny batteries.
+Redesign evaluation into:
+* development battery;
+* hidden promotion battery;
+* delayed regression battery.
+Do not promote merely because a prompt wins on 2–3 trivial tasks.
+Increase minimum evidence before broad promotion.
+Preserve:
+* separate cloned roots;
+* same battery for base/variant;
+* protected roles;
+* owner-controlled promotion;
+* rollback.
+Consider later implementing a quality-diversity archive rather than one global universal winner:
+* coding variant;
+* research variant;
+* low-cost variant;
+* long-horizon variant;
+* browser variant;
+* etc.
+Task scheduler chooses the empirically best niche.
+Do not implement this before robust evaluation exists.
+---
+# PART XVIII — TRAINING LAB COMPLETION
+Preserve the current security boundary:
+* no silent production weight mutation;
+* frozen holdout;
+* verifier hash;
+* rollback;
+* owner-controlled promotion.
+Add optional external trainer integration rather than embedding a huge ML stack into the stdlib core.
+Support external recipes for:
+* LoRA/QLoRA;
+* supervised fine-tuning;
+* preference optimization;
+* RLVR;
+* verifier/process-reward training.
+Flow:
+verified trajectories
+-> sanitized dataset
+-> external training
+-> checkpoint
+-> sealed holdout evaluation
+-> candidate registry
+-> canary
+-> promotion or rejection
+Do not allow the trainee to modify its own eval or promotion criteria.
+---
+# PART XIX — RESEARCH / DEEP-RESEARCH IMPROVEMENTS
+Current deterministic clause splitting is useful but limited.
+Add a deeper research planning mode.
+A research investigation should model:
+* factual subquestions;
+* dependencies;
+* competing hypotheses;
+* missing evidence;
+* counterevidence;
+* source quality;
+* temporal validity.
+Example:
+question
+-> claims required
+-> evidence for each claim
+-> contradictory evidence
+-> unresolved gaps
+-> answer only after gap assessment
+Do not equate:
+`retrieval returned a result`
+with:
+`the proposition is established`.
+Coverage metrics should distinguish:
+* retrieved;
+* supported;
+* contradicted;
+* unresolved.
+---
+# PART XX — TWO-LANE SOURCE DISCOVERY
+Keep curated authoritative discovery.
+Add a second controlled general-web discovery lane for areas the curated catalogs miss:
+* vendor documentation;
+* current software documentation;
+* recent company announcements;
+* legal/regulatory changes;
+* operational troubleshooting.
+Every general-web result still passes:
+* source classification;
+* freshness checks;
+* provenance;
+* content fencing;
+* citation tracking.
+Do not let general search-engine ranking itself become evidence quality.
+---
+# PART XXI — SWARM
+Keep the conservative design.
+Do NOT turn swarm into free-form multi-agent discussion by default.
+Current useful property:
+* parallelize only declared-independent work;
+* prefer deterministic proven runbooks;
+* central verifier settles results.
+Preserve that.
+If adding reasoning-agent collaboration later, isolate it behind experiments and compare against a single-agent baseline because parallel reasoning can degrade sequential tasks.
+---
+# PART XXII — PROOF/EVALUATION SYSTEM
+Extend `proof.py` so intelligence capabilities cannot appear production-proven based only on offline unit tests.
+For intelligence-related entries distinguish:
+* implementation exists;
+* offline regression passes;
+* external benchmark passes;
+* statistically meaningful repeated evaluation;
+* live-provider validation;
+* production workload evidence.
+A green CI suite must never automatically imply:
+* model lift;
+* intelligence lift;
+* learning transfer;
+* cost superiority.
+Those require separate experiment evidence.
+---
+# PART XXIII — LIVE PROVIDER / RELEASE TESTS
+Keep ordinary CI keyless.
+Add optional release/nightly live tests using tightly bounded budgets.
+Examples:
+* one real provider call;
+* one real routed cheap/strong comparison;
+* one real MCP read-only operation if configured;
+* one real Docker sandbox;
+* one real federation exchange if environment is available.
+Make them opt-in or scheduled.
+Never expose provider keys to untrusted test code.
+---
+# PART XXIV — FINAL CLAIM BOUNDARIES
+Update documentation to distinguish:
+## Proven
+* mechanical invariants;
+* test-backed security guarantees;
+* code paths actually exercised;
+* measured benchmark results.
+## Hypothesis
+* harness amplifies cheap-model performance;
+* memory improves long-horizon capability;
+* skill accumulation reduces future cost.
+## Not allowed to claim without evidence
+* “100× smarter”;
+* “AGI”;
+* “better than Claude/Codex”;
+* “self-improves indefinitely”;
+* “no hallucinations”;
+* universal exactly-once side effects;
+* general transfer from tiny benchmark improvements.
+Preferred long-term claim, only once measured:
+> Expert Fleet can produce large improvements in verified useful work per dollar on specific workload classes by combining adaptive model routing, memory, tools, external verification, learned procedures, and deterministic reuse of mastered workflows.
+---
+# BUILD ORDER
+Implement in this order unless repository evidence strongly changes priority:
+## Phase 0 — Critical safety
+1. detached-child host execution investigation/fix;
+2. outside-root authority/seal protection;
+3. acquisition arena;
+4. hosted sandbox filesystem contract;
+5. MCP credential isolation;
+6. MCP dependency pinning;
+7. actual acquisition removal semantics.
+## Phase 1 — Measurement integrity
+8. LIFT-001A;
+9. proper experimental arms;
+10. larger benchmark corpus;
+11. mastery split repair;
+12. module-ablation framework.
+## Phase 2 — Missing intelligence engine
+13. cross-trajectory procedural compiler;
+14. preconditions/effects;
+15. runbook generalization evidence;
+16. task-conditioned cognitive scheduler;
+17. expected-value test-time compute.
+## Phase 3 — Verification and memory
+18. layered verifier;
+19. confidence calibration;
+20. global context budgeting;
+21. hybrid memory retrieval;
+22. external memory benchmarks;
+23. skill causal attribution.
+## Phase 4 — Advanced learning
+24. stronger variant evaluation;
+25. quality-diversity experiments;
+26. external specialist-model training;
+27. JitRL/local-model adaptation;
+28. learned constrained memory controller.
+## Phase 5 — Ecosystem/protocol polish
+29. current MCP transport;
+30. A2A adapter;
+31. repository/action hardening;
+32. query-token deprecation;
+33. release/live-provider tests.
+---
+# TESTING STANDARD
+For every meaningful finding:
+1. reproduce before fixing when safely possible;
+2. capture the failing behavior in a regression test;
+3. implement the narrowest architectural fix;
+4. prove the regression turns green;
+5. run neighboring subsystem tests;
+6. run `harness.py --check`;
+7. run execution/model call-site audits;
+8. run mutation checks;
+9. run complete test suite;
+10. inspect git diff for accidental changes;
+11. update SECURITY / CHANGELOG / proof registry only after verification.
+For intelligence changes:
+1. never promote based on the same examples used to develop the change;
+2. maintain independent holdout data;
+3. report raw numbers, not impressions;
+4. report cost and latency alongside accuracy;
+5. preserve failed experiments;
+6. do not silently change evaluation thresholds after seeing results.
+---
+# COMPLETION REPORT REQUIRED
+When finished, return a table:
+| Finding | Status | Files changed | Regression/eval | Pre-fix result | Post-fix result |
+| ------- | ------ | ------------- | --------------- | -------------- | --------------- |
+Then report:
+### Security
+* remaining P0;
+* remaining P1;
+* residual risks intentionally accepted.
+### Intelligence
+* verified success lift;
+* cost/verified-success lift;
+* model-call reduction;
+* runbook reuse;
+* memory improvement;
+* transfer improvement;
+* statistical uncertainty.
+### Claims
+State separately:
+* what is now proven;
+* what remains hypothesis;
+* whether there is any evidence whatsoever for 10×, 50× or 100× verified useful work per dollar.
+Do not say the project is “100× smarter” unless an independently held-out experiment establishes a properly defined 100× metric.
+The goal is not to maximize the number of features.
+The goal is to turn this repository into a system that:
+**learns from verified experience, converts successful reasoning into reusable capability, spends expensive model intelligence only where necessary, preserves hard external judges, and can prove through clean experiments whether it is actually improving.**

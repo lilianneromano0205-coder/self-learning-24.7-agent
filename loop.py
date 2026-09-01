@@ -75,6 +75,39 @@ TOOL_DEFS = [
     {
         "type": "function",
         "function": {
+            "name": "transform_table",
+            "description": (
+                "Derive one CSV from another deterministically. Give source "
+                "(input CSV path), path (output CSV path), and spec — a JSON "
+                'pipeline {"steps":[...]} over a CLOSED operation set: '
+                '{"op":"select","columns":[...]}, '
+                '{"op":"rename","columns":{old:new}}, '
+                '{"op":"filter","column":c,"compare":"eq|ne|lt|le|gt|ge|contains",'
+                '"value":const} (or "other":c2 to compare two columns), '
+                '{"op":"sort","column":c,"descending":false}, '
+                '{"op":"dedupe","columns":[...]}, '
+                '{"op":"join","column":c,"with_column":c2,"prefix":"b_"} '
+                "(inner join with source2, a second CSV path), "
+                '{"op":"aggregate","group":[...],"aggregations":{name:'
+                '{"fn":"sum|count|min|max","column":c}}}. '
+                "The harness executes the spec, not you — prefer this over "
+                "computing table results yourself: the result is exact, "
+                "re-derivable, and can become a repeatable procedure."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source": {"type": "string"},
+                    "path": {"type": "string"},
+                    "spec": {"type": "string"},
+                    "source2": {"type": "string"},
+                },
+                "required": ["source", "path", "spec"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "run_command",
             "description": "Run a shell command with a hard timeout. Returns exit code, stdout, stderr.",
             "parameters": {
@@ -377,6 +410,16 @@ class Agent:
         self._load_env_file()
         with open(os.path.join(self.root, "settings.toml"), "rb") as f:
             self.cfg = tomllib.loads(f.read().decode("utf-8-sig"))
+        # An unreadable [evaluation] ablation policy must refuse HERE, before
+        # a task is claimed. Every call site downstream is inside the
+        # post-task learning path, where the same ValueError would kill the
+        # daemon after the work was done and before it was filed — the worst
+        # possible moment. Validated once, on the way in.
+        try:
+            import evaluation_policy
+            evaluation_policy.disabled(self.cfg, "memory")
+        except ImportError:
+            pass
         a = self.cfg.get("agent", {})
         self.max_steps = a.get("max_steps", 150)
         self.command_timeout = a.get("command_timeout_seconds", 300)
@@ -747,8 +790,21 @@ class Agent:
 
     def add_task(self, role, goal, memory_files=None, course=None,
                  attempt=1, base_goal=None, done_check=None, lineage=None,
-                 stop=None, mission=None, criterion=None):
+                 stop=None, mission=None, criterion=None,
+                 judge_id=None, inputs=None, family=None, task_class=None):
         tid = uuid.uuid4().hex[:12]
+        # TASK CLASS — assigned at the single gateway every task passes
+        # through, because every downstream conditioner (routing profiles,
+        # the candidate stopping rule, calibration-by-class) read this field
+        # while nothing wrote it, so every task collapsed into 'general'
+        # and per-class evidence could never accumulate. Deterministic
+        # keyword buckets; 'general' stays the honest fallback.
+        if not task_class:
+            try:
+                import scheduler
+                task_class = scheduler.classify(goal)
+            except Exception:
+                task_class = "general"
         # every loop is defined by its STOP CONDITION (the 2026 loop
         # taxonomy): criteria the evaluator checks, a ceiling on attempts,
         # a deadline, a step ceiling — declared on the task, enforced by the
@@ -777,6 +833,13 @@ class Agent:
             "criterion": criterion,
             "done_check": done_check,   # shell command that must exit 0 to finish
             "stop": stop,
+            "task_class": task_class,
+            # OPTIONAL procedural-learning contract: an owner-sealed judge id
+            # plus typed inputs open an independently judged trajectory, and
+            # let a proven compiled procedure be replayed deterministically.
+            "judge_id": judge_id,
+            "inputs": inputs if isinstance(inputs, dict) else None,
+            "family": family or safe_course(course) or task_class,
             "memory_files": memory_files or [],
             "context_ref": None,
             "steps": [],
@@ -912,29 +975,13 @@ class Agent:
     def matching_skills(self, goal):
         """Procedural-memory fetch rule (Part 6): a skills/ playbook loads when
         the task goal matches its name (all filename tokens present) or any of
-        its declared KEYWORDS (first line: 'KEYWORDS: a, b, c')."""
-        goal_words = set(re.findall(r"[a-z0-9]+", goal.lower()))
-        out = []
-        # both shapes count: the flat skills/x.md the Reflector writes and
-        # the Agent Skills folder skills/x/SKILL.md the owner imports
-        for s in skillgraph.discover(self.root):
-            stem_tokens = set(re.findall(r"[a-z0-9]+", s["stem"].lower()))
-            # KEYWORDS: what the skill is about; TRIGGER: the situation
-            # that should summon it (ReasoningBank-style applicability)
-            keywords = {k.strip().lower()
-                        for k in (s["keywords"] + s["trigger"]) if k.strip()}
-            # a keyword or TRIGGER may be a PHRASE ("load more"): it matches
-            # when every word of the phrase appears in the goal
-            hit = any(set(re.findall(r"[a-z0-9]+", k)) <= goal_words
-                      for k in keywords if k.strip())
-            if (stem_tokens and stem_tokens <= goal_words) or hit:
-                out.append(s["rel"])
-            if len(out) >= self.max_skills_loaded * 2:
-                break
-        # the skill GRAPH decides what actually loads: quarantined skills are
-        # excluded, proven ones outrank candidates, and each selected skill
-        # pulls its declared sub-skills (one hop) so procedures compose
-        return skillgraph.select(self.root, out, self.max_skills_loaded)
+        its declared KEYWORDS (first line: 'KEYWORDS: a, b, c').
+
+        The rule itself now lives in `skills.matching`, so the capability
+        graph and the panel ask the same question the loop asks and get the
+        same answer — a second copy of a matching rule is a drift waiting to
+        happen, and this repository has already paid for that lesson."""
+        return skillgraph.matching(self.root, goal, self.max_skills_loaded)
 
     def initial_messages(self, task):
         """The first window is COMPILED, not piled up: context.py budgets each
@@ -997,19 +1044,17 @@ class Agent:
         return providers[name]
 
     def _api_key(self, prov):
-        if "api_key_env" in prov:
-            key = os.environ.get(prov["api_key_env"], "")
-            if key:
-                return key
-        if "api_key" in prov:
-            return prov["api_key"]
-        if "api_key_file" in prov:
-            try:
-                with open(prov["api_key_file"], "r", encoding="utf-8") as f:
-                    return f.read().strip()
-            except OSError:
-                pass
-        return ""
+        """Delegates to the ONE credential model (credentials.resolve).
+
+        This used to be a private re-implementation, and it had quietly
+        drifted: it did not know about agent.env and did not resolve a
+        relative key file against the expert root, so a provider that
+        credentials.key_present() called funded could be refused here as
+        keyless. Two resolvers for one authority is the exact defect class
+        this platform keeps finding in itself; test_invariants pins this
+        delegation so the fork cannot return."""
+        import credentials
+        return credentials.resolve(prov, self.root)
 
     def _collect_cards(self, task, text):
         """Collect UI cards an agent emitted. The catalogue is closed: an
@@ -1032,14 +1077,15 @@ class Agent:
             self.log.info(json.dumps({"event": "ui_card_invalid",
                                       "task": task["id"], "why": p}))
 
-    def _route_for(self, role):
+    def _route_for(self, role, task=None):
         """The routing decision for a role, computed once per loop process
         and logged the first time — a decision nobody can see is not a
         decision, it is a rumour."""
         cache = getattr(self, "_route_cache", None)
         if cache is None:
             cache = self._route_cache = {}
-        hit = cache.get(role)
+        cache_key = (role, (task or {}).get("id"))
+        hit = cache.get(cache_key)
         # a 24/7 process may run for weeks: a routing decision made on the
         # first task must not be frozen for the life of the process, or a
         # model that starts failing keeps its job forever
@@ -1048,7 +1094,7 @@ class Agent:
         d = {"routed": False, "rule": "static", "why": "routing unavailable"}
         try:
             import modelrouter
-            prov, model, d = modelrouter.choose(self, role)
+            prov, model, d = modelrouter.choose(self, role, task=task)
             d = {**d, "provider": prov, "model": model}
             if d.get("routed"):
                 self.log.info(json.dumps({"event": "model_routed", "role": role,
@@ -1057,30 +1103,52 @@ class Agent:
         except Exception as e:
             d = {"routed": False, "rule": "static", "why": f"router error: {e}"}
         d["_at"] = time.time()
-        cache[role] = d
+        # The key carries a TASK id, so on a 24/7 fleet this dict would grow
+        # by one entry per task for the life of the process — a slow leak in
+        # the one component that never restarts. Anything past its TTL would
+        # be recomputed anyway, so dropping it costs nothing and bounds the
+        # cache to the tasks active inside one window.
+        for k, v in list(cache.items()):
+            if d["_at"] - v.get("_at", 0) >= ROUTE_TTL_SECONDS:
+                cache.pop(k, None)
+        cache[cache_key] = d
         return d
 
     def call_model(self, role, messages, use_tools=True, escalated=False,
-                   purpose="step", task_id=None):
+                   purpose="step", task_id=None, task=None):
         """Call the model with exponential backoff (5 tries) on the primary
         provider, then the fallback provider. Returns (message, usage, provider).
         When escalated, the role's escalate_provider/escalate_model is tried
         first — cheap by default, expensive on the hard steps."""
         rc = self.role_cfg(role)
         attempts = []
-        if escalated and rc.get("escalate_model"):
+        evaluation = self.cfg.get("evaluation", {}) or {}
+        single_provider = bool(evaluation.get("single_provider_attempt"))
+        if escalated and rc.get("escalate_model") and not single_provider:
             attempts.append((rc.get("escalate_provider", rc["provider"]),
                              rc["escalate_model"]))
         # CAPABILITY ROUTING: when the role is on route = "auto", the model
         # is chosen from this expert's own measured outcomes (cheapest that
         # clears the gate bar). The configured pair always stays as the
         # fallback below, so routing can never strand a role.
-        routed = self._route_for(role)
+        routed = self._route_for(role, task=task) if not single_provider else {
+            "routed": False, "rule": "ablation",
+            "why": "raw evaluation uses one configured provider attempt"}
+        if routed.get("stop"):
+            # the scheduler refused to authorise ANY strategy for this task
+            # (over budget, no eligible option). Falling back to the static
+            # pair here would run exactly the work it declined to authorise.
+            raise RuntimeError(
+                f"the cognitive scheduler authorised no strategy for this "
+                f"task: {routed.get('why', 'no reason recorded')}")
         if routed.get("routed"):
             attempts.append((routed["provider"], routed["model"]))
         attempts.append((rc["provider"], rc["model"]))
-        if rc.get("fallback_provider"):
+        if rc.get("fallback_provider") and not single_provider:
             attempts.append((rc["fallback_provider"], rc.get("fallback_model", rc["model"])))
+        # A configured pair can also be the routed or escalation pair. Do not
+        # silently multiply its retry allowance by listing it twice.
+        attempts = list(dict.fromkeys(attempts))
         last_err = None
         for prov_name, model in attempts:
             prov = self.provider_cfg(prov_name)
@@ -1096,6 +1164,18 @@ class Agent:
                             f"in agent.env (python bootstrap.py --key "
                             f"{prov.get('api_key_env', 'NAME')}=...)")
                 continue
+            allowed = self.allowed_tools(role) if use_tools else set()
+            tool_defs = ([t for t in TOOL_DEFS
+                          if t["function"]["name"] in allowed]
+                         if use_tools and prov.get("native_tools", True) else [])
+            # Account for every request at the exact provider/model rung,
+            # including mocks, fallbacks, compactors and judges. Over-limit
+            # requests stop before network or scripted-provider execution.
+            import context
+            context.assert_request_budget(
+                self.cfg, prov_name, model, messages,
+                self.max_output_tokens if self.max_output_tokens > 0 else None,
+                tool_defs)
             if prov.get("type") == "mock":
                 t0 = time.time()
                 msg = self._call_mock(prov, messages)
@@ -1108,7 +1188,7 @@ class Agent:
                             self._mock_usage, cost, task_id, t0)
                 self.last_call = {"provider": prov_name, "model": model}
                 return msg, self._mock_usage, prov_name
-            for attempt in range(5):
+            for attempt in range(1 if single_provider else 5):
                 _t0 = time.time()
                 try:
                     payload = {"model": model, "messages": messages}
@@ -1117,10 +1197,8 @@ class Agent:
                     # providers/models without function calling (set
                     # native_tools = false) rely on the grounding header's
                     # inline-JSON tool format instead
-                    if use_tools and prov.get("native_tools", True):
-                        allowed = self.allowed_tools(role)
-                        payload["tools"] = [t for t in TOOL_DEFS
-                                            if t["function"]["name"] in allowed]
+                    if tool_defs:
+                        payload["tools"] = tool_defs
                     headers = {
                         "Content-Type": "application/json",
                         "Authorization": f"Bearer {self._api_key(prov)}",
@@ -1504,7 +1582,22 @@ class Agent:
                                       "reason": str(e)[:200]}))
             return False, f"done_check refused: {e}"
         body = ((out or "") + (err or "")).strip()
-        return rc == 0, f"exit={rc}\n{truncate(body, 2000)}"
+        l0_evidence = f"exit={rc}\n{truncate(body, 2000)}"
+        try:
+            import verification
+            report = verification.run(self, task, (rc == 0, l0_evidence))
+            task["verification"] = {
+                "passed": report["passed"],
+                "decided_by": report["decided_by"],
+                "evidence_tier": report["evidence_tier"],
+                "levels": len(report["layers"]),
+            }
+            return bool(report["passed"]), l0_evidence
+        except Exception as e:
+            self.log.info(json.dumps({"event": "verification_failed_closed",
+                                      "task": task.get("id"),
+                                      "reason": str(e)[:200]}))
+            return False, f"{l0_evidence}\nverification ledger failed: {e}"
 
     def exec_tool(self, task, name, args):
         """Every tool returns TEXT, including its failures — an agent can
@@ -1519,21 +1612,116 @@ class Agent:
 
     def _exec_tool(self, task, name, args):
         if name == "read_file":
+            token = None
             try:
                 p = self._safe_path(args["path"])
+                import procedure
+                if procedure.active_trajectory(self.root, task["id"]):
+                    token = procedure.begin_action(
+                        self.root, task["id"], "read_file",
+                        {"path": args["path"]})
                 with open(p, "r", encoding="utf-8", errors="replace") as f:
-                    return truncate(f.read())
+                    result = truncate(f.read())
+                if token:
+                    procedure.finish_action(self.root, task["id"], token, True)
+                rel = str(args["path"]).replace("\\", "/").strip("/")
+                used = {str(x).replace("\\", "/").strip("/")
+                        for x in task.get("skills_used", [])}
+                if rel in used:
+                    import skills
+                    skills.trace_event(
+                        task, "referenced", [rel],
+                        step=len(task.get("steps", [])) + 1,
+                        evidence=f"read_file:{rel}")
+                return result
             except (OSError, ValueError) as e:
+                if token:
+                    try:
+                        procedure.finish_action(self.root, task["id"], token, False)
+                    except Exception:
+                        pass
                 return f"ERROR: {e}"
         if name == "write_file":
+            token = None
             try:
                 p = self._safe_path(args["path"], write=True)
             except ValueError as e:
                 return f"ERROR: {e}"
-            os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
-            with open(p, "w", encoding="utf-8") as f:
-                f.write(args["content"])
+            try:
+                import procedure
+                if procedure.active_trajectory(self.root, task["id"]):
+                    token = procedure.begin_action(
+                        self.root, task["id"], "write_file",
+                        {"path": args["path"], "content": args["content"]})
+                # ONE mutation semantic: fileauth decided WHERE above
+                # (_safe_path); fileauth also decides HOW — atomic temp-and-
+                # replace, so a crash mid-write leaves the previous file
+                # whole. A second open("w") here was a fork of the file
+                # authority's write semantics; test_invariants pins this.
+                import fileauth
+                fileauth.write_text(self.root, args["path"], args["content"])
+                if token:
+                    procedure.finish_action(self.root, task["id"], token, True)
+            except Exception:
+                if token:
+                    try:
+                        procedure.finish_action(self.root, task["id"], token, False)
+                    except Exception:
+                        pass
+                raise
             return f"ok, wrote {len(args['content'])} chars to {args['path']}"
+        if name == "transform_table":
+            # THE HARNESS COMPUTES, THE MODEL ONLY CHOOSES. The spec runs
+            # through tabular.py — a closed, pure, total operation set — so
+            # the answer is exact, and the capture hooks can hand the
+            # compiler a step whose replay re-derives the output instead of
+            # asking anyone to think. This is the adapter that lets repeated
+            # data work (reconciliation, normalization, report tables) stop
+            # costing model calls once it is proven.
+            token = None
+            try:
+                src = self._safe_path(args["source"])
+                dst = self._safe_path(args["path"], write=True)
+                src2 = (self._safe_path(args["source2"])
+                        if args.get("source2") else None)
+            except (KeyError, ValueError) as e:
+                return f"ERROR: {e}"
+            try:
+                import tabular
+                spec = tabular.canonical(str(args.get("spec") or ""))
+            except ValueError as e:
+                return f"ERROR: {e}"
+            import fileauth
+            try:
+                import procedure
+                capture = {"source": args["source"], "path": args["path"],
+                           "spec": spec}
+                if args.get("source2"):
+                    capture["source2"] = args["source2"]
+                if procedure.active_trajectory(self.root, task["id"]):
+                    token = procedure.begin_action(
+                        self.root, task["id"], "transform_table", capture)
+                with open(src, "r", encoding="utf-8", errors="replace") as f:
+                    primary = f.read()
+                secondary = None
+                if src2:
+                    with open(src2, "r", encoding="utf-8", errors="replace") as f:
+                        secondary = f.read()
+                out = tabular.apply(spec, primary, secondary)
+                # same single mutation semantic as write_file: atomic, via
+                # the file authority
+                fileauth.write_text(self.root, args["path"], out)
+                if token:
+                    procedure.finish_action(self.root, task["id"], token, True)
+                return (f"ok, derived {max(0, out.count(chr(10)) - 1)} data "
+                        f"row(s) into {args['path']}")
+            except (OSError, ValueError, fileauth.Denied) as e:
+                if token:
+                    try:
+                        procedure.finish_action(self.root, task["id"], token, False)
+                    except Exception:
+                        pass
+                return f"ERROR: {e}"
         if name == "run_command":
             cmd = args["cmd"]
             with open(os.path.join(self.logs_dir, "commands.log"), "a", encoding="utf-8") as f:
@@ -1734,7 +1922,7 @@ class Agent:
         for m in middle:
             for tc in (m.get("tool_calls") or []):
                 fn = tc.get("function") or {}
-                if fn.get("name") == "write_file":
+                if fn.get("name") in ("write_file", "transform_table"):
                     try:
                         p = json.loads(fn.get("arguments") or "{}").get("path")
                         if p and p not in written:
@@ -1786,14 +1974,14 @@ class Agent:
             self.commit_task(task)
             return False
 
-        routed = self._route_for(task["role"])
+        routed = self._route_for(task["role"], task=task)
         if routed.get("routed"):
             task["route"] = {k: routed[k] for k in
                              ("chosen", "why", "cost", "rule") if k in routed}
         try:
             msg, usage, prov_name = self.call_model(
                 task["role"], messages, escalated=bool(task.get("escalated")),
-                purpose="step", task_id=task["id"])
+                purpose="step", task_id=task["id"], task=task)
             task["provider"] = prov_name
             # the model that ACTUALLY served, not the one routing intended:
             # on failover the fallback provider answers with its own model,
@@ -1990,10 +2178,33 @@ class Agent:
                 # sixth. Ranking is gate-first, so a failing attempt can
                 # never beat a passing one.
                 self._stash_attempt(task)
-                if task["done_rejects"] >= self.max_done_rejects:
+                stop_sampling = task["done_rejects"] >= self.max_done_rejects
+                try:
+                    import candidates
+                    decision = candidates.next_attempt(
+                        task, candidates.history(self.root, task["id"]),
+                        cfg=self.cfg,
+                        # the empirical branch was unreachable: both fields
+                        # existed in the signature and no caller passed them
+                        recovery_observations=candidates.recovery_observations(
+                            self.root),
+                        remaining_budget_usd=(
+                            max(0.0, self.max_task_usd - task.get("cost_usd", 0.0))
+                            if self.max_task_usd > 0 else None))
+                    task["candidate_decision"] = decision
+                    stop_sampling = stop_sampling or not decision["continue"]
+                except Exception as e:
+                    # The established hard ceiling remains the safe fallback;
+                    # a broken optimizer never grants extra attempts.
+                    task["candidate_decision"] = {
+                        "continue": not stop_sampling,
+                        "reason": f"sequential policy unavailable: {e}"}
+                if stop_sampling:
                     task["status"] = "failed"
-                    task["error"] = (f"done_check never passed after "
-                                     f"{task['done_rejects']} attempts: {evidence}")
+                    why = task.get("candidate_decision", {}).get("reason")
+                    task["error"] = (
+                        f"done_check never passed after {task['done_rejects']} "
+                        f"attempts ({why or 'hard attempt ceiling'}): {evidence}")
                     result = f"TASK FAILED: {task['error']}"
                     self._promote_best_attempt(task)
                 else:
@@ -2628,7 +2839,15 @@ class Agent:
             memory_files=task.get("memory_files"), course=task.get("course"),
             attempt=attempt + 1, base_goal=base,
             lineage=task.get("lineage") or task["id"],
-            done_check=task.get("done_check"), stop=task.get("stop"))
+            done_check=task.get("done_check"), stop=task.get("stop"),
+            # the procedural contract travels with the retry. Without this
+            # the retry carried no judge and no typed inputs, so the FIRST
+            # failure permanently ended trajectory capture for that work —
+            # and a retry is exactly the attempt most worth learning from.
+            # task_class travels too, or it would be re-derived from the
+            # RETRY preamble rather than the original goal.
+            judge_id=task.get("judge_id"), inputs=task.get("inputs"),
+            family=task.get("family"), task_class=task.get("task_class"))
         self.log.info(json.dumps({"event": "retry_queued", "failed_task": task["id"],
                                   "retry_task": nid, "attempt": attempt + 1}))
 
@@ -2649,6 +2868,227 @@ class Agent:
         self.commit_task(task)
         self.log.info(json.dumps({"event": "task_unblocked", "task": task_id}))
 
+    def _begin_trajectory(self, task):
+        """Open an independently judged trajectory for a task that carries
+        an owner-sealed judge and typed inputs. Opening is opt-in per task;
+        the capture hooks in _exec_tool fire only inside one. A refusal
+        (missing judge, reused identity) downgrades to ordinary execution —
+        it never blocks the work itself."""
+        # EVERY GATED TASK IS CAPTURED. This used to require the owner to
+        # hand-write a sealed judge and typed inputs per task, so on ordinary
+        # work — the panel, a goal, a mission, a routine — nothing was ever
+        # captured and the induction path existed only for a demo. A task
+        # that carries its own definition of done already has an external,
+        # mechanical verdict; that is enough to REMEMBER what happened.
+        # It is not enough to trust it, and it does not become enough:
+        # gate-captured evidence can only ever yield a candidate.
+        if not (task.get("judge_id") or task.get("done_check")):
+            return
+        try:
+            import procedure
+            procedure.begin_trajectory(
+                self.root, task["id"], task.get("judge_id"),
+                task.get("inputs") if isinstance(task.get("inputs"), dict) else None,
+                family=(task.get("family") or task.get("course")
+                        or task.get("task_class") or "unspecified"),
+                gate=task.get("done_check"))
+            self.log.info(json.dumps({
+                "event": "trajectory_opened", "task": task["id"],
+                "judge": task.get("judge_id"),
+                "basis": "sealed_judge" if task.get("judge_id") else "harness_gate"}))
+        except Exception as e:
+            self.log.info(json.dumps({
+                "event": "trajectory_refused", "task": task["id"],
+                "why": str(e)[:200]}))
+
+    def _try_procedure_route(self, task):
+        """Deterministic reuse of earned competence, before any model call.
+
+        Fires only when the task has typed inputs AND its own done gate: the
+        gate stays the acceptor, so the procedure is never the judge of its
+        own replay. Only PROVEN compiled procedures qualify — candidate
+        trust is earned through sealed evaluation, not through live traffic.
+        Every non-gated outcome falls through to the ordinary model path."""
+        # A task with no declared inputs is not disqualified: a procedure
+        # induced from work that never varied has an EMPTY input schema, and
+        # check_inputs below is what decides whether the task can satisfy it.
+        # Requiring typed inputs here meant the commonest repeated job — the
+        # same report, written the same way, every week — could never take
+        # the free path.
+        if task.get("procedure_route_tried") or not task.get("done_check"):
+            return False
+        inputs = task.get("inputs") if isinstance(task.get("inputs"), dict) else {}
+        task["procedure_route_tried"] = True
+        try:
+            from evaluation_policy import disabled
+            if disabled(self.cfg, "procedures"):
+                return False
+        except ImportError:
+            pass
+        try:
+            import operators
+            import procedure
+            import runbook
+            hits = runbook.match(self.root, task["goal"])
+        except Exception:
+            return False
+        for hit in hits:
+            name = hit["name"]
+            if hit.get("status") != "proven":
+                continue
+            try:
+                rb = runbook.load(self.root, name)
+            except Exception:
+                continue
+            if not rb.get("procedure_version"):
+                continue
+            try:
+                operators.check_inputs(self.root, rb["operator"]["inputs"], inputs)
+            except Exception as e:
+                self.log.info(json.dumps({
+                    "event": "procedure_route_skipped", "task": task["id"],
+                    "runbook": name, "why": str(e)[:160]}))
+                continue
+            started = time.time()
+            try:
+                result = procedure.execute(self.root, rb, inputs)
+            except Exception as e:
+                self.log.info(json.dumps({
+                    "event": "procedure_route_skipped", "task": task["id"],
+                    "runbook": name, "why": str(e)[:160]}))
+                continue
+            if not result.get("ok"):
+                try:
+                    runbook.record(self.root, name, False,
+                                   why=str(result.get("why", ""))[:200])
+                except Exception:
+                    pass
+                continue
+            passed, evidence = self.check_done(task)
+            try:
+                runbook.record(self.root, name, True, accepted=bool(passed),
+                               why="live deterministic route")
+            except Exception:
+                pass
+            if passed:
+                task["status"] = "done"
+                task["procedure_routed"] = name
+                task["summary"] = (f"proven procedure {name} executed "
+                                   f"deterministically; done gate passed")
+                self.commit_task(task)
+                self.log.info(json.dumps({
+                    "event": "procedure_route", "task": task["id"],
+                    "runbook": name, "family": (rb.get("provenance") or {})
+                    .get("family"), "model_calls": 0,
+                    "seconds": round(time.time() - started, 3)}))
+                return True
+            self.log.info(json.dumps({
+                "event": "procedure_route_rejected", "task": task["id"],
+                "runbook": name, "why": "steps verified but the task's own "
+                "done gate refused the result", "evidence": str(evidence)[:160]}))
+        return False
+
+    def _procedural_learning(self, task):
+        """Terminal-outcome learning step for captured trajectories.
+
+        Closes the trajectory against its EXTERNAL verdict — a sealed judge
+        re-observed, or the task's own mechanical gate — never the worker's
+        claim. Once a family holds two independent accepted trajectories,
+        they are compiled into a CANDIDATE procedure and any owner-sealed
+        suite is run against it. Compile refusals are ordinary events: most
+        experience should not become a procedure, and the refusal says why."""
+        if not (task.get("judge_id") or task.get("done_check")):
+            return
+        try:
+            from evaluation_policy import disabled
+            if disabled(self.cfg, "procedures"):
+                return
+        except ImportError:
+            pass
+        try:
+            import procedure
+            if not procedure.active_trajectory(self.root, task["id"]):
+                return
+            # the gate verdict the harness itself recorded for this task —
+            # check_done's result, not anything the worker said about it
+            gate_passed = None
+            if task.get("done_check"):
+                # check_done files its verdict on the task; `passed` is what
+                # the verification authority decided, with L0 supreme
+                gate_passed = (task.get("verification") or {}).get("passed")
+                if gate_passed is None:
+                    gate_passed = task.get("status") == "done"
+            trajectory = procedure.finish_trajectory(self.root, task["id"],
+                                                     gate_passed=gate_passed)
+        except Exception as e:
+            self.log.info(json.dumps({
+                "event": "trajectory_close_failed", "task": task["id"],
+                "why": str(e)[:200]}))
+            return
+        self.log.info(json.dumps({
+            "event": "trajectory_closed", "task": task["id"],
+            "accepted": bool(trajectory.get("accepted")),
+            "family": trajectory.get("family")}))
+        if not trajectory.get("accepted"):
+            return
+        family = trajectory.get("family") or "unspecified"
+        try:
+            rows = procedure.accepted_trajectories(self.root, family)
+        except Exception:
+            return
+        # The same independence rule compile() applies, asked here first so
+        # the loop does not call the compiler on evidence it will refuse.
+        # Sealed-judge evidence must span two judges; gate-captured evidence
+        # has one gate per task and no typed inputs, so what it must show is
+        # that the RUNS DIFFERED.
+        auto = all(r.get("acceptance_basis") == "harness_gate" for r in rows)
+        if auto:
+            independent = len({r.get("work_hash") for r in rows}) >= 2
+        else:
+            independent = (len({r["input_hash"] for r in rows}) >= 2
+                           and len({r["judge_id"] for r in rows}) >= 2)
+        if not independent:
+            return          # not yet two independent runs — nothing to learn
+        name = "proc-" + (safe_course(family) or "unnamed")
+        try:
+            import runbook
+            existing = runbook.load(self.root, name)
+            known = set((existing.get("provenance") or {})
+                        .get("trajectory_ids") or [])
+            if {r["task_id"] for r in rows} <= known:
+                return      # nothing new to induce from
+        except Exception:
+            pass            # no runbook yet — this would be the first compile
+        try:
+            procedure.compile(self.root, name,
+                              [r["task_id"] for r in rows], [family])
+            self.log.info(json.dumps({
+                "event": "procedure_compiled", "task": task["id"],
+                "runbook": name, "family": family,
+                "trajectories": len(rows)}))
+        except Exception as e:
+            self.log.info(json.dumps({
+                "event": "procedure_compile_refused", "task": task["id"],
+                "family": family, "why": str(e)[:200]}))
+            return
+        try:
+            suites = procedure.sealed_suites(self.root, family)
+        except Exception:
+            suites = []
+        for suite_id in suites:
+            try:
+                verdict = procedure.evaluate(self.root, name, suite_id)
+                self.log.info(json.dumps({
+                    "event": "procedure_evaluated", "task": task["id"],
+                    "runbook": name, "suite": suite_id,
+                    "accepted": bool(verdict.get("accepted")),
+                    "status": verdict.get("status")}))
+            except Exception as e:
+                self.log.info(json.dumps({
+                    "event": "procedure_evaluation_refused", "task": task["id"],
+                    "runbook": name, "suite": suite_id,
+                    "why": str(e)[:200]}))
+
     def _file_memory(self, task):
         """Every finished task files institutional memory: a structured,
         categorized failure record when it failed, and an earned competence
@@ -2659,33 +3099,40 @@ class Agent:
         gate-verified) or quarantines a repeat loser."""
         if task["status"] not in ("done", "failed"):
             return
+        try:
+            from evaluation_policy import disabled as evaluation_disabled
+        except ImportError:
+            evaluation_disabled = lambda _cfg, _module: False
         # CONFIDENCE: how much doubt is left, measured from what the harness
         # already checked. Recorded on the task, never self-reported, and
         # used to decide whether more compute is warranted (candidates.py).
-        try:
-            import confidence
-            rep = confidence.score(self, task)
-            task["confidence"] = {k: rep[k] for k in
-                                  ("confidence", "band", "action", "why")}
-            # the task was committed when it finished, so this needs its own
-            # write or the band exists only in memory and dies with the loop
-            self.commit_task(task)
-            if rep["band"] != "high":
-                self.log.info(json.dumps({
-                    "event": "low_confidence", "task": task["id"],
-                    "confidence": rep["confidence"], "band": rep["band"],
-                    "action": rep["action"], "why": rep["why"]}))
-        except Exception as e:
-            self.log.error(json.dumps({"event": "confidence_failed",
-                                       "error": str(e)}))
+        if not evaluation_disabled(self.cfg, "confidence"):
+            try:
+                import confidence
+                rep = confidence.score(self, task)
+                task["confidence"] = {k: rep[k] for k in
+                                      ("confidence", "band", "action", "why")}
+                # the task was committed when it finished, so this needs its own
+                # write or the band exists only in memory and dies with the loop
+                self.commit_task(task)
+                if rep["band"] != "high":
+                    self.log.info(json.dumps({
+                        "event": "low_confidence", "task": task["id"],
+                        "confidence": rep["confidence"], "band": rep["band"],
+                        "action": rep["action"], "why": rep["why"]}))
+            except Exception as e:
+                self.log.error(json.dumps({"event": "confidence_failed",
+                                           "error": str(e)}))
         will_retry_s = (task["status"] == "failed"
                         and task.get("attempt", 1) <= self.max_task_retries)
-        if not will_retry_s and task.get("skills_used"):
+        if (not will_retry_s and task.get("skills_used")
+                and not evaluation_disabled(self.cfg, "skills")):
             try:
                 changed = skillgraph.record_use(
                     self.root, task["skills_used"], task["id"],
                     success=(task["status"] == "done"),
-                    verified=bool(task.get("done_check")))
+                    verified=bool(task.get("done_check")),
+                    trace=task.get("skill_trace"))
                 for stem, (old_st, new_st) in changed.items():
                     self.log.info(json.dumps({
                         "event": "skill_status", "skill": stem,
@@ -2697,7 +3144,7 @@ class Agent:
         # which model the next task of this kind should use. Kept per expert
         # (not per fleet) — a model that suits this expert's work may be
         # wrong for another's.
-        if not will_retry_s:
+        if not will_retry_s and not evaluation_disabled(self.cfg, "routing"):
             try:
                 import modelrouter
                 # PER-ATTEMPT ATTRIBUTION (audit P1). task["provider"] holds
@@ -2719,6 +3166,50 @@ class Agent:
             except Exception as e:
                 self.log.error(json.dumps({"event": "route_record_failed",
                                            "error": str(e)}))
+        # CANDIDATE RECOVERY LEDGER — the development observations the
+        # sequential stopping rule filters for. Written at the terminal
+        # outcome because "did another sample fix it" is only knowable then.
+        if not will_retry_s and not evaluation_disabled(self.cfg, "candidates"):
+            try:
+                import candidates
+                candidates.record_recovery(self.root, task)
+            except Exception as e:
+                self.log.error(json.dumps({"event": "recovery_record_failed",
+                                           "error": str(e)}))
+        # SCHEDULER OUTCOMES — the write side of the routing learner. The
+        # decisions ledger existed and the outcomes ledger had no writer, so
+        # choose() could never leave its prior. A shadow decision records
+        # too: shadow mode is exactly how the training data accrues before
+        # anyone trusts the planner with routing authority.
+        if not will_retry_s and not evaluation_disabled(self.cfg, "routing"):
+            try:
+                decision = task.get("scheduler_decision")
+                shadow = False
+                if not decision:
+                    decision, shadow = task.get("scheduler_shadow"), True
+                if decision and decision.get("features"):
+                    import scheduler
+                    started = task.get("started_at")
+                    scheduler.record(
+                        self.root, task, decision,
+                        success=(task["status"] == "done"),
+                        verified_l0=(bool(task.get("done_check"))
+                                     and task["status"] == "done"),
+                        cost_usd=task.get("cost_usd", 0),
+                        # measured, not the 0.0 default: a latency column that
+                        # is structurally always zero is worse than absent,
+                        # because the scheduler divides by it
+                        latency_seconds=(max(0.0, time.time() - started)
+                                         if started else 0.0),
+                        shadow=shadow,
+                        served=list((task.get("served") or {}).keys()))
+            except Exception as e:
+                self.log.error(json.dumps({"event": "scheduler_record_failed",
+                                           "error": str(e)}))
+        # PROCEDURAL LEARNING — close the judged trajectory and, when the
+        # family's evidence permits, compile and evaluate.
+        if not will_retry_s:
+            self._procedural_learning(task)
         # experts/<slug> -> the fleet home two levels up
         parent = os.path.dirname(self.root)
         if os.path.basename(parent) != "experts":
@@ -3016,10 +3507,26 @@ class Agent:
                 if claimed is None:
                     continue      # another loop claimed it between read and now
                 task = claimed          # claim_task took the course lock
+                # when work on this task actually began — the only honest
+                # source for a latency measurement (`created` is when it was
+                # queued, which on a busy fleet is a different number)
+                task["started_at"] = time.time()
                 self.log.info(json.dumps({
                     "event": "task_start", "task": task["id"],
                     "role": task["role"], "course": task.get("course"),
                 }))
+                # PROCEDURE FIRST. A task whose family already has a proven
+                # compiled procedure and whose typed inputs satisfy it is
+                # executed deterministically — zero model calls — and still
+                # answers to its own done gate. Anything short of a gated
+                # pass falls through to the ordinary model path.
+                self._try_procedure_route(task)
+                # A task carrying an owner-sealed judge opens a trajectory:
+                # the capture hooks in _exec_tool are live only inside one,
+                # and acceptance is the judge's re-observation, never the
+                # worker's claim.
+                if task["status"] == "running":
+                    self._begin_trajectory(task)
             else:
                 # resumed running task: prove it is abandoned and take
                 # ownership under the mutex before touching it, exactly as
@@ -3029,6 +3536,7 @@ class Agent:
                 if adopted is None:
                     continue
                 task = adopted          # adopt_task took the course lock
+                task.setdefault("started_at", time.time())
                 self.log.info(json.dumps({
                     "event": "task_resumed", "task": task["id"],
                     "role": task["role"], "steps": n_steps(task),
@@ -3104,6 +3612,19 @@ def main():
     p_add.add_argument("--deadline", default=None,
                        help="ISO timestamp after which the task fails")
     p_add.add_argument("--max-steps", type=int, default=None, dest="max_steps")
+    # THE PROCEDURAL CONTRACT — how verified work becomes a reusable
+    # procedure. Both are owner-supplied and optional: --judge-id names a
+    # judge the OWNER sealed (python procedure.py seal-judge ...), and
+    # --inputs gives the task's typed values. With both, the loop opens an
+    # independently judged trajectory, and once a family has two accepted
+    # trajectories with distinct inputs and distinct judges it compiles them
+    # into a candidate procedure. Without them nothing changes.
+    p_add.add_argument("--judge-id", default=None, dest="judge_id",
+                       help="owner-sealed judge for this task's trajectory")
+    p_add.add_argument("--inputs", default=None,
+                       help="JSON object of this task's typed inputs")
+    p_add.add_argument("--family", default=None,
+                       help="task family the procedure would generalize over")
 
     p_st = sub.add_parser("status", help="show the task queue")
     p_st.add_argument("--root", default=".")
@@ -3126,13 +3647,31 @@ def main():
     if args.cmd == "run":
         agent.run(drain=args.drain)
     elif args.cmd == "add":
+        inputs = None
+        if args.inputs:
+            try:
+                inputs = json.loads(args.inputs)
+            except ValueError as e:
+                raise SystemExit(f"--inputs must be a JSON object: {e}")
+            if not isinstance(inputs, dict):
+                raise SystemExit("--inputs must be a JSON OBJECT of typed "
+                                 "values, e.g. '{\"path\": \"out/x.txt\"}'")
+        if args.judge_id and inputs is None:
+            raise SystemExit("--judge-id needs --inputs: a trajectory without "
+                             "typed inputs cannot be generalized into a "
+                             "procedure, so nothing would be learned from it")
         tid = agent.add_task(args.role, args.goal, args.memory, args.course,
                              done_check=args.done_check,
                              stop={"criteria": args.stop_criteria,
                                    "max_attempts": args.max_attempts,
                                    "deadline": args.deadline,
-                                   "max_steps": args.max_steps})
+                                   "max_steps": args.max_steps},
+                             judge_id=args.judge_id, inputs=inputs,
+                             family=args.family)
         print(f"queued task {tid}")
+        if args.judge_id:
+            print(f"  judged trajectory: judge={args.judge_id} "
+                  f"family={args.family or args.course or 'from goal'}")
     elif args.cmd == "status":
         for t in agent.load_state()["tasks"]:
             course = t.get("course") or "-"

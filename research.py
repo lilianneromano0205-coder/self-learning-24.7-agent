@@ -83,65 +83,74 @@ def facts_needed(question):
     return subs[:MAX_SUBS + 3]
 
 
-def investigate(root, question, per_sub=HITS_PER_SUB):
-    """Retrieve for each sub-question separately. Never raises."""
-    try:
-        import recall
-    except ImportError:
-        return {"question": question, "subs": [], "error": "recall unavailable"}
-    try:
-        import citecheck
-        known = citecheck.known_atoms(root)
-    except Exception:
-        known = set()
-    subs, established, missing = [], set(), []
-    for sub in facts_needed(question):
-        try:
-            hits = recall.search(root, " ".join(sub["terms"]), limit=per_sub)
-        except Exception:
-            hits = []
-        rows, atoms = [], []
-        for h in hits:
-            # recall returns (score, "path:line", text) or a dict, tolerate both
-            if isinstance(h, dict):
-                where, text = h.get("where", ""), h.get("text", "")
-            elif isinstance(h, (list, tuple)) and len(h) >= 3:
-                where, text = h[1], h[2]
-            else:
-                continue
-            found = [a for a in ATOM_RE.findall(text) if a in known] or \
-                ATOM_RE.findall(text)
-            atoms += found
-            rows.append({"where": where, "text": text[:220], "atoms": found})
-        atoms = list(dict.fromkeys(atoms))
-        established.update(atoms)
-        if not rows:
-            missing.append(sub["ask"])
-        subs.append({"ask": sub["ask"], "terms": sub["terms"],
-                     "hits": rows, "atoms": atoms,
-                     "established": bool(rows)})
-    return {"question": question, "subs": subs,
-            "atoms": sorted(established), "unestablished": missing,
-            "coverage": round(
-                sum(1 for s in subs if s["established"]) / len(subs), 2)
-            if subs else 0.0}
+def investigate(root, question, per_sub=HITS_PER_SUB, *, plan=None, as_of=None, cfg=None):
+    """Retrieve and assess claims before any answer.
+
+    Explicit plans carry propositions, counterclaims, dependencies and date
+    requirements. Grammar-only decomposition remains available but never
+    upgrades retrieved text to established facts. Invalid plans fail closed.
+    """
+    import recall
+    import research_plan
+    if cfg is None:
+        import sources
+        cfg = sources._root_cfg(root)
+    return research_plan.collect(root, question, plan, as_of, per_sub, cfg, recall.search)
+
+
+def answer(report):
+    """Complete source-relative answers require a current gap assessment."""
+    import research_plan
+    return research_plan.answer(report)
+
+
+def discover_gaps(root, report, cfg=None, rails=None, general_web=False,
+                  as_of=None, limit=8):
+    """Find candidates for unresolved claims without changing claim states.
+
+    Discovery snippets remain fenced candidates. Only a later guarded fetch,
+    source record and fresh investigation can support a proposition.
+    """
+    import copy
+    import discover
+    before = copy.deepcopy(report.get("gap_assessment"))
+    searches = []
+    for sub in report.get("subs", []):
+        if sub.get("established"):
+            continue
+        query = sub.get("ask") or sub.get("proposition") or report.get("question", "")
+        found = discover.search(query, rails=rails, limit=limit, cfg=cfg,
+                                general_web=general_web, as_of=as_of)
+        searches.append({"claim_id": sub.get("id"), "query": query,
+                         "discovery": found})
+    if report.get("gap_assessment") != before:
+        raise RuntimeError("discovery altered the frozen gap assessment")
+    return {"searches": searches, "claim_states_changed": False,
+            "instruction": "fetch candidates through ingest, then investigate again"}
 
 
 def render(report):
     """The briefing block a consultant is handed before it writes anything."""
     if not report.get("subs"):
         return ""
-    L = ["RESEARCH BRIEF — the facts this question rests on, retrieved before "
-         "answering. Cite the atom IDs below; for anything marked NOTHING "
-         "FOUND, write NOT IN MY TRAINING rather than filling the gap."]
+    import sources
+    assessment = report.get("gap_assessment", {})
+    L = ["RESEARCH BRIEF — retrieved evidence is not established truth. "
+         "For unresolved claims declare NOT IN MY TRAINING; do not fill gaps.",
+         f"GAP ASSESSMENT: {'performed' if assessment.get('performed') else 'MISSING'}; "
+         f"complete answer ready: {assessment.get('answer_ready', False)}."]
     for s in report["subs"]:
-        if not s["established"]:
+        if not s["hits"]:
             L.append(f"- {s['ask']}  -> NOTHING FOUND in this expert's memory")
             continue
-        L.append(f"- {s['ask']}"
+        L.append(f"- {s['ask']} -> {s.get('state', 'unresolved').upper()}"
                  + (f"  (atoms: {', '.join(s['atoms'][:8])})" if s["atoms"] else ""))
         for h in s["hits"][:3]:
-            L.append(f"    [{h['where']}] {h['text'][:150]}")
+            L.append(sources.fence_content(h['where'], h['text'][:500]))
+        if s.get("missing_evidence"):
+            L.append("GAPS: " + "; ".join(s["missing_evidence"]))
+        if s.get("counterevidence"):
+            L.append("COUNTEREVIDENCE: " + ", ".join(s["counterevidence"]))
     if report.get("unestablished"):
         L.append(f"UNESTABLISHED ({len(report['unestablished'])}): "
                  + "; ".join(report["unestablished"][:4]))
@@ -170,15 +179,28 @@ def main():
     ap.add_argument("--root", default=".")
     ap.add_argument("--save", action="store_true")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--plan", help="JSON list of factual claims/dependencies/counterclaims")
+    ap.add_argument("--as-of", help="ISO date for reproducible temporal assessment")
+    ap.add_argument("--answer", action="store_true", help="answer only if gap assessment permits")
     a = ap.parse_args()
     root = os.path.abspath(a.root)
-    rep = investigate(root, a.question)
+    plan = None
+    if a.plan:
+        with open(a.plan, encoding="utf-8") as f:
+            plan = json.load(f)
+    rep = investigate(root, a.question, plan=plan, as_of=a.as_of)
+    if a.answer:
+        try:
+            print(answer(rep))
+        except ValueError as exc:
+            raise SystemExit(str(exc))
+        return
     if a.json:
         print(json.dumps(rep, indent=1))
     else:
         print(render(rep) or "nothing to investigate")
-        print(f"\ncoverage: {rep['coverage']:.0%} of the sub-questions had "
-              f"supporting material")
+        print(f"\nsupported coverage: {rep['coverage']:.0%}; "
+              f"states: {rep['coverage_states']}")
     if a.save:
         print("saved:", save(root, a.question, rep))
     raise SystemExit(0 if rep.get("coverage") else 1)

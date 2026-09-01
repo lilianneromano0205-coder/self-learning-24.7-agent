@@ -42,7 +42,8 @@ def main():
                         roles={"tester": "m"}, scripts={"s.json": []})
     root = fleet.create(home, "Fixer", "learns what actually works")
     with open(os.path.join(root, "settings.toml"), "w", encoding="utf-8") as f:
-        f.write('[agent]\npoll_interval_seconds = 1\nmax_task_usd = 0\n'
+        f.write('[agent]\nsandbox = "host"\nallow_unsafe_host = true\n'
+                'poll_interval_seconds = 1\nmax_task_usd = 0\n'
                 'reflect_after = []\nmax_task_retries = 0\nmax_done_rejects = 1\n\n'
                 '[providers.m]\ntype = "mock"\nscript = "script.json"\n\n'
                 '[roles.default]\nprovider = "m"\nmodel = "mock"\n')

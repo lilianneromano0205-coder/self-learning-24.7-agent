@@ -250,12 +250,14 @@ def score(agent, task, artifacts=None):
     weakest = sorted(parts.items(), key=lambda kv: kv[1])[:2]
     why = "; ".join(f"{k} {v:.2f}" for k, v in weakest) or "no measured signals"
     return {"confidence": round(conf, 4), "band": band,
+            "kind": "heuristic_score", "calibrated": False,
+            "calibration_evidence": "NOT_MEASURED: held-out class-specific validation required",
             "action": ACTIONS[band], "signals": signals,
             "weakest": [k for k, _ in weakest], "why": why}
 
 
 def render(rep):
-    return (f"CONFIDENCE {rep['confidence']:.0%} ({rep['band']}) -> "
+    return (f"HEURISTIC CONFIDENCE SCORE {rep['confidence']:.0%} ({rep['band']}) -> "
             f"{rep['action']}; weakest: {rep['why']}")
 
 

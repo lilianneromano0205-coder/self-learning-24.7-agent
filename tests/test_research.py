@@ -66,7 +66,7 @@ def main():
     # --- 3 + 4. retrieval, and the gap reported as a gap
     rep = research.investigate(sb, QUESTION)
     got = {s["ask"]: s for s in rep["subs"]}
-    covered = [s for s in rep["subs"] if s["established"]]
+    covered = [s for s in rep["subs"] if s["retrieved"]]
     assert covered, rep
     assert "C-0101" in rep["atoms"] and "C-0102" in rep["atoms"], rep["atoms"]
     assert any(h["where"].startswith("courses/design/notes.md")
@@ -74,10 +74,12 @@ def main():
     refund = [s for s in rep["subs"] if "refund" in s["terms"]]
     assert refund and not refund[0]["established"], refund
     assert any("refund" in u for u in rep["unestablished"]), rep["unestablished"]
-    assert 0 < rep["coverage"] < 1, rep["coverage"]
+    assert rep["coverage"] == 0, rep["coverage"]
+    assert not any(s["established"] for s in rep["subs"]), rep
+    assert rep["coverage_states"]["retrieved"] > 0, rep
     print(f"[retrieve] the two design questions found their atoms "
           f"({', '.join(rep['atoms'])}); the refund question found nothing and "
-          f"is listed as unestablished — coverage {rep['coverage']:.0%}")
+          f"is listed as unestablished; retrieval is not proposition support")
 
     # --- the brief tells the answerer what to do about the gap
     text = research.render(rep)

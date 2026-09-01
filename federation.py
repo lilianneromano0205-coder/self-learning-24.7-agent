@@ -278,23 +278,24 @@ def _seen_nonce(home, fleet_id, nonce):
 
 
 def a2a_card(home):
-    """An Agent2Agent (A2A v1.0, Linux Foundation) discovery card derived
-    from the published fleet card — so ANY A2A-aware ecosystem can discover
-    this fleet's exposed experts at the standard well-known path. Discovery
-    only exposes what the owner already chose to expose; task exchange stays
-    behind the signed fleet protocol, declared here as the security scheme.
-    No secret and no fingerprint ever appear in this card."""
+    """A2A-discoverable/custom federation transport, not an A2A task API.
+
+    The conventional discovery URL and skill descriptions are provided for
+    human/tool discovery. A2A SendMessage/GetTask semantics are not implemented.
+    No secret and no fingerprint appear in this custom discovery document.
+    """
     card = _load(home, "my-card.json", None)
     if not card:
         return None
     return {
-        "protocolVersion": "1.0",
+        "interoperability": {"description": "A2A-discoverable/custom federation transport",
+                             "a2a_task_api": False, "transport": "signed-fleet-v1"},
         "name": card.get("name") or card.get("fleet_id", "expert-fleet"),
         "description": ("Expert fleet: trained specialist agents. Answers "
                         "are citation-gated; unknown ground is declared, "
                         "never invented."),
         "url": (card.get("endpoint") or "").rstrip("/") + "/ask",
-        "preferredTransport": "JSONRPC",
+        "preferredTransport": "CUSTOM_FEDERATION",
         "version": "1.0.0",
         "provider": {"organization": card.get("name") or "expert-fleet",
                      "url": card.get("endpoint") or ""},
@@ -330,8 +331,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(b)
 
     def do_GET(self):
-        # A2A v1.0 discovery: the standard well-known path (agent.json kept
-        # for pre-1.0 clients). Public by design — it reveals only what the
+        # Custom discovery at conventional A2A paths. Not an A2A task API.
+        # Public by design — it reveals only what the
         # owner exposed, and names the auth scheme real exchange requires.
         if self.path.split("?")[0] in ("/.well-known/agent-card.json",
                                        "/.well-known/agent.json"):

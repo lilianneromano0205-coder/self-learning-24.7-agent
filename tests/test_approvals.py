@@ -38,7 +38,7 @@ def main():
     root = fleet.create(home, "Records Clerk", "keeps the records straight")
     deleted_log = os.path.join(root, "deleted.log")
     with open(os.path.join(root, "settings.toml"), "w", encoding="utf-8") as f:
-        f.write('[agent]\npoll_interval_seconds = 1\nmax_task_usd = 0\n'
+        f.write('[agent]\nsandbox = "host"\nallow_unsafe_host = true\npoll_interval_seconds = 1\nmax_task_usd = 0\n'
                 'reflect_after = []\nmax_task_retries = 0\n\n'
                 '[providers.m]\ntype = "mock"\nscript = "script.json"\n\n'
                 '[roles.default]\nprovider = "m"\nmodel = "mock"\n\n'

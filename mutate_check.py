@@ -181,11 +181,16 @@ MUTATIONS = [
      "test_endurance.py",
      "a hot queue that grows without bound"),
 
+    # The anchor below is the AUTHORIZATION CALL ITSELF, not the shape of the
+    # code around it. The previous anchor quoted three lines including a
+    # `return True` that moved when _may_write/_may were split apart, so the
+    # mutation silently stopped applying ("anchor appears 0x") and the RBAC
+    # control lost its mutation coverage without anything going red. A
+    # mutation that cannot be applied proves exactly as much as a test that
+    # cannot fail.
     ("rbac: every write allowed", "ui.py",
-     '''            org.check(self.home, getattr(self, "actor", OWNER_ACTOR),
-                      permission, obj)
-            return True''',
-     '''            return True''',
+     '''            org.check(self.home, actor, permission, obj)''',
+     '''            pass''',
      "test_rbac.py",
      "a viewer able to delete an agent"),
 

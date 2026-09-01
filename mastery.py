@@ -59,11 +59,16 @@ import json
 import os
 import sys
 import time
+import uuid
 
 HOME = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HOME)
 
-MAX_RELEARN_ROUNDS = 2      # per failing competency; oscillation stops it
+MAX_RELEARN_ROUNDS = 2      # kept as run()'s `max_rounds` default only.
+                            # There is no re-exam to bound: the exposure
+                            # authority consumes a sealed set at the
+                            # sitting that used it, so relearn_rounds is
+                            # always 0 and a gap ends in fresh_pack_required.
 DIR = "mastery"
 
 
@@ -128,7 +133,32 @@ def _run_task(home, expert, pack, task, phase, drive=False, timeout=900):
     import contract
     import goal as goalmod
     root = os.path.join(home, "experts", expert)
-    gid = f"m-{pack}-{phase}-{task['id']}-{time.strftime('%H%M%S')}"
+    if phase != "practice":
+        # Only practice may file trajectories/memory into the persistent student.
+        # Baseline/exam/retention run in distinct homes, with packs still outside
+        # the actor root. No artifacts, prompts, answers or graders return.
+        import evaluation_workspace
+        import shutil
+        with evaluation_workspace.arena(root, expert=expert) as (temp_home, temp_root, snap):
+            target = capability.pack_dir(temp_home, pack)
+            shutil.copytree(capability.pack_dir(home, pack), target)
+            capability.freeze(temp_home, pack)
+            result = _execute_task(temp_home, expert, pack, task, phase, drive, timeout)
+        _event(root, pack, "task_graded", phase=phase, task=task["id"],
+               gid=result["gid"], passed=result["passed"],
+               competencies=result["competencies"], failed_checks=result["failed_checks"],
+               pack_hash=capability.verify_pack(home, pack)["hash"], snapshot_hash=snap,
+               evidence_scope="disposable-evaluation-no-training-export")
+        return result
+    return _execute_task(home, expert, pack, task, phase, drive, timeout)
+
+
+def _execute_task(home, expert, pack, task, phase, drive, timeout):
+    import capability
+    import contract
+    import goal as goalmod
+    root = os.path.join(home, "experts", expert)
+    gid = f"m-{pack}-{phase}-{task['id']}-{uuid.uuid4().hex[:12]}"
     accept = capability.accept_for(home, pack, task)
     rec = goalmod.pursue(home, expert, task["goal"], cycles=2, drive=drive,
                          timeout=timeout, gid=gid, accept=accept)
@@ -172,22 +202,52 @@ def _refuse_unless_sealed(home, pack, expert=None):
 
 def pretest(home, expert, pack, drive=False, phase="pretest",
             timeout=900):
-    """The sealed transfer set BEFORE any study — the baseline every later
-    improvement claim is measured against. Recorded however bad: a system
-    that only measures after learning can never show it learned."""
+    """One previously unexposed independent set, never persisted as training."""
     import capability
     _refuse_unless_sealed(home, pack, expert=expert)
     root = os.path.join(home, "experts", expert)
+    selectors = {"pretest": capability.baseline_tasks, "exam": capability.transfer_tasks,
+                 "retest": capability.retention_tasks}
+    if phase not in selectors:
+        raise MasteryError("unknown evaluation phase")
+    selected = selectors[phase](home, pack)
+    _reserve_exposure(home, expert, pack, phase, selected)
     results = [
         _run_task(home, expert, pack, t, phase, drive=drive,
                   timeout=timeout)
-        for t in capability.transfer_tasks(home, pack)]
+        for t in selected]
     score = (sum(1 for r in results if r["passed"]) / len(results)
              if results else 0.0)
     _event(root, pack, phase, score=round(score, 3),
            passed=[r["task"] for r in results if r["passed"]],
            failed=[r["task"] for r in results if not r["passed"]])
     return {"score": round(score, 3), "results": results}
+
+
+def _reserve_exposure(home, expert, pack, phase, tasks):
+    """Consume before dispatch, even on crash. The student cannot erase history."""
+    import capability
+    import locks
+    p = os.path.join(home, "org", "mastery-exposures.jsonl")
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    digest = capability.verify_pack(home, pack)["hash"]
+    with locks.holding(p, timeout=10, stale=8):
+        rows = []
+        if os.path.exists(p):
+            try:
+                with open(p, encoding="utf-8") as f:
+                    rows = [json.loads(line) for line in f if line.strip()]
+            except (ValueError, OSError) as exc:
+                raise MasteryError("corrupt exposure authority; refusing") from exc
+        ids = {t["id"] for t in tasks}
+        if any(r.get("expert") == expert and r.get("pack_hash") == digest
+               and ids.intersection(r.get("tasks", [])) for r in rows):
+            raise MasteryError("evaluation set already exposed; use a fresh independently sealed pack")
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"expert": expert, "pack": pack, "pack_hash": digest,
+                                "phase": phase, "tasks": sorted(ids), "at": time.time()}) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
 
 
 def study(home, expert, pack, drive=False, competencies=None,
@@ -246,8 +306,7 @@ def practice(home, expert, pack, drive=False, timeout=900):
 
 
 def exam(home, expert, pack, drive=False, phase="exam", timeout=900):
-    """The sealed transfer set, for real. Identical machinery to pretest —
-    the only difference is what came before it, which is the point."""
+    """Transfer set B: independent of baseline A, and single-use."""
     return pretest(home, expert, pack, drive=drive, phase=phase,
                    timeout=timeout)
 
@@ -312,10 +371,7 @@ def distill(home, expert, pack):
 
 
 def retest(home, expert, pack, drive=False, timeout=900):
-    """RETENTION: the same sealed tasks, fresh pursuit ids, and no study
-    artifacts injected — what survives is what the expert's persistent
-    memory and runbook library can reproduce, which is the only honest
-    meaning of "it learned". The delta against the exam is recorded."""
+    """Retention C, never seen in A/practice/B. Record elapsed interval honestly."""
     r = pretest(home, expert, pack, drive=drive, phase="retest",
                 timeout=timeout)
     root = os.path.join(home, "experts", expert)
@@ -323,21 +379,29 @@ def retest(home, expert, pack, drive=False, timeout=900):
                       if e.get("kind") == "exam"), None)
     delta = (round(r["score"] - float(last_exam.get("score") or 0.0), 3)
              if last_exam else None)
-    _event(root, pack, "retention", score=r["score"], delta_vs_exam=delta)
-    return {**r, "delta_vs_exam": delta}
+    elapsed = None
+    if last_exam:
+        elapsed = max(0, time.time() - time.mktime(time.strptime(last_exam["at"], "%Y-%m-%dT%H:%M:%S")))
+    _event(root, pack, "retention", score=r["score"], delta_vs_exam=delta,
+           elapsed_since_exam_seconds=elapsed,
+           limitation="fresh-instance performance; duration alone does not prove long-term retention")
+    return {**r, "delta_vs_exam": delta, "elapsed_since_exam_seconds": elapsed}
 
 
 # ---------------------------------------------------------------- the loop
 
 def run(home, expert, pack, drive=False, skip_study=False,
         max_rounds=MAX_RELEARN_ROUNDS, timeout=900):
-    """The whole loop: pretest → study → practice → exam → (diagnose →
-    targeted re-study → re-exam)×bounded → verdict → distill.
+    """The whole loop: pretest → study → practice → exam → diagnose →
+    verdict → distill.
 
-    Bounded and oscillation-aware like everything else here: a competency
-    whose transfer tasks fail IDENTICALLY across rounds stops the loop
-    with the wall named — a third identical attempt is a loop wearing
-    persistence's clothes."""
+    THERE IS NO RE-EXAM, and `relearn_rounds` is therefore always 0. The
+    exposure authority consumes a sealed set at the sitting that used it, so
+    a competency whose transfer tasks failed cannot be re-examined on those
+    tasks at any distance — re-study then re-sit would be measuring memory of
+    the exam. A diagnosis ends in `fresh_pack_required` instead, and the
+    owner supplies an independently sealed pack. `max_rounds` is kept in the
+    signature for callers that pass it; it bounds nothing today."""
     root = os.path.join(home, "experts", expert)
     _event(root, pack, "run_started", expert=expert,
            skip_study=bool(skip_study))
@@ -347,25 +411,9 @@ def run(home, expert, pack, drive=False, skip_study=False,
     prac = practice(home, expert, pack, drive=drive, timeout=timeout)
     ex = exam(home, expert, pack, drive=drive, timeout=timeout)
 
-    seen_signatures = set()
     rounds = 0
-    while rounds < max_rounds:
-        plan = diagnose(ex)
-        if not plan:
-            break
-        sig = tuple(sorted((p["competency"], tuple(sorted(p["failed_checks"])))
-                           for p in plan))
-        if sig in seen_signatures:
-            _event(root, pack, "not_converging",
-                   competencies=[p["competency"] for p in plan])
-            break
-        seen_signatures.add(sig)
-        rounds += 1
-        for p in plan:
-            study(home, expert, pack, drive=drive,
-                  competencies=[p["competency"]],
-                  because=", ".join(sorted(set(p["failed_checks"]))[:4]))
-        ex = exam(home, expert, pack, drive=drive, timeout=timeout)
+    if diagnose(ex):
+        _event(root, pack, "fresh_pack_required", reason="exam consumed; re-study cannot reuse transfer tasks")
 
     v = verdict(home, expert, pack, prac["score"], ex["score"])
     drafted = distill(home, expert, pack)

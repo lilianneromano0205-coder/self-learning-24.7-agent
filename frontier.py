@@ -945,13 +945,40 @@ def acquire_next(root, home, capability, apply=False, worker_id=None):
             raise Refused("the acquisition row carries a local path or a "
                           "private index; the frontier never writes either")
         acquire.install(root, home, acq_id, worker_id=worker_id)
+        # TWO INDEPENDENT GRADERS, EACH WHERE IT CAN ACTUALLY RUN.
+        # PROMOTION is decided by acquire's own arena probe: its source is
+        # hardcoded in acquire.py (outside any workspace), rewritten into a
+        # disposable arena every run, hashed into probe_hash and executed
+        # with no network. Passing the frontier's sealed command here was
+        # worse than useless — that command is a HOST argv, executed as a
+        # shell string inside a Linux container, so it could not run at all.
+        # The sealed probe still decides "proven"; it now does so below,
+        # against the promoted bytes, where it CAN run.
+        acquire.capability_test(root, acq_id, module=row.get("module") or "")
+        # acquire now stages into a disposable arena and promotes to
+        # capabilities/<name> only on a passing sealed probe — install_path
+        # is the ARENA until then. Checking the landing before the probe
+        # therefore refused every acquisition against its own staging path.
+        # The invariant stands where it can be true: after promotion, the
+        # proven bytes must live exactly where the sealed probe tests.
         fresh = next((r for r in acquire.load(root) if r["id"] == acq_id), {})
+        evidence = fresh.get("test_evidence") or {}
+        if not evidence.get("passed"):
+            # capability_test RETURNS on a failed probe (it records
+            # stage="rejected"), it does not raise. Without this branch
+            # control fell through to the unconditional stage="proven" write
+            # below and recorded green {"rc": 0, "contained": true} — an
+            # observation that was never made, about bytes that were never
+            # promoted. A capability may fail its probe; the one thing it may
+            # not do is be written down as proven.
+            raise RuntimeError(
+                "the sealed capability probe did not pass, so nothing was "
+                "promoted to capabilities/: "
+                + str(evidence.get("evidence", "no evidence recorded"))[:300])
         target = (fresh.get("install_path") or "").replace("\\", "/")
         if target and target != row["target_rel"]:
-            raise Refused(f"the install landed at {target!r} but the sealed "
-                          f"probe tests {row['target_rel']!r}")
-        acquire.capability_test(root, acq_id,
-                                probe=sealed_command(root, capability))
+            raise Refused(f"the install landed at {target!r} but the "
+                          f"sealed probe tests {row['target_rel']!r}")
     except Refused:
         raise
     except Exception as e:
@@ -976,11 +1003,30 @@ def acquire_next(root, home, capability, apply=False, worker_id=None):
         except (OSError, UnboundLocalError, KeyError):
             pass
 
+    # THE SEALED PROBE, AGAINST THE PROMOTED BYTES. Until now this block
+    # wrote "rc": 0 as a literal — a green observation nobody had made. The
+    # probe is regenerated from the sealed spec and TAMPER-checked before it
+    # runs, so what is recorded below is what was actually observed.
     row = get(root, capability) or row
+    green_rc, green_out = _run_probe_here(root, capability)
+    if green_rc != 0:
+        row.setdefault("attempts", []).append(
+            {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "result": "refused",
+             "why": f"sealed probe exit {green_rc}"})
+        row["stage"] = "refused"
+        row["refusal"] = {"why": (f"the capability installed, but its SEALED "
+                                  f"probe still fails (exit {green_rc}): "
+                                  f"{green_out.strip()[-300:]}"),
+                          "retry_after": _retry_after(row)}
+        _put(root, row)
+        _event(root, capability, "refused", why=f"sealed probe exit {green_rc}")
+        return {"capability": capability, "acted": False,
+                "why": row["refusal"]["why"]}
     row["stage"] = "proven"
     row["unverified_registry_sha256"] = sha
     row["acq_id"] = acq_id
-    row["green"] = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "rc": 0,
+    row["green"] = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "rc": green_rc,
+                    "output": green_out.strip()[-400:],
                     "contained": True, "backend": sandbox.backend_name(cfg),
                     "install_digest": install_digest(root, row),
                     "acq_id": acq_id}

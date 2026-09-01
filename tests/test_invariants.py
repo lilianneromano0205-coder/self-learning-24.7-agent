@@ -81,13 +81,21 @@ def check_execution_catalogue():
     # sandbox and skipped the one flag nobody implemented — an enumeration
     # with a hole is how a declared control goes missing in plain sight.
     import tempfile
+    # This check is about the CATALOGUE's declared controls — policy,
+    # approval, argument type — not about which backend runs the command. It
+    # passed cfg={}, which now means the shipped default (docker), so on any
+    # machine without usable Linux containers "ordinary work must still flow"
+    # failed with rc 127 and the check reported a control problem that was
+    # really an absent daemon. It declares the trusted developer host, like
+    # every other fixture that needs to actually run something.
+    HOST = {"agent": {"sandbox": "host", "allow_unsafe_host": True}}
     for name, o in ops.items():
         if not o.get("approval"):
             continue
         probe = tempfile.mkdtemp(prefix="approval-inv-")
         consequential = "git push origin main"
         try:
-            execution.run(name, consequential, probe, cfg={},
+            execution.run(name, consequential, probe, cfg=HOST,
                           role="practitioner", timeout=5)
             raise AssertionError(
                 f"{name} declares approval:True and ran a consequential "
@@ -97,7 +105,7 @@ def check_execution_catalogue():
             assert "APPROVAL REQUIRED" in str(e), (
                 f"{name} refused {consequential!r} for the wrong reason: {e}")
         # and ordinary work must still flow, or the control is a brake
-        rc, _o, _e = execution.run(name, "echo ok", probe, cfg={},
+        rc, _o, _e = execution.run(name, "echo ok", probe, cfg=HOST,
                                    role="practitioner", timeout=30)
         assert rc == 0, f"{name} blocked ordinary work (rc={rc})"
 
@@ -711,6 +719,101 @@ def check_sandbox_names_are_unique():
           f"directory is the failure that only shows up under load")
 
 
+def check_settings_keys_are_declared():
+    """EVERY [agent] key the code reads appears in settings.toml.
+
+    settings.toml already carries the scar: *"keys the code reads that this
+    file used to leave undeclared. An audit found ten of them; two decide
+    containment, so an operator reading only settings.toml could not see what
+    their fleet was actually doing."* The fix was a one-time sweep, and
+    nothing held it — seventeen more keys accumulated, including the seven
+    that decide WHEN A TASK STOPS RETRYING. A documented invariant with no
+    test is a comment.
+
+    Declaration includes a COMMENTED example: a key whose default must not be
+    written down (because writing it would change behaviour, as with
+    sandbox_workload) is still discoverable, which is the point.
+
+    The scan is AST-based and deliberately narrow — it follows the two shapes
+    the codebase actually uses to reach the agent table, so it reports keys
+    rather than guesses.
+    """
+    import ast
+    settings = io.open(os.path.join(AGENT_DIR, "settings.toml"),
+                       encoding="utf-8").read()
+
+    def unwrap(node):
+        """`(x or {})` and `(x if y else {})` still yield x."""
+        while isinstance(node, (ast.BoolOp, ast.IfExp)):
+            node = (node.values[0] if isinstance(node, ast.BoolOp)
+                    else node.body)
+        return node
+
+    def agent_table(node):
+        """Is this expression the [agent] table (or a table inside it)?
+
+        EXACTLY two shapes, matched structurally rather than by looking for
+        the word 'agent' anywhere in the dump — the loose version matched
+        `.get()` on task dicts and reported `args`, `goal` and `passed` as
+        undeclared settings. A checker that cannot tell a config read from a
+        dictionary lookup gets switched off, and then it protects nothing.
+        """
+        node = unwrap(node)
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "_cfg"):
+            return True                     # sandbox.py's accessor
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "get" and node.args
+                and isinstance(node.args[0], ast.Constant)):
+            if node.args[0].value == "agent":
+                return True
+            # [agent.scheduler] and friends: a sub-table of the agent table
+            return (node.args[0].value in ("scheduler", "memory_retrieval")
+                    and agent_table(node.func.value))
+        return False
+
+    found = {}
+    for mod in sorted(f for f in os.listdir(AGENT_DIR) if f.endswith(".py")):
+        try:
+            tree = ast.parse(io.open(os.path.join(AGENT_DIR, mod),
+                                     encoding="utf-8").read())
+        except (OSError, SyntaxError):
+            continue
+        aliases = set()
+        for node in ast.walk(tree):
+            # ag = (cfg or {}).get("agent", {}) ...  -> `ag` is the table
+            if isinstance(node, ast.Assign) and agent_table(node.value):
+                for t in node.targets:
+                    if isinstance(t, ast.Name):
+                        aliases.add(t.id)
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "get" and node.args):
+                continue
+            key = node.args[0]
+            if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
+                continue
+            recv = unwrap(node.func.value)
+            reaches_agent = ((isinstance(recv, ast.Name) and recv.id in aliases)
+                             or agent_table(recv))
+            if reaches_agent and key.value not in ("agent", "scheduler",
+                                                   "memory_retrieval"):
+                found.setdefault(key.value, mod)
+
+    missing = sorted((k, m) for k, m in found.items() if k not in settings)
+    assert not missing, (
+        "these [agent] settings are read by code and appear nowhere in "
+        "settings.toml, so an operator cannot discover them:\n  "
+        + "\n  ".join(f"{k}  (read by {m})" for k, m in missing)
+        + "\nDeclare each with its CODE DEFAULT, or as a commented example "
+          "where writing the value would change behaviour rather than "
+          "describe it.")
+    print(f"[settings] {len(found)} [agent] key(s) read across the modules, "
+          f"every one of them declared in settings.toml — the file an "
+          f"operator reads is the file the code obeys")
+
+
 def check_documented_cli_exists():
     """EVERY command the manual promises, not the ones we remembered to try.
 
@@ -758,14 +861,23 @@ def check_documented_cli_exists():
     for mod in sorted(modules):
         r = subprocess.run([sys.executable, os.path.join(AGENT_DIR, mod),
                             "--help"], capture_output=True, text=True,
-                           timeout=60, env=env, cwd=AGENT_DIR)
+                           errors="replace", timeout=60, env=env,
+                           cwd=AGENT_DIR)
         if "UnicodeEncodeError" in (r.stderr or ""):
             crashed.append(mod)
     for mod, sub in sorted(pairs):
+        # errors="replace": the child is deliberately run on a non-UTF-8
+        # console, so its help text comes back as cp1252 bytes. Decoding
+        # those strictly made the READER fail — subprocess hands back None
+        # for stdout and the line below died with a TypeError instead of
+        # reporting anything. Whether that happened depended on the encoding
+        # of the console the SUITE was launched from, which is the worst
+        # kind of test: one whose verdict is a property of the terminal.
         r = subprocess.run([sys.executable, os.path.join(AGENT_DIR, mod), sub,
                             "--help"], capture_output=True, text=True,
-                           timeout=60, env=env, cwd=AGENT_DIR)
-        if "invalid choice" in (r.stdout + r.stderr):
+                           errors="replace", timeout=60, env=env,
+                           cwd=AGENT_DIR)
+        if "invalid choice" in ((r.stdout or "") + (r.stderr or "")):
             refused.append(f"python {mod} {sub}")
 
     assert not crashed, (
@@ -1250,8 +1362,16 @@ def check_health_checks_can_fail():
     assert ok is False, (
         "sandbox.available cannot report an unavailable sandbox — the "
         "harness health check is decorative")
-    ok2, _ = sandbox.available({"agent": {"sandbox": "host"}})
-    assert ok2 is True, "the host backend must stay available"
+    ok2, why2 = sandbox.available({"agent": {"sandbox": "host"}})
+    assert ok2 is False, (
+        "host was reported available without allow_unsafe_host — autonomous "
+        "shell work would run uncontained on the owner's machine")
+    assert "allow_unsafe_host" in why2, why2
+    ok3, why3 = sandbox.available(
+        {"agent": {"sandbox": "host", "allow_unsafe_host": True}})
+    assert ok3 is True, (
+        "an owner who explicitly declared the developer host was still "
+        f"refused, so trusted fixtures have no way to run: {why3}")
 
     # A REACHABLE daemon is not a USABLE one. Docker Desktop in
     # Windows-container mode answers `docker info` perfectly and rejects
@@ -1288,8 +1408,76 @@ def check_health_checks_can_fail():
         if not usable:
             assert "linux containers" in why.lower(), why
     print("[health] the sandbox health check can actually FAIL: a configured "
-          "backend that does not exist is reported, and `host` still passes "
-          "— it was reading agent.agent.sandbox and defaulting to OK forever")
+          "backend that does not exist is reported, and `host` is refused "
+          "unless the owner explicitly declares allow_unsafe_host")
+
+
+def check_one_credential_resolver():
+    """The runtime may have exactly ONE implementation of 'what is this
+    provider's key'. loop.py once grew a private _api_key that modeled fewer
+    sources than credentials.resolve (no agent.env, no root-relative
+    api_key_file), so a funded provider was reported keyless by the loop's
+    own preflight while the health check called it funded. An authority
+    with two resolvers is two authorities."""
+    src = io.open(os.path.join(AGENT_DIR, "loop.py"), encoding="utf-8").read()
+    assert "api_key_file" not in src, (
+        "loop.py touches api_key_file directly — credential resolution has "
+        "forked again; delegate to credentials.resolve")
+    body = src.split("def _api_key", 1)
+    assert len(body) == 2 and "credentials.resolve" in body[1].split("def ", 1)[0], (
+        "loop._api_key must delegate to credentials.resolve — no second "
+        "resolver")
+    import inspect
+    assert "credentials.resolve" in inspect.getsource(loop.Agent._api_key)
+    print("[credentials] loop.py delegates key resolution to the one "
+          "credential authority; no private resolver, no api_key_file reads")
+
+
+def check_one_mutation_semantic():
+    """fileauth decides WHERE a worker write may land AND HOW it lands
+    (atomic temp-and-replace). The worker file tools once resolved through
+    fileauth and then mutated with a bare open('w') — one module authorizing,
+    a different implementation mutating, which is the exact split that made a
+    crash mid-write leave truncated files. Enumerate the worker mutation
+    handlers and require each to write through fileauth.write_text."""
+    src = io.open(os.path.join(AGENT_DIR, "loop.py"), encoding="utf-8").read()
+    for tool in ("write_file", "transform_table"):
+        start = src.index(f'if name == "{tool}":')
+        end = src.index('if name == "', start + 10)
+        handler = src[start:end]
+        assert "fileauth.write_text" in handler, (
+            f"the {tool} handler must mutate through fileauth.write_text")
+        assert not re.search(r'open\([^)]*,\s*"w"', handler), (
+            f"the {tool} handler opens a file for writing directly — "
+            f"mutation semantics have forked from the file authority")
+    print("[mutation] both worker mutation tools write through "
+          "fileauth.write_text: one authority for where AND how bytes land")
+
+
+def check_public_prose_matches_executable_reality():
+    """Executable behavior outranks prose, and public prose is CHECKED
+    against it. ARCHITECTURE.md/README.md/REFERENCE.md each state a module
+    count and a test count; those went stale (104/136 while reality said
+    105/138) the moment new files landed. A paper cannot cite a stale
+    architecture document, so the counts are now computed here from the
+    repository itself and the docs fail the suite when they rot."""
+    modules = len([f for f in os.listdir(AGENT_DIR) if f.endswith(".py")
+                   and os.path.isfile(os.path.join(AGENT_DIR, f))])
+    sys.path.insert(0, os.path.join(AGENT_DIR, "tests"))
+    import run_all
+    tests = len(run_all.TESTS)
+    for name in ("ARCHITECTURE.md", "README.md", "REFERENCE.md"):
+        text = io.open(os.path.join(AGENT_DIR, name), encoding="utf-8").read()
+        for pattern, actual, what in (
+                (r"(\d+) Python modules", modules, "module count"),
+                (r"(\d+) acceptance tests", tests, "test count")):
+            for found in re.findall(pattern, text):
+                assert int(found) == actual, (
+                    f"{name} claims {found} where the repository has "
+                    f"{actual} ({what}) — public prose has drifted behind "
+                    f"executable reality; update the document")
+    print(f"[prose] ARCHITECTURE/README/REFERENCE counts verified against "
+          f"the tree itself: {modules} modules, {tests} acceptance tests")
 
 
 def main():
@@ -1311,6 +1499,7 @@ def main():
     check_expert_birth_paths()
     check_exam_readers_agree(sb)
     check_sandbox_names_are_unique()
+    check_settings_keys_are_declared()
     check_documented_cli_exists()
     check_no_file_clock_comparisons()
     check_capability_report_matches_reality()
@@ -1319,6 +1508,9 @@ def main():
     check_policy_fails_closed()
     check_health_checks_can_fail()
     check_grant_kinds_cover_authority_classes()
+    check_one_credential_resolver()
+    check_one_mutation_semantic()
+    check_public_prose_matches_executable_reality()
     print("PASS test_invariants")
 
 

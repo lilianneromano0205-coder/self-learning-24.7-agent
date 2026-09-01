@@ -645,6 +645,24 @@ FEED_EVENTS = {
     "stop_condition":   ("gate",  "warn", "stopped on the task's own stop condition"),
     "health_ritual":    ("run",   "info", "harness health check at loop start"),
     "tool_results_cleared": ("link", "info", "cleared old tool output to a pointer"),
+    # THE PROCEDURAL LOOP. Without these rows the panel drops every event the
+    # loop emits while turning verified work into a reusable procedure — the
+    # manual tells the owner to watch for `procedure_route`, and the pulse
+    # would have shown nothing, forever, with no error. An allowlist that
+    # silently discards the newest half of the system is the same defect this
+    # release was written to fix, one layer out.
+    "trajectory_opened":  ("skill", "info", "opened a judged trajectory — this work may become a procedure"),
+    "trajectory_closed":  ("skill", "info", "closed a judged trajectory; the sealed judge decided"),
+    "trajectory_refused": ("gap",   "warn", "could not open a judged trajectory"),
+    "trajectory_close_failed": ("gap", "warn", "a judged trajectory could not be closed"),
+    "procedure_compiled": ("skill", "ok",   "compiled a procedure from repeated verified work"),
+    "procedure_compile_refused": ("gap", "info", "declined to induce a procedure — the evidence was not independent enough"),
+    "procedure_evaluated": ("exam", "ok",   "ran a compiled procedure against sealed fresh instances"),
+    "procedure_evaluation_refused": ("gap", "warn", "a sealed evaluation refused to run"),
+    "procedure_route":    ("run",   "ok",   "ran a PROVEN procedure — no model call"),
+    "procedure_route_rejected": ("gate", "warn", "a procedure ran but the task's own gate refused the result"),
+    "procedure_route_skipped":  ("link", "info", "a matching procedure did not fit this task's inputs"),
+    "scheduler_record_failed":  ("gap", "warn", "a routing outcome could not be recorded"),
 }
 
 
@@ -815,6 +833,12 @@ class Handler(BaseHTTPRequestHandler):
     home = HOME
     token = None  # when set, every /api request must carry it
 
+    def end_headers(self):
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        super().end_headers()
+
     def log_message(self, *a):  # quiet
         pass
 
@@ -870,8 +894,6 @@ class Handler(BaseHTTPRequestHandler):
         header = self.headers.get("Authorization", "")
         if header.startswith("Bearer "):
             presented = header[7:]
-        elif query.get("token", [""])[0]:
-            presented = query.get("token", [""])[0]
         self.actor, member = self._resolve_actor(presented)
         if not self.token:
             return True
@@ -2530,14 +2552,14 @@ def main():
         # cannot forget the mode
         import credentials as _cred
         _cred.write_secret(tok_path, token + "\n")
-        print(f"access token generated (saved to {tok_path}):\n  {token}\n")
+        print(f"access token saved to owner-only file: {tok_path}")
         if shared and not exposed:
             print("this fleet belongs to an organization, so the panel needs "
                   "a token to tell members apart.")
             print("Give each member their own:  python org.py token <email> "
                   "--as you@example.com")
-            print("Keep the one above to yourself — it resolves to the owner "
-                  "and grants everything.")
+            print("The token in ui-token.txt is yours alone — it resolves "
+                  "to the owner and grants everything.")
             print()
     Handler.token = token
     srv = ThreadingHTTPServer((args.host, args.port), Handler)

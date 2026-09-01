@@ -42,6 +42,7 @@ import io
 import json
 import os
 import time
+import math
 
 HOME = os.path.dirname(os.path.abspath(__file__))
 LEDGER = os.path.join("proof", "observations.jsonl")
@@ -68,6 +69,14 @@ LEVELS = {
 # a code hash instead of a clock, so they do not expire by time; anything that
 # touched the outside world does, because the outside world moves.
 MAX_AGE_DAYS = {"live": 30, "stress": 90, "production": 30}
+MAX_AGE_DAYS.update({"benchmark": 90, "repeated": 90})
+INTELLIGENCE_LEVELS = {
+    0: LEVELS[SPEC], 1: LEVELS[IMPLEMENTED], 2: LEVELS[OFFLINE],
+    3: ("EXTERNAL BENCHMARK VERIFIED", "teal", "External held-out benchmark evidence."),
+    4: ("REPEATED EVALUATION VERIFIED", "green", "Repeated paired evaluation clears a preregistered statistical bar."),
+    5: ("LIVE PROVIDER VERIFIED", "green", "Real provider evaluation under the same experimental protocol."),
+    6: ("PRODUCTION WORKLOAD VERIFIED", "darkgreen", "Sustained measured production workload."),
+}
 
 
 # ------------------------------------------------------------- the registry
@@ -77,9 +86,10 @@ MAX_AGE_DAYS = {"live": 30, "stress": 90, "production": 30}
 
 REGISTRY = {
     "harness-loop": {
-        "capability": "An expert runs gated tasks: compiled context, five "
-                      "tools, a definition-of-done that must pass, brakes, "
-                      "retries and a durable trace.",
+        "capability": "An expert runs gated tasks: compiled context, the "
+                      "declared tool surface (loop.TOOL_DEFS — counting it "
+                      "here went stale once already), a definition-of-done "
+                      "that must pass, brakes, retries and a durable trace.",
         "invariants": ["a task is claimed exactly once",
                        "finish_task is refused until the gate passes",
                        "every step is traced with its cost"],
@@ -215,7 +225,8 @@ REGISTRY = {
                       "decision, never because the file says so.",
         "invariants": ["a skill file cannot self-declare trust",
                        "community scripts stay disabled until promoted",
-                       "promotion requires distinct verified wins"],
+                       "earned status requires a matched held-out ablation "
+                       "pinned to the exact skill bytes"],
         # fileauth.py is in this boundary because CONTROL_PATHS is what
         # actually enforces "trust comes from the graph, which only the owner
         # writes" — delete that one line and an agent marks its own skill
@@ -313,6 +324,37 @@ REGISTRY = {
 }
 
 
+for _name in ("harness-loop", "memory-institution", "skills-provenance", "mission-engine", "training-lab"):
+    REGISTRY[_name]["intelligence"] = True
+REGISTRY["training-lab"]["code"] = ["training.py", "trainer_integration.py", "learning_authority.py"]
+REGISTRY["training-lab"]["tests"] = ["test_training.py", "test_advanced_learning.py"]
+for _name, _code, _description in (
+    # The flagship capability of the procedural-learning release: verified
+    # work becomes an executable procedure, and a matching task then runs it
+    # with no model call. It is registered here so its evidence LEVEL is
+    # tracked like every other capability — and so editing its code drops it
+    # out of OFFLINE VERIFIED until the suite is re-run, which is the whole
+    # point of the proof system.
+    ("procedural-learning",
+     ["procedure.py", "operators.py", "runbook.py", "tabular.py",
+      "capability_graph.py"],
+     "Independently judged trajectories compile into an executable procedure "
+     "that a later matching task runs deterministically, with the task's own "
+     "gate still deciding acceptance."),
+    ("variant-learning", ["variants.py", "learning_authority.py"], "Prompt variants earn owner promotion through independent batteries."),
+    ("experimental-adaptation", ["adaptation.py"], "Opt-in memory adaptation distinguishes local logits from closed API approximation."),
+):
+    REGISTRY[_name] = {"capability": _description, "code": _code,
+                      "intelligence": True,
+                      "tests": (["test_procedural_learning.py",
+                                 "test_loop_learning_controls.py",
+                                 "test_capability_graph.py",
+                                 "test_tabular.py", "test_use_cases.py"]
+                                if _name == "procedural-learning"
+                                else ["test_advanced_learning.py"]),
+                      "invariants": ["offline tests never establish model lift", "judges remain independent"],
+                      "stress_tests": [], "live": "preregistered real-provider paired evaluation"}
+
 # ---------------------------------------------------------------- evidence
 
 def _path(root):
@@ -332,7 +374,8 @@ def code_hash(files, tree=HOME):
     for rel in sorted(files):
         p = os.path.join(tree, rel)
         try:
-            body = io.open(p, "rb").read().replace(CRLF, LF)
+            with io.open(p, "rb") as stream:
+                body = stream.read().replace(CRLF, LF)
             h.update(rel.encode("utf-8"))
             h.update(body)
         except OSError:
@@ -348,7 +391,11 @@ def observe(root, feature, kind, ok, detail="", command="", tree=HOME,
     code looked like at the time — which is what makes a later regression
     downgrade the badge without anyone deciding to.
     """
-    entry = REGISTRY.get(feature, {})
+    import controlplane
+    controlplane.owner_only("record proof evidence")
+    if feature not in REGISTRY or kind not in {"offline", "live", "stress", "production", "benchmark", "repeated"}:
+        raise ValueError("unknown proof feature or evidence kind")
+    entry = REGISTRY[feature]
     rec = {
         "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "feature": feature, "kind": kind, "ok": bool(ok),
@@ -356,6 +403,7 @@ def observe(root, feature, kind, ok, detail="", command="", tree=HOME,
         "code_hash": code_hash(entry.get("code", []), tree),
         "artifacts": list(artifacts or []),
         "metrics": metrics or {},
+        "artifact_hashes": _artifact_hashes(artifacts or []),
     }
     try:
         os.makedirs(os.path.dirname(_path(root)), exist_ok=True)
@@ -397,15 +445,81 @@ def _latest(rows, kind, current_hash, max_age=None):
     no longer supports a claim — which is how a badge goes down by itself."""
     best = None
     for r in rows:
-        if r.get("kind") != kind or not r.get("ok"):
+        if r.get("kind") != kind:
             continue
         if r.get("code_hash") != current_hash:
             continue                     # the code moved; this no longer describes it
         if max_age is not None and _age_days(r.get("at", "")) > max_age:
             continue                     # true once, not evidence now
-        if best is None or r.get("at", "") > best.get("at", ""):
+        if best is None or r.get("at", "") >= best.get("at", ""):
             best = r
-    return best
+    return best if best and best.get("ok") is True else None
+
+
+def _artifact_hashes(paths):
+    out = {}
+    for path in paths:
+        if not isinstance(path, str):
+            continue
+        try:
+            with open(path, "rb") as stream:
+                out[os.path.abspath(path)] = hashlib.sha256(stream.read()).hexdigest()
+        except OSError:
+            continue
+    return out
+
+
+def _intelligence_evidence(row, kind):
+    if not row:
+        return False
+    metrics = row.get("metrics", {})
+    pins = row.get("artifact_hashes", {})
+    if not pins or _artifact_hashes(list(pins)) != pins or not metrics.get("protocol_id"):
+        return False
+    if metrics.get("simulated") is not False or metrics.get("holdout_sealed") is not True:
+        return False
+    if kind == "benchmark":
+        return bool(metrics.get("external_benchmark") and metrics.get("task_count", 0) >= 20)
+    if kind == "repeated":
+        return paired_evidence(metrics).get("meaningful", False)
+    if kind == "live":
+        return bool(metrics.get("provider") and metrics.get("model_revision") and metrics.get("provider_calls", 0) > 0)
+    if kind == "production":
+        return (metrics.get("days", 0) >= 7 and metrics.get("verified_tasks", 0) >= 100
+                and metrics.get("thresholds_preregistered") is True
+                and metrics.get("thresholds_met") is True)
+    return False
+
+
+def paired_evidence(metrics):
+    """Exact sign test across distinct tasks, averaging repeated seeds per task.
+
+    Repeated measurements of one task are not independent task evidence.
+    This conservative acceptance policy is not a universal power guarantee.
+    """
+    rows = metrics.get("paired_results", [])
+    grouped, identities, seeds = {}, set(), set()
+    try:
+        for row in rows:
+            identity = (row["task"], row["seed"])
+            if identity in identities or type(row["base"]) is not bool or type(row["candidate"]) is not bool:
+                return {"meaningful": False}
+            identities.add(identity); seeds.add(row["seed"])
+            grouped.setdefault(row["task"], []).append(int(row["candidate"]) - int(row["base"]))
+        if len(seeds) < 3 or len(grouped) < 20 or any(len(values) != len(seeds) for values in grouped.values()):
+            return {"meaningful": False}
+        wins = sum(sum(v) > 0 for v in grouped.values())
+        losses = sum(sum(v) < 0 for v in grouped.values())
+        n = wins + losses
+        p = sum(math.comb(n, i) for i in range(wins, n + 1)) / (2 ** n) if n else 1
+        alpha = metrics.get("alpha", 0.05)
+        meaningful = (type(alpha) in (int, float) and math.isfinite(alpha)
+                      and 0 < alpha <= 0.05 and wins > losses and p <= alpha
+                      and metrics.get("preregistered") is True)
+        return {"meaningful": meaningful, "p_value": p, "independent_tasks": len(grouped),
+                "seeds": len(seeds), "wins": wins, "losses": losses}
+    except (KeyError, TypeError, ValueError):
+        return {"meaningful": False}
 
 
 def evaluate(root, feature, tree=HOME):
@@ -475,7 +589,25 @@ def evaluate(root, feature, tree=HOME):
                 "why": ("the code changed since" if last.get("code_hash") != h
                         else f"older than {MAX_AGE_DAYS[key]} days")})
 
-    name, colour, meaning = LEVELS[level]
+    intelligence = entry.get("intelligence", False)
+    intelligence_tiers = {}
+    if intelligence:
+        level = OFFLINE if off and len(present) == len(files) else (IMPLEMENTED if len(present) == len(files) else SPEC)
+        protocol = None
+        for rank, kind in enumerate(("benchmark", "repeated", "live", "production"), 3):
+            row = _latest(rows, kind, h, MAX_AGE_DAYS[kind])
+            valid = _intelligence_evidence(row, kind)
+            candidate_protocol = row.get("metrics", {}).get("protocol_id") if row else None
+            if protocol is not None and candidate_protocol != protocol:
+                valid = False
+            intelligence_tiers[kind] = "VERIFIED" if valid else "NOT_PROVEN"
+            if level == rank - 1 and valid:
+                level = rank
+                protocol = candidate_protocol
+        why = ("intelligence evidence is separate from green CI; "
+               + INTELLIGENCE_LEVELS[level][2])
+        nxt = "supply the next independent experiment tier with pinned artifacts and the same protocol"
+    name, colour, meaning = (INTELLIGENCE_LEVELS if intelligence else LEVELS)[level]
     return {
         "feature": feature, "level": level, "badge": name, "colour": colour,
         "meaning": meaning, "why": why, "next": nxt,
@@ -486,6 +618,10 @@ def evaluate(root, feature, tree=HOME):
         "live_requires": entry.get("live"),
         "expired": expired,
         "observations": len(rows),
+        "intelligence": intelligence,
+        "intelligence_tiers": intelligence_tiers,
+        "intelligence_claims_proven": bool(intelligence and level >= 4),
+        "claim_scope": "paired verified task success on the recorded protocol only; no automatic transfer or cost superiority claim",
     }
 
 
