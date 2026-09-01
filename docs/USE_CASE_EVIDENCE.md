@@ -102,7 +102,9 @@ promotes it, and the next matching task executes with zero model calls while
 its own gate still decides acceptance. Receipts: `test_procedural_learning.py`
 and the end-to-end CLI run on a fresh clone (0 model steps, $0.0000).
 The binding constraint is stated in §4: deterministic adapters currently
-cover file write/copy semantics. An ERP or bank connector is an acquisition
+cover file write/copy semantics and closed-set table transforms
+(`tabular.py` — select/rename/filter/sort/dedupe/join/aggregate over CSV,
+demonstrated end to end in R1b). An ERP or bank connector is an acquisition
 (family C), and until a corresponding adapter is trusted, recurring work in
 that system runs through agents — verified, but not yet model-free.
 
@@ -233,6 +235,24 @@ before it ran** — verified by reading the actual context window, which
 contains the `-> DO` line. A diagnosed failure warned the successor
 mechanically; nobody had to remember.
 
+**R1b. The desk stops needing the model** — the whole economic arc of §2
+("human task → AI task → learned capability → background infrastructure")
+in one CI-enforced run, made possible by the `transform_table` adapter
+(`tabular.py`): a closed, pure, total set of table operations (select,
+rename, filter, sort, dedupe, join, aggregate) that the HARNESS executes,
+so the model chooses *what* to derive and never computes the numbers.
+Two weeks of reconciliation performed through it compiled into an
+**all-deterministic** procedure whose spec is a constant and whose only
+parameters are the three file paths; an owner-sealed suite of fresh weeks
+(including an empty-reconciliation edge case) promoted it to **proven**;
+week three then completed with **zero model calls** — its worker was given
+an *empty* provider script, so any consultation of the model could only
+have failed — and the task's own truth-recomputing gate still delivered
+the verdict. The compiled effect is the new `file_derives` predicate: the
+output file *is* this derivation of these sources, re-checkable at any
+later moment. This is the first family where "routine cognition becomes
+infrastructure" is a CI-held property rather than a plan.
+
 ### COMPOSES — every required primitive verified, assembly not yet run
 
 - **R4. Obligations calendar / SLA arbitration pack** — contract dates and
@@ -285,11 +305,15 @@ mechanically; nobody had to remember.
 
 ## 5. The boundaries, kept visible on purpose
 
-- **Deterministic adapters are narrow**: write_file/copy_file. Browser, HTTP,
-  database and spreadsheet operations run through agents today; compiling
-  them to zero-model procedures requires trusted semantic adapters with
-  observable pre/postconditions. This is the single highest-leverage
-  engineering frontier in the repository.
+- **Deterministic adapters are still finite**: write_file/copy_file and the
+  `transform_table` family (tabular.py — CSV select/rename/filter/sort/
+  dedupe/join/aggregate, with the `file_derives` effect predicate). That
+  widened zero-model replay from "emit these exact bytes" to "derive this
+  table from those tables" — reconciliation, normalization, report tables.
+  Browser, HTTP, database and native-spreadsheet operations still run
+  through agents; each is a future adapter with observable
+  pre/postconditions, and this remains the highest-leverage engineering
+  frontier in the repository.
 - **No live provider has ever been attached.** Every intelligence-shaped
   number so far is mock-driven. `benchmark.py` refuses provider spend without
   explicit opt-in, and LIFT-001A stays NOT_RUN until a key and budget exist.

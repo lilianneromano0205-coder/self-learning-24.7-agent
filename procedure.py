@@ -1,6 +1,7 @@
 """Conservative workflow induction from harness-observed, independently graded actions.
 
-Only file write/copy semantics have deterministic adapters. Unknown tools remain
+File write/copy semantics and closed-set table transforms (tabular.py) have
+deterministic adapters. Unknown tools remain
 model-required barriers. A candidate never authors its graders or its receipts.
 Authority state uses the same external org boundary as goal-contract seals.
 """
@@ -154,22 +155,32 @@ def _normalize(action):
         raise ProcedureError("action must identify a tool and structured arguments")
     action = copy.deepcopy(action)
     action.setdefault("args", {})
-    if action["tool"] in ("write_file", "copy_file", "read_file"):
+    if action["tool"] in ("write_file", "copy_file", "read_file", "transform_table"):
         required = {"write_file": ("path", "content"), "copy_file": ("source", "path"),
-                    "read_file": ("path",)}[action["tool"]]
+                    "read_file": ("path",),
+                    "transform_table": ("source", "path", "spec")}[action["tool"]]
         if any(not isinstance(action["args"].get(key), str) for key in required):
             raise ProcedureError("file actions require string arguments")
-        for key in ("path", "source"):
-            if key in action["args"]:
+        if action["tool"] == "transform_table":
+            if "source2" in action["args"] and not isinstance(action["args"]["source2"], str):
+                raise ProcedureError("file actions require string arguments")
+            import tabular
+            # canonicalize so byte-different, meaning-identical specs align
+            # across trajectories — and an invalid spec dies HERE, before it
+            # can enter a trajectory as evidence
+            action["args"]["spec"] = tabular.canonical(action["args"]["spec"])
+        for key in ("path", "source", "source2"):
+            if key in action["args"] and isinstance(action["args"][key], str):
                 action["args"][key] = action["args"][key].replace("\\", "/")
     return action
 
 
 def _snapshot(root, action):
     result = {}
-    for key in ("path", "source"):
+    for key in ("path", "source", "source2"):
         value = action["args"].get(key)
-        if action["tool"] not in ("write_file", "copy_file", "read_file") or not value:
+        if action["tool"] not in ("write_file", "copy_file", "read_file",
+                                  "transform_table") or not value:
             continue
         mode = "write" if key == "path" and action["tool"] != "read_file" else "read"
         path = fileauth.resolve(root, value, mode, "agent")
@@ -210,6 +221,22 @@ def finish_action(root, task_id, token, succeeded):
             success = success and after["path"]["hash"] == digest(action["args"]["content"])
         if action["tool"] == "copy_file":
             success = success and after["path"]["exists"] and after["path"]["hash"] == item["before"]["source"]["hash"]
+        if action["tool"] == "transform_table":
+            # RE-DERIVE, never believe: the recorded output must equal the
+            # trusted adapter's own answer over the sources as they stand.
+            # A source mutated between execution and this check makes the
+            # re-derivation fail — fail-closed is the correct reading of
+            # "the evidence cannot be reproduced".
+            import tabular
+            try:
+                second = (fileauth.read_text(root, action["args"]["source2"])
+                          if "source2" in action["args"] else None)
+                derived = tabular.apply(
+                    action["args"]["spec"],
+                    fileauth.read_text(root, action["args"]["source"]), second)
+                success = success and after["path"]["hash"] == digest(derived)
+            except (OSError, ValueError, fileauth.Denied):
+                success = False
         item.update({"complete": True, "succeeded": success, "after": after,
                      "latency_seconds": max(0, time.time() - item["started"])})
         return success
@@ -222,6 +249,12 @@ def _perform(root, action):
         fileauth.write_text(root, args["path"], args["content"])
     elif action["tool"] == "copy_file":
         fileauth.write_text(root, args["path"], fileauth.read_text(root, args["source"]))
+    elif action["tool"] == "transform_table":
+        import tabular
+        second = (fileauth.read_text(root, args["source2"])
+                  if "source2" in args else None)
+        fileauth.write_text(root, args["path"], tabular.apply(
+            args["spec"], fileauth.read_text(root, args["source"]), second))
     elif action["tool"] == "read_file":
         fileauth.read_text(root, args["path"])
     else:
@@ -382,12 +415,14 @@ def compile(root, name, trajectory_ids, triggers):
                 for key in actions[0]["args"]}
         identity = f"step-{index + 1}"
         step = {"id": identity, "depends_on": [steps[-1]["id"]] if steps else [],
-                "kind": "deterministic" if tool in ("write_file", "copy_file") else "model",
+                "kind": ("deterministic"
+                         if tool in ("write_file", "copy_file", "transform_table")
+                         else "model"),
                 "action": {"tool": tool, "args": args}, "preconditions": [], "effects": []}
         if step["kind"] == "model":
             step["reason"] = "tool has no trusted deterministic semantic adapter"
         else:
-            for key in ("path", "source"):
+            for key in ("path", "source", "source2"):
                 if isinstance(args.get(key), dict):
                     schema[args[key]["input"]] = "path"
             before = {item["before"]["path"]["exists"] for item in aligned}
@@ -397,13 +432,23 @@ def compile(root, name, trajectory_ids, triggers):
             step["preconditions"].append(guard)
             if args["path"] not in touched:
                 preconditions.append(guard)
+            for key in ("source", "source2"):
+                if key in args:
+                    source = {"predicate": "file_exists", "path": args[key]}
+                    step["preconditions"].append(source)
+                    if args[key] not in touched:
+                        preconditions.append(source)
+                        invariants.append(source)
             if tool == "copy_file":
-                source = {"predicate": "file_exists", "path": args["source"]}
-                step["preconditions"].append(source)
-                if args["source"] not in touched:
-                    preconditions.append(source)
-                    invariants.append(source)
                 effect = {"predicate": "file_exists", "path": args["path"]}
+            elif tool == "transform_table":
+                # The strongest effect the algebra has: the output file IS
+                # this derivation of these sources, re-checkable at any later
+                # moment through the same trusted adapter that produced it.
+                effect = {"predicate": "file_derives", "path": args["path"],
+                          "spec": args["spec"], "source": args["source"]}
+                if "source2" in args:
+                    effect["source2"] = args["source2"]
             else:
                 effect = {"predicate": "file_equals", "path": args["path"], "value": args["content"]}
             step["effects"].append(effect)
@@ -443,7 +488,8 @@ def validate(rb):
             if step.get("kind") not in ("deterministic", "model"):
                 raise ProcedureError("step must be explicit deterministic or model-required")
             if step["kind"] == "deterministic":
-                if step.get("action", {}).get("tool") not in ("write_file", "copy_file"):
+                if step.get("action", {}).get("tool") not in (
+                        "write_file", "copy_file", "transform_table"):
                     raise ProcedureError("unknown deterministic adapter")
                 if not step.get("effects"):
                     raise ProcedureError("step must have mechanically observable effects")

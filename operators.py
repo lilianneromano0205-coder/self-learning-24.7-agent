@@ -42,10 +42,14 @@ def check_inputs(root, schema, inputs):
 
 def validate_predicate(item):
     if not isinstance(item, dict) or item.get("predicate") not in (
-            "file_exists", "file_absent", "file_equals") or "path" not in item:
+            "file_exists", "file_absent", "file_equals", "file_derives") \
+            or "path" not in item:
         raise OperatorError("unsupported mechanically observable predicate")
     if item["predicate"] == "file_equals" and "value" not in item:
         raise OperatorError("file_equals needs a value")
+    if item["predicate"] == "file_derives" and (
+            "spec" not in item or "source" not in item):
+        raise OperatorError("file_derives needs a spec and a source")
 
 
 def observe(root, predicate):
@@ -58,6 +62,21 @@ def observe(root, predicate):
         return False
     if kind == "file_exists":
         return True
+    if kind == "file_derives":
+        # The output IS the deterministic transform of its sources, RIGHT NOW
+        # — re-derived through the trusted adapter, never remembered. A
+        # source that moved, a spec that no longer parses, an output that
+        # drifted: all of them are simply "no longer true".
+        import tabular
+        try:
+            second = (fileauth.read_text(root, predicate["source2"])
+                      if "source2" in predicate else None)
+            derived = tabular.apply(predicate["spec"],
+                                    fileauth.read_text(root, predicate["source"]),
+                                    second)
+        except (OSError, ValueError, fileauth.Denied):
+            return False
+        return fileauth.read_text(root, predicate["path"]) == derived
     return fileauth.read_text(root, predicate["path"]) == predicate["value"]
 
 
@@ -137,7 +156,10 @@ def plan(root, goals, bindings, authority=None, max_steps=8, max_states=256):
                     elif effect["predicate"] == "file_absent":
                         truth = predicate["predicate"] == "file_absent"
                     else:
-                        truth = predicate["predicate"] == "file_exists"
+                        # file_exists and file_derives effects: the file is
+                        # there; a derives GOAL is predicted true only for the
+                        # identical derivation, and reobserved either way
+                        truth = predicate["predicate"] == "file_exists" or predicate == effect
                     if truth:
                         following.add(atom)
                     else:

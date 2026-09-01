@@ -75,6 +75,39 @@ TOOL_DEFS = [
     {
         "type": "function",
         "function": {
+            "name": "transform_table",
+            "description": (
+                "Derive one CSV from another deterministically. Give source "
+                "(input CSV path), path (output CSV path), and spec — a JSON "
+                'pipeline {"steps":[...]} over a CLOSED operation set: '
+                '{"op":"select","columns":[...]}, '
+                '{"op":"rename","columns":{old:new}}, '
+                '{"op":"filter","column":c,"compare":"eq|ne|lt|le|gt|ge|contains",'
+                '"value":const} (or "other":c2 to compare two columns), '
+                '{"op":"sort","column":c,"descending":false}, '
+                '{"op":"dedupe","columns":[...]}, '
+                '{"op":"join","column":c,"with_column":c2,"prefix":"b_"} '
+                "(inner join with source2, a second CSV path), "
+                '{"op":"aggregate","group":[...],"aggregations":{name:'
+                '{"fn":"sum|count|min|max","column":c}}}. '
+                "The harness executes the spec, not you — prefer this over "
+                "computing table results yourself: the result is exact, "
+                "re-derivable, and can become a repeatable procedure."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source": {"type": "string"},
+                    "path": {"type": "string"},
+                    "spec": {"type": "string"},
+                    "source2": {"type": "string"},
+                },
+                "required": ["source", "path", "spec"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "run_command",
             "description": "Run a shell command with a hard timeout. Returns exit code, stdout, stderr.",
             "parameters": {
@@ -1635,6 +1668,57 @@ class Agent:
                         pass
                 raise
             return f"ok, wrote {len(args['content'])} chars to {args['path']}"
+        if name == "transform_table":
+            # THE HARNESS COMPUTES, THE MODEL ONLY CHOOSES. The spec runs
+            # through tabular.py — a closed, pure, total operation set — so
+            # the answer is exact, and the capture hooks can hand the
+            # compiler a step whose replay re-derives the output instead of
+            # asking anyone to think. This is the adapter that lets repeated
+            # data work (reconciliation, normalization, report tables) stop
+            # costing model calls once it is proven.
+            token = None
+            try:
+                src = self._safe_path(args["source"])
+                dst = self._safe_path(args["path"], write=True)
+                src2 = (self._safe_path(args["source2"])
+                        if args.get("source2") else None)
+            except (KeyError, ValueError) as e:
+                return f"ERROR: {e}"
+            try:
+                import tabular
+                spec = tabular.canonical(str(args.get("spec") or ""))
+            except ValueError as e:
+                return f"ERROR: {e}"
+            try:
+                import procedure
+                capture = {"source": args["source"], "path": args["path"],
+                           "spec": spec}
+                if args.get("source2"):
+                    capture["source2"] = args["source2"]
+                if procedure.active_trajectory(self.root, task["id"]):
+                    token = procedure.begin_action(
+                        self.root, task["id"], "transform_table", capture)
+                with open(src, "r", encoding="utf-8", errors="replace") as f:
+                    primary = f.read()
+                secondary = None
+                if src2:
+                    with open(src2, "r", encoding="utf-8", errors="replace") as f:
+                        secondary = f.read()
+                out = tabular.apply(spec, primary, secondary)
+                os.makedirs(os.path.dirname(dst) or ".", exist_ok=True)
+                with open(dst, "w", encoding="utf-8") as f:
+                    f.write(out)
+                if token:
+                    procedure.finish_action(self.root, task["id"], token, True)
+                return (f"ok, derived {max(0, out.count(chr(10)) - 1)} data "
+                        f"row(s) into {args['path']}")
+            except (OSError, ValueError) as e:
+                if token:
+                    try:
+                        procedure.finish_action(self.root, task["id"], token, False)
+                    except Exception:
+                        pass
+                return f"ERROR: {e}"
         if name == "run_command":
             cmd = args["cmd"]
             with open(os.path.join(self.logs_dir, "commands.log"), "a", encoding="utf-8") as f:
@@ -1835,7 +1919,7 @@ class Agent:
         for m in middle:
             for tc in (m.get("tool_calls") or []):
                 fn = tc.get("function") or {}
-                if fn.get("name") == "write_file":
+                if fn.get("name") in ("write_file", "transform_table"):
                     try:
                         p = json.loads(fn.get("arguments") or "{}").get("path")
                         if p and p not in written:
