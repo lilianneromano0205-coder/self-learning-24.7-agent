@@ -92,7 +92,12 @@ TOOL_DEFS = [
                 '{"fn":"sum|count|min|max","column":c}}}. '
                 "The harness executes the spec, not you — prefer this over "
                 "computing table results yourself: the result is exact, "
-                "re-derivable, and can become a repeatable procedure."),
+                "re-derivable, and can become a repeatable procedure. "
+                "Optionally give schema — a JSON object "
+                '{"columns":{name:"string|identifier|integer|boolean|date|'
+                'datetime|decimal:<scale>|money:<CUR>:<scale>|nullable:<T>"}} '
+                "— and the output is validated against those types before it "
+                "is written; a non-conforming result refuses."),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -100,8 +105,56 @@ TOOL_DEFS = [
                     "path": {"type": "string"},
                     "spec": {"type": "string"},
                     "source2": {"type": "string"},
+                    "schema": {"type": "string"},
                 },
                 "required": ["source", "path", "spec"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "db_query",
+            "description": (
+                "Read-only observation of a SQLite database in the "
+                "workspace. Give database (file path) and query (a single "
+                "SELECT/WITH statement; deterministic functions only — no "
+                "clock, no random). Returns rows as JSON: values are "
+                "int | string | null; approximate REAL values refuse."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "database": {"type": "string"},
+                    "query": {"type": "string"},
+                },
+                "required": ["database", "query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "db_transaction",
+            "description": (
+                "Mutate a SQLite database in ONE gated transaction. Give "
+                "database (file path — must be in the owner's db_write "
+                "allowlist in settings.toml), statements (JSON list of "
+                '{"sql":..., "params":[...]}, each a single INSERT/UPDATE/'
+                "DELETE/CREATE TABLE/CREATE INDEX/SELECT, parameterized, "
+                "deterministic functions only), and assertions (JSON list "
+                'of {"query": SELECT..., "equals": expected rows}). The '
+                "harness executes everything, then checks every assertion "
+                "INSIDE the transaction: all true → commit; any false → "
+                "rollback and the database is untouched. Declare at least "
+                "one assertion — an unasserted mutation refuses."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "database": {"type": "string"},
+                    "statements": {"type": "string"},
+                    "assertions": {"type": "string"},
+                },
+                "required": ["database", "statements", "assertions"],
             },
         },
     },
@@ -1689,6 +1742,10 @@ class Agent:
             try:
                 import tabular
                 spec = tabular.canonical(str(args.get("spec") or ""))
+                schema = None
+                if args.get("schema"):
+                    import tabletypes
+                    schema = tabletypes.canonical_schema(str(args["schema"]))
             except ValueError as e:
                 return f"ERROR: {e}"
             import fileauth
@@ -1698,6 +1755,8 @@ class Agent:
                            "spec": spec}
                 if args.get("source2"):
                     capture["source2"] = args["source2"]
+                if schema:
+                    capture["schema"] = schema
                 if procedure.active_trajectory(self.root, task["id"]):
                     token = procedure.begin_action(
                         self.root, task["id"], "transform_table", capture)
@@ -1708,14 +1767,93 @@ class Agent:
                     with open(src2, "r", encoding="utf-8", errors="replace") as f:
                         secondary = f.read()
                 out = tabular.apply(spec, primary, secondary)
+                if schema:
+                    import tabletypes
+                    # conforms-or-refuse BEFORE the write: a typed step
+                    # never lands a non-conforming table on disk
+                    tabletypes.conforms(schema, out)
                 # same single mutation semantic as write_file: atomic, via
                 # the file authority
                 fileauth.write_text(self.root, args["path"], out)
                 if token:
                     procedure.finish_action(self.root, task["id"], token, True)
                 return (f"ok, derived {max(0, out.count(chr(10)) - 1)} data "
-                        f"row(s) into {args['path']}")
+                        f"row(s) into {args['path']}"
+                        + (" (schema verified)" if schema else ""))
             except (OSError, ValueError, fileauth.Denied) as e:
+                if token:
+                    try:
+                        procedure.finish_action(self.root, task["id"], token, False)
+                    except Exception:
+                        pass
+                return f"ERROR: {e}"
+        if name == "db_query":
+            # observation, not mutation: read-only connection, screened
+            # SELECT, exact values only
+            try:
+                dbfile = self._safe_path(args["database"])
+            except (KeyError, ValueError) as e:
+                return f"ERROR: {e}"
+            token = None
+            import dbstate
+            import procedure
+            try:
+                if procedure.active_trajectory(self.root, task["id"]):
+                    token = procedure.begin_action(
+                        self.root, task["id"], "db_query",
+                        {"database": args["database"],
+                         "query": str(args.get("query") or "")})
+                rows = dbstate.query(dbfile, str(args.get("query") or ""))
+                if token:
+                    procedure.finish_action(self.root, task["id"], token, True)
+                return truncate(json.dumps(rows, ensure_ascii=False))
+            except (OSError, ValueError) as e:
+                if token:
+                    try:
+                        procedure.finish_action(self.root, task["id"], token, False)
+                    except Exception:
+                        pass
+                return f"ERROR: {e}"
+        if name == "db_transaction":
+            # THE OWNER NAMES THE DATABASES A WORKER MAY MUTATE. db_write in
+            # settings.toml is the whole grant surface: empty (the default)
+            # means every db_transaction refuses — fail closed — and the
+            # refusal tells the operator exactly which line to add.
+            rel = str(args.get("database") or "").replace("\\", "/")
+            allowed = {str(p).replace("\\", "/")
+                       for p in (self.cfg.get("agent", {}).get("db_write")
+                                 or [])}
+            if rel not in allowed:
+                return (f"ERROR: database {rel!r} is not in the owner's "
+                        f"db_write allowlist (settings.toml [agent] "
+                        f"db_write). Ask the owner to add it; nothing "
+                        f"self-grants.")
+            try:
+                dbfile = self._safe_path(rel, write=True)
+            except ValueError as e:
+                return f"ERROR: {e}"
+            token = None
+            import dbstate
+            import procedure
+            try:
+                statements = dbstate.canonical_statements(
+                    str(args.get("statements") or ""))
+                assertions = dbstate.canonical_assertions(
+                    str(args.get("assertions") or ""))
+            except ValueError as e:
+                return f"ERROR: {e}"
+            try:
+                if procedure.active_trajectory(self.root, task["id"]):
+                    token = procedure.begin_action(
+                        self.root, task["id"], "db_transaction",
+                        {"database": rel, "statements": statements,
+                         "assertions": assertions})
+                dbstate.transact(dbfile, statements, assertions)
+                if token:
+                    procedure.finish_action(self.root, task["id"], token, True)
+                return (f"ok, transaction committed on {rel}; every declared "
+                        f"assertion observed true")
+            except (OSError, ValueError) as e:
                 if token:
                     try:
                         procedure.finish_action(self.root, task["id"], token, False)
@@ -2951,7 +3089,16 @@ class Agent:
                 continue
             started = time.time()
             try:
-                result = procedure.execute(self.root, rb, inputs)
+                # the deterministic route holds exactly the authority the
+                # OWNER declared: workspace writes, plus db-write for each
+                # database named in settings.toml [agent] db_write. Nothing
+                # here can grant itself more.
+                grant = {"workspace-write"} | {
+                    "db-write:" + str(p).replace("\\", "/")
+                    for p in (self.cfg.get("agent", {}).get("db_write")
+                              or [])}
+                result = procedure.execute(self.root, rb, inputs,
+                                           authority=grant)
             except Exception as e:
                 self.log.info(json.dumps({
                     "event": "procedure_route_skipped", "task": task["id"],

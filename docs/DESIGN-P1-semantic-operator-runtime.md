@@ -1,7 +1,16 @@
 # DESIGN — Phase 1: Semantic Operator Runtime
 
-**Branch:** `phase1/semantic-operator-runtime` · **Status:** DESIGN (nothing
-in this document is built until its benchmark exists) · **Contract:**
+**Branch:** `phase1/semantic-operator-runtime` · **Status:** BUILT — the
+preregistered exit benchmark below is `tests/test_operator_runtime.py` in
+the acceptance suite: all five workflows run verified→candidate→sealed
+suite→PROVEN→zero-model replay, and every named refusal path is
+unit-tested. Implementation: `tabletypes.py` (typed columns incl.
+money(currency,scale), constraints; predicates `table_conforms`,
+`table_satisfies`), `dbstate.py` (screened deterministic SQLite,
+effect-gated transactions; predicate `db_satisfies_all`; worker tools
+`db_transaction`/`db_query`), owner allowlist `[agent] db_write` (empty
+default, fail closed), per-file `db-write:<path>` authority derived from
+bound steps at execute time. · **Contract:**
 [VISION_CONTRACT.md](../VISION_CONTRACT.md) binds every decision below.
 
 ## The problem, stated from evidence
