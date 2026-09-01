@@ -10,7 +10,7 @@ continuously, prove what they did, and remember what they learned.**
 ![mutations](https://img.shields.io/badge/mutation%20tests-56%2F56%20killed-brightgreen)
 ![license](https://img.shields.io/badge/license-AGPL--3.0-orange)
 
-105 Python modules · 138 acceptance tests · one HTML control panel · no
+105 Python modules · 139 acceptance tests · one HTML control panel · no
 database, no framework, no build step. Python 3.11+ and your own API keys.
 
 ```bash
@@ -588,7 +588,7 @@ build is cleared.** The full table is in
 
 ```bash
 python demo.py            # the whole platform, keyless, in one run
-python tests/run_all.py   # 138 acceptance tests
+python tests/run_all.py   # 139 acceptance tests
 python proof.py           # what is proven, and to what level
 python evidence.py        # why we believe it, and where belief runs out
 python metrics.py         # is it working — and the numbers it refuses to invent
