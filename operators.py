@@ -42,7 +42,8 @@ def check_inputs(root, schema, inputs):
 
 def validate_predicate(item):
     if not isinstance(item, dict) or item.get("predicate") not in (
-            "file_exists", "file_absent", "file_equals", "file_derives") \
+            "file_exists", "file_absent", "file_equals", "file_derives",
+            "table_conforms", "table_satisfies", "db_satisfies_all") \
             or "path" not in item:
         raise OperatorError("unsupported mechanically observable predicate")
     if item["predicate"] == "file_equals" and "value" not in item:
@@ -50,6 +51,12 @@ def validate_predicate(item):
     if item["predicate"] == "file_derives" and (
             "spec" not in item or "source" not in item):
         raise OperatorError("file_derives needs a spec and a source")
+    if item["predicate"] == "table_conforms" and "schema" not in item:
+        raise OperatorError("table_conforms needs a schema")
+    if item["predicate"] == "table_satisfies" and "constraint" not in item:
+        raise OperatorError("table_satisfies needs a constraint")
+    if item["predicate"] == "db_satisfies_all" and "assertions" not in item:
+        raise OperatorError("db_satisfies_all needs assertions")
 
 
 def observe(root, predicate):
@@ -77,6 +84,36 @@ def observe(root, predicate):
         except (OSError, ValueError, fileauth.Denied):
             return False
         return fileauth.read_text(root, predicate["path"]) == derived
+    if kind == "table_conforms":
+        # The file IS a table of the declared types, re-checked now. An
+        # unparseable file, a missing column, one bad cell: all read as
+        # "no longer true", never as an exception a caller must guess at.
+        import tabletypes
+        try:
+            tabletypes.conforms(predicate["schema"],
+                                fileauth.read_text(root, predicate["path"]))
+        except (OSError, ValueError, fileauth.Denied):
+            return False
+        return True
+    if kind == "table_satisfies":
+        import tabletypes
+        try:
+            other = (fileauth.read_text(root, predicate["other"])
+                     if "other" in predicate else None)
+            return bool(tabletypes.satisfies(
+                predicate["constraint"],
+                fileauth.read_text(root, predicate["path"]), other))
+        except (OSError, ValueError, fileauth.Denied):
+            return False
+    if kind == "db_satisfies_all":
+        # Every declared assertion re-observed against the database as it
+        # stands — the SQL analog of file_derives.
+        import dbstate
+        try:
+            ok, _why = dbstate.check_assertions(path, predicate["assertions"])
+        except (OSError, ValueError, fileauth.Denied):
+            return False
+        return ok
     return fileauth.read_text(root, predicate["path"]) == predicate["value"]
 
 

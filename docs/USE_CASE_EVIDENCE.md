@@ -305,15 +305,19 @@ infrastructure" is a CI-held property rather than a plan.
 
 ## 5. The boundaries, kept visible on purpose
 
-- **Deterministic adapters are still finite**: write_file/copy_file and the
-  `transform_table` family (tabular.py — CSV select/rename/filter/sort/
-  dedupe/join/aggregate, with the `file_derives` effect predicate). That
-  widened zero-model replay from "emit these exact bytes" to "derive this
-  table from those tables" — reconciliation, normalization, report tables.
-  Browser, HTTP, database and native-spreadsheet operations still run
-  through agents; each is a future adapter with observable
-  pre/postconditions, and this remains the highest-leverage engineering
-  frontier in the repository.
+- **Deterministic adapters are still finite**: write_file/copy_file, the
+  `transform_table` family (tabular.py + tabletypes.py — CSV select/rename/
+  filter/sort/dedupe/join/aggregate with exact decimals, typed columns
+  including money(currency,scale), and constraint predicates), and screened
+  SQLite transactions (dbstate.py — deterministic SQL only, commit gated on
+  declared assertions, owner-allowlisted per file). Zero-model replay now
+  spans "emit these exact bytes", "derive this table from those tables",
+  and "put this database into this asserted state" — demonstrated end to
+  end by `tests/test_operator_runtime.py` (five workflows, all proven, all
+  replayed with zero model calls). Browser, HTTP, and native-spreadsheet
+  operations still run through agents; each is a future adapter with
+  observable pre/postconditions, per the phase order in
+  docs/DESIGN-P1-semantic-operator-runtime.md.
 - **No live provider has ever been attached.** Every intelligence-shaped
   number so far is mock-driven. `benchmark.py` refuses provider spend without
   explicit opt-in, and LIFT-001A stays NOT_RUN until a key and budget exist.

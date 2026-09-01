@@ -1,6 +1,7 @@
 """Conservative workflow induction from harness-observed, independently graded actions.
 
-File write/copy semantics and closed-set table transforms (tabular.py) have
+File write/copy semantics, closed-set table transforms (tabular.py, typed by
+tabletypes.py), and screened SQLite transactions (dbstate.py) have
 deterministic adapters. Unknown tools remain
 model-required barriers. A candidate never authors its graders or its receipts.
 Authority state uses the same external org boundary as goal-contract seals.
@@ -89,6 +90,13 @@ def seal_suite(root, identity, suite, actor="owner"):
         raise ProcedureError("case identities must be distinct")
     for check in suite["checks"]:
         operators.validate_predicate(check)
+    # a suite may carry the extra authority its arenas need (db-write for
+    # the databases its own cases materialize) — the SEAL is the owner's
+    # signature on that grant, scoped to evaluation arenas and nothing else
+    extra = suite.get("authority", [])
+    if not isinstance(extra, list) or any(
+            not isinstance(token, str) or not token for token in extra):
+        raise ProcedureError("suite authority must be a list of tokens")
     return _seal(root, "suites", identity, suite, actor)
 
 
@@ -155,10 +163,13 @@ def _normalize(action):
         raise ProcedureError("action must identify a tool and structured arguments")
     action = copy.deepcopy(action)
     action.setdefault("args", {})
-    if action["tool"] in ("write_file", "copy_file", "read_file", "transform_table"):
+    if action["tool"] in ("write_file", "copy_file", "read_file",
+                          "transform_table", "db_transaction", "db_query"):
         required = {"write_file": ("path", "content"), "copy_file": ("source", "path"),
                     "read_file": ("path",),
-                    "transform_table": ("source", "path", "spec")}[action["tool"]]
+                    "transform_table": ("source", "path", "spec"),
+                    "db_transaction": ("database", "statements", "assertions"),
+                    "db_query": ("database", "query")}[action["tool"]]
         if any(not isinstance(action["args"].get(key), str) for key in required):
             raise ProcedureError("file actions require string arguments")
         if action["tool"] == "transform_table":
@@ -169,7 +180,25 @@ def _normalize(action):
             # across trajectories — and an invalid spec dies HERE, before it
             # can enter a trajectory as evidence
             action["args"]["spec"] = tabular.canonical(action["args"]["spec"])
-        for key in ("path", "source", "source2"):
+            if "schema" in action["args"]:
+                import tabletypes
+                if not isinstance(action["args"]["schema"], str):
+                    raise ProcedureError("file actions require string arguments")
+                action["args"]["schema"] = tabletypes.canonical_schema(
+                    action["args"]["schema"])
+        if action["tool"] == "db_transaction":
+            import dbstate
+            # screened and canonicalized HERE: a statement the screen
+            # refuses never becomes evidence, and byte-different equal
+            # meanings align across trajectories
+            action["args"]["statements"] = dbstate.canonical_statements(
+                action["args"]["statements"])
+            action["args"]["assertions"] = dbstate.canonical_assertions(
+                action["args"]["assertions"])
+        if action["tool"] == "db_query":
+            import dbstate
+            dbstate._screen(action["args"]["query"], read_only=True)
+        for key in ("path", "source", "source2", "database"):
             if key in action["args"] and isinstance(action["args"][key], str):
                 action["args"][key] = action["args"][key].replace("\\", "/")
     return action
@@ -177,12 +206,15 @@ def _normalize(action):
 
 def _snapshot(root, action):
     result = {}
-    for key in ("path", "source", "source2"):
+    for key in ("path", "source", "source2", "database"):
         value = action["args"].get(key)
         if action["tool"] not in ("write_file", "copy_file", "read_file",
-                                  "transform_table") or not value:
+                                  "transform_table", "db_transaction",
+                                  "db_query") or not value:
             continue
-        mode = "write" if key == "path" and action["tool"] != "read_file" else "read"
+        mode = ("write" if (key == "path" and action["tool"] != "read_file")
+                or (key == "database" and action["tool"] == "db_transaction")
+                else "read")
         path = fileauth.resolve(root, value, mode, "agent")
         exists = os.path.isfile(path)
         result[key] = {"exists": exists, "hash": digest(fileauth.read_text(root, value)) if exists else None}
@@ -235,6 +267,23 @@ def finish_action(root, task_id, token, succeeded):
                     action["args"]["spec"],
                     fileauth.read_text(root, action["args"]["source"]), second)
                 success = success and after["path"]["hash"] == digest(derived)
+                if success and "schema" in action["args"]:
+                    import tabletypes
+                    tabletypes.conforms(action["args"]["schema"], derived)
+            except (OSError, ValueError, fileauth.Denied):
+                success = False
+        if action["tool"] == "db_transaction":
+            # The declared assertions re-observed against the database as it
+            # stands — independent of the tool's own commit gate, which is
+            # the point: the evidence is what the harness re-derived, not
+            # what the executor reported about itself.
+            import dbstate
+            try:
+                ok, _why = dbstate.check_assertions(
+                    fileauth.resolve(root, action["args"]["database"],
+                                     "read", "agent"),
+                    action["args"]["assertions"])
+                success = success and ok
             except (OSError, ValueError, fileauth.Denied):
                 success = False
         item.update({"complete": True, "succeeded": success, "after": after,
@@ -253,8 +302,22 @@ def _perform(root, action):
         import tabular
         second = (fileauth.read_text(root, args["source2"])
                   if "source2" in args else None)
-        fileauth.write_text(root, args["path"], tabular.apply(
-            args["spec"], fileauth.read_text(root, args["source"]), second))
+        derived = tabular.apply(
+            args["spec"], fileauth.read_text(root, args["source"]), second)
+        if "schema" in args:
+            import tabletypes
+            # conforms-or-refuse BEFORE the write: a non-conforming table
+            # never lands on disk under a typed step
+            tabletypes.conforms(args["schema"], derived)
+        fileauth.write_text(root, args["path"], derived)
+    elif action["tool"] == "db_transaction":
+        import dbstate
+        dbstate.transact(fileauth.resolve(root, args["database"], "write", "agent"),
+                         args["statements"], args["assertions"])
+    elif action["tool"] == "db_query":
+        import dbstate
+        dbstate.query(fileauth.resolve(root, args["database"], "read", "agent"),
+                      args["query"])
     elif action["tool"] == "read_file":
         fileauth.read_text(root, args["path"])
     else:
@@ -399,7 +462,9 @@ def compile(root, name, trajectory_ids, triggers):
         schema[key] = kind
     minted = []
     # Reads are observations; all mutating/unknown tools must align in order.
-    sequences = [[item for item in t["actions"] if item["action"]["tool"] != "read_file"] for t in trajectories]
+    sequences = [[item for item in t["actions"]
+                  if item["action"]["tool"] not in ("read_file", "db_query")]
+                 for t in trajectories]
     if not sequences[0] or any(len(s) != len(sequences[0]) for s in sequences):
         raise ProcedureError("unaligned action sequence; refusing to drop mutations")
     steps, preconditions, effects, invariants = [], [], [], []
@@ -416,21 +481,26 @@ def compile(root, name, trajectory_ids, triggers):
         identity = f"step-{index + 1}"
         step = {"id": identity, "depends_on": [steps[-1]["id"]] if steps else [],
                 "kind": ("deterministic"
-                         if tool in ("write_file", "copy_file", "transform_table")
+                         if tool in ("write_file", "copy_file",
+                                     "transform_table", "db_transaction")
                          else "model"),
                 "action": {"tool": tool, "args": args}, "preconditions": [], "effects": []}
         if step["kind"] == "model":
             step["reason"] = "tool has no trusted deterministic semantic adapter"
         else:
-            for key in ("path", "source", "source2"):
+            for key in ("path", "source", "source2", "database"):
                 if isinstance(args.get(key), dict):
                     schema[args[key]["input"]] = "path"
-            before = {item["before"]["path"]["exists"] for item in aligned}
+            # the mutated target: a file for the file family, the database
+            # for the SQL family
+            target_key = "database" if tool == "db_transaction" else "path"
+            target = args[target_key]
+            before = {item["before"][target_key]["exists"] for item in aligned}
             if len(before) != 1:
                 raise ProcedureError("mixed overwrite/create preconditions require separate operators")
-            guard = {"predicate": "file_exists" if True in before else "file_absent", "path": args["path"]}
+            guard = {"predicate": "file_exists" if True in before else "file_absent", "path": target}
             step["preconditions"].append(guard)
-            if args["path"] not in touched:
+            if target not in touched:
                 preconditions.append(guard)
             for key in ("source", "source2"):
                 if key in args:
@@ -440,25 +510,35 @@ def compile(root, name, trajectory_ids, triggers):
                         preconditions.append(source)
                         invariants.append(source)
             if tool == "copy_file":
-                effect = {"predicate": "file_exists", "path": args["path"]}
+                effect = {"predicate": "file_exists", "path": target}
             elif tool == "transform_table":
                 # The strongest effect the algebra has: the output file IS
                 # this derivation of these sources, re-checkable at any later
                 # moment through the same trusted adapter that produced it.
-                effect = {"predicate": "file_derives", "path": args["path"],
+                effect = {"predicate": "file_derives", "path": target,
                           "spec": args["spec"], "source": args["source"]}
                 if "source2" in args:
                     effect["source2"] = args["source2"]
+                if "schema" in args:
+                    # a TYPED step also promises what the output MEANS
+                    step["effects"].append({"predicate": "table_conforms",
+                                            "path": target,
+                                            "schema": args["schema"]})
+            elif tool == "db_transaction":
+                # the SQL analog of file_derives: every declared assertion
+                # re-observed against the database as it stands
+                effect = {"predicate": "db_satisfies_all", "path": target,
+                          "assertions": args["assertions"]}
             else:
-                effect = {"predicate": "file_equals", "path": args["path"], "value": args["content"]}
+                effect = {"predicate": "file_equals", "path": target, "value": args["content"]}
             step["effects"].append(effect)
-            effects = [e for e in effects if e["path"] != args["path"]] + [effect]
-            touched.append(args["path"])
+            effects = [e for e in effects if e["path"] != target] + [effect]
+            touched.append(target)
         steps.append(step)
     rb = {"name": name, "triggers": triggers, "procedure_version": 1, "steps": steps,
           "operator": {"inputs": schema, "preconditions": preconditions, "effects": effects,
                        "invariants": invariants, "cost_usd": 0.0,
-                       "cost_basis": "deterministic local file adapters; no provider calls",
+                       "cost_basis": "deterministic local adapters (file, table, sqlite); no provider calls",
                        "latency_seconds": sum(sum(i["latency_seconds"] for i in seq) for seq in sequences) / len(sequences),
                        "reversibility": "conditional", "authority": ["workspace-write"],
                        "reliability": {"source": "induction only; independent evaluation required"}},
@@ -489,7 +569,8 @@ def validate(rb):
                 raise ProcedureError("step must be explicit deterministic or model-required")
             if step["kind"] == "deterministic":
                 if step.get("action", {}).get("tool") not in (
-                        "write_file", "copy_file", "transform_table"):
+                        "write_file", "copy_file", "transform_table",
+                        "db_transaction"):
                     raise ProcedureError("unknown deterministic adapter")
                 if not step.get("effects"):
                     raise ProcedureError("step must have mechanically observable effects")
@@ -509,8 +590,19 @@ def execute(root, rb, inputs, workspace=None, authority=None):
         operators.check_inputs(workspace, rb["operator"]["inputs"], inputs)
         bound = operators.bind(rb, inputs)
         op = bound["operator"]
-        if not set(op["authority"]) <= authority:
-            raise ProcedureError("required authority was not granted")
+        # Authority is DERIVED from what the bound steps will actually touch,
+        # not only from what the author declared: a db step demands the
+        # owner-granted token for exactly that database file, so a proven
+        # procedure pointed at a new database by its inputs still needs the
+        # owner's grant for THAT file. Fail-closed, per file.
+        required = set(op["authority"])
+        for step in bound["steps"]:
+            if step.get("action", {}).get("tool") == "db_transaction":
+                required.add("db-write:" + str(step["action"]["args"]
+                                               ["database"]).replace("\\", "/"))
+        if not required <= authority:
+            raise ProcedureError("required authority was not granted: missing "
+                                 + ", ".join(sorted(required - authority)))
         # Check all arguments before any side effect, including constants.
         for step in bound["steps"]:
             if step["kind"] == "model":
@@ -610,8 +702,19 @@ def evaluate(root, name, suite_id):
                     for item in initial):
                 raise ProcedureError("initial_files must be path/content records")
             for item in initial:
-                fileauth.write_text(arena, item["path"], item["content"])
-            result = execute(root, rb, case["inputs"], workspace=arena)
+                if item["path"].endswith(".db"):
+                    # a database bootstraps from an owner-sealed SQL script,
+                    # deterministically — binary fixtures cannot be sealed
+                    # as text and would not be reviewable if they could
+                    import dbstate
+                    dbstate.run_script(
+                        fileauth.resolve(arena, item["path"], "write", "agent"),
+                        item["content"])
+                else:
+                    fileauth.write_text(arena, item["path"], item["content"])
+            grant = {"workspace-write"} | set(suite.get("authority", []))
+            result = execute(root, rb, case["inputs"], workspace=arena,
+                             authority=grant)
             checks = operators.bind(suite["checks"], case["inputs"])
             accepted = result["ok"] and all(operators.observe(arena, check) for check in checks)
             receipt = {"id": identity, "name": name, "runbook_hash": digest(rb),
