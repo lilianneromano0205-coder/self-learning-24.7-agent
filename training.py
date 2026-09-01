@@ -22,8 +22,10 @@ claim a level of the proof ladder it has not earned.
 
 So `run()` produces an exportable, hash-pinned training package and stops at
 the boundary, telling you exactly what an external trainer must do with it.
-`promote()` refuses a checkpoint whose DECLARED held-out score does not clear
-its declared bar, and every promotion records a rollback target.
+`promote()` refuses any candidate whose score_origin is not
+"sealed_paired_evaluation" — a merely DECLARED score can be registered and
+compared but can never promote — requires sealed evaluation and canary
+receipts, and every promotion records a rollback target.
 
 WHERE THE SCORE COMES FROM, SAID PLAINLY
 

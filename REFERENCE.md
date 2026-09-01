@@ -7,8 +7,8 @@ logic it runs, how you interact with it, and what it does **not** do.
 written by reading the code, not from memory; where a claim could rot, the
 test that keeps it honest is named.
 
-**Scale, so you know what you are reading about:** 104 Python modules,
-one HTML file for the whole UI, 136 acceptance tests, zero third-party
+**Scale, so you know what you are reading about:** 105 Python modules,
+one HTML file for the whole UI, 138 acceptance tests, zero third-party
 dependencies. Python 3.11+ and your own API keys.
 
 ---

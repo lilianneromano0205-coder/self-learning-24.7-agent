@@ -18,11 +18,15 @@ trusted as evidence.
 Ordering rules are carried by LISTS in the spec (select order, group order);
 JSON object key order never carries meaning, so canonicalization (sorted keys)
 cannot change what a spec does.
+
+Numbers are EXACT DECIMALS, never floats: 0.1 + 0.2 is 0.3, and a sum that
+would need rounding refuses instead of losing cents. That is the minimum bar
+for a substrate that will carry ledgers.
 """
 import csv
+import decimal
 import io
 import json
-import math
 
 MAX_STEPS = 32          # a pipeline longer than this is a program, not a spec
 MAX_CELLS = 250_000     # per table, at every stage — join fan-out included
@@ -194,22 +198,25 @@ def _col(header, name):
 
 
 def _num(value):
+    """Exact decimal, or None. Floats never touch a cell: 0.1 + 0.2 must be
+    0.3 in a substrate that will carry ledgers, not 0.30000000000000004."""
     try:
-        number = float(value)
-    except ValueError:
+        number = decimal.Decimal(value.strip())
+    except (decimal.InvalidOperation, ValueError, ArithmeticError, AttributeError):
         return None
-    return number if math.isfinite(number) else None
+    return number if number.is_finite() else None
 
 
 def _order_key(value):
     number = _num(value)
-    return (0, number, "") if number is not None else (1, 0.0, value)
+    return (0, number, "") if number is not None else (1, decimal.Decimal(0), value)
 
 
 def _fmt(value):
-    if value == int(value) and abs(value) < 1e15:
-        return str(int(value))
-    return repr(value)
+    text = format(value, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return "0" if text in ("", "-0") else text
 
 
 def _compare(left, compare, right):
@@ -314,7 +321,17 @@ def apply(spec_text, primary, secondary=None):
                         numbers = [_num(v) for v in values]
                         if any(n is None for n in numbers):
                             _fail(f"sum over non-numeric values in {name!r}")
-                        record.append(_fmt(math.fsum(numbers)))
+                        # EXACT OR REFUSE: the Inexact trap means a sum that
+                        # would round (beyond 60 significant digits) raises
+                        # instead of silently losing cents
+                        try:
+                            with decimal.localcontext() as ctx:
+                                ctx.prec = 60
+                                ctx.traps[decimal.Inexact] = True
+                                total = sum(numbers, decimal.Decimal(0))
+                        except (decimal.Inexact, decimal.InvalidOperation):
+                            _fail(f"sum in {name!r} exceeds exact precision")
+                        record.append(_fmt(total))
                     else:
                         picked = (min if fn == "min" else max)(
                             values, key=_order_key)

@@ -134,9 +134,22 @@ def check_a_bad_key_says_so(home, slug, srv):
     assert r.returncode != 0, (
         "a failing probe must exit non-zero, or a setup script cannot branch "
         "on it")
-    # …and no key at all is a different message, naming the variable
-    r2 = run(["loop.py", "check", "--root", root], cwd=AGENT_DIR, timeout=180,
-             env={"DEEPSEEK_API_KEY": ""})
+    # …and no key at all is a different message, naming the variable.
+    # "No key at all" must mean no key in ANY declared source. The canonical
+    # resolver (credentials.resolve) rightly falls back to the expert's own
+    # agent.env when the environment variable is empty — fleet.create copies
+    # the fleet's env file into every expert root. This check used to pass
+    # only because the loop's private resolver modeled fewer sources than
+    # the runtime; encoding that fork here is how it survived. So empty the
+    # file source too, not just the variable.
+    env_file = os.path.join(root, "agent.env")
+    held = env_file + ".hold"
+    os.replace(env_file, held)
+    try:
+        r2 = run(["loop.py", "check", "--root", root], cwd=AGENT_DIR,
+                 timeout=180, env={"DEEPSEEK_API_KEY": ""})
+    finally:
+        os.replace(held, env_file)
     out2 = r2.stdout + r2.stderr
     assert "FAIL" in out2 and "DEEPSEEK_API_KEY" in out2, out2[-400:]
     assert "no API key" in out2, out2[-400:]

@@ -80,6 +80,11 @@ def check_join_and_aggregate():
                                "n": {"fn": "count"}}}),
         "key,amount\nB,2\nA,1.5\nA,1\nB,3\n")
     assert agg == "key,n,total\nA,2,2.5\nB,2,5\n", agg
+    cents = tabular.apply(
+        spec({"op": "aggregate", "group": [],
+              "aggregations": {"t": {"fn": "sum", "column": "v"}}}),
+        "v\n0.1\n0.2\n")
+    assert cents == "t\n0.3\n", ("money is decimal, not float", cents)
     # groups in sorted order, aggregation columns in sorted-name order,
     # integral sums rendered without a decimal point
     top = tabular.apply(

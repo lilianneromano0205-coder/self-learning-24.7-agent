@@ -1412,6 +1412,74 @@ def check_health_checks_can_fail():
           "unless the owner explicitly declares allow_unsafe_host")
 
 
+def check_one_credential_resolver():
+    """The runtime may have exactly ONE implementation of 'what is this
+    provider's key'. loop.py once grew a private _api_key that modeled fewer
+    sources than credentials.resolve (no agent.env, no root-relative
+    api_key_file), so a funded provider was reported keyless by the loop's
+    own preflight while the health check called it funded. An authority
+    with two resolvers is two authorities."""
+    src = io.open(os.path.join(AGENT_DIR, "loop.py"), encoding="utf-8").read()
+    assert "api_key_file" not in src, (
+        "loop.py touches api_key_file directly — credential resolution has "
+        "forked again; delegate to credentials.resolve")
+    body = src.split("def _api_key", 1)
+    assert len(body) == 2 and "credentials.resolve" in body[1].split("def ", 1)[0], (
+        "loop._api_key must delegate to credentials.resolve — no second "
+        "resolver")
+    import inspect
+    assert "credentials.resolve" in inspect.getsource(loop.Agent._api_key)
+    print("[credentials] loop.py delegates key resolution to the one "
+          "credential authority; no private resolver, no api_key_file reads")
+
+
+def check_one_mutation_semantic():
+    """fileauth decides WHERE a worker write may land AND HOW it lands
+    (atomic temp-and-replace). The worker file tools once resolved through
+    fileauth and then mutated with a bare open('w') — one module authorizing,
+    a different implementation mutating, which is the exact split that made a
+    crash mid-write leave truncated files. Enumerate the worker mutation
+    handlers and require each to write through fileauth.write_text."""
+    src = io.open(os.path.join(AGENT_DIR, "loop.py"), encoding="utf-8").read()
+    for tool in ("write_file", "transform_table"):
+        start = src.index(f'if name == "{tool}":')
+        end = src.index('if name == "', start + 10)
+        handler = src[start:end]
+        assert "fileauth.write_text" in handler, (
+            f"the {tool} handler must mutate through fileauth.write_text")
+        assert not re.search(r'open\([^)]*,\s*"w"', handler), (
+            f"the {tool} handler opens a file for writing directly — "
+            f"mutation semantics have forked from the file authority")
+    print("[mutation] both worker mutation tools write through "
+          "fileauth.write_text: one authority for where AND how bytes land")
+
+
+def check_public_prose_matches_executable_reality():
+    """Executable behavior outranks prose, and public prose is CHECKED
+    against it. ARCHITECTURE.md/README.md/REFERENCE.md each state a module
+    count and a test count; those went stale (104/136 while reality said
+    105/138) the moment new files landed. A paper cannot cite a stale
+    architecture document, so the counts are now computed here from the
+    repository itself and the docs fail the suite when they rot."""
+    modules = len([f for f in os.listdir(AGENT_DIR) if f.endswith(".py")
+                   and os.path.isfile(os.path.join(AGENT_DIR, f))])
+    sys.path.insert(0, os.path.join(AGENT_DIR, "tests"))
+    import run_all
+    tests = len(run_all.TESTS)
+    for name in ("ARCHITECTURE.md", "README.md", "REFERENCE.md"):
+        text = io.open(os.path.join(AGENT_DIR, name), encoding="utf-8").read()
+        for pattern, actual, what in (
+                (r"(\d+) Python modules", modules, "module count"),
+                (r"(\d+) acceptance tests", tests, "test count")):
+            for found in re.findall(pattern, text):
+                assert int(found) == actual, (
+                    f"{name} claims {found} where the repository has "
+                    f"{actual} ({what}) — public prose has drifted behind "
+                    f"executable reality; update the document")
+    print(f"[prose] ARCHITECTURE/README/REFERENCE counts verified against "
+          f"the tree itself: {modules} modules, {tests} acceptance tests")
+
+
 def main():
     sb = make_sandbox("invariants", providers={"m": {"script": "s.json"}},
                       roles={"practitioner": "m"},
@@ -1440,6 +1508,9 @@ def main():
     check_policy_fails_closed()
     check_health_checks_can_fail()
     check_grant_kinds_cover_authority_classes()
+    check_one_credential_resolver()
+    check_one_mutation_semantic()
+    check_public_prose_matches_executable_reality()
     print("PASS test_invariants")
 
 

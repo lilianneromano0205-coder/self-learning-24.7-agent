@@ -86,9 +86,10 @@ INTELLIGENCE_LEVELS = {
 
 REGISTRY = {
     "harness-loop": {
-        "capability": "An expert runs gated tasks: compiled context, five "
-                      "tools, a definition-of-done that must pass, brakes, "
-                      "retries and a durable trace.",
+        "capability": "An expert runs gated tasks: compiled context, the "
+                      "declared tool surface (loop.TOOL_DEFS — counting it "
+                      "here went stale once already), a definition-of-done "
+                      "that must pass, brakes, retries and a durable trace.",
         "invariants": ["a task is claimed exactly once",
                        "finish_task is refused until the gate passes",
                        "every step is traced with its cost"],
@@ -224,7 +225,8 @@ REGISTRY = {
                       "decision, never because the file says so.",
         "invariants": ["a skill file cannot self-declare trust",
                        "community scripts stay disabled until promoted",
-                       "promotion requires distinct verified wins"],
+                       "earned status requires a matched held-out ablation "
+                       "pinned to the exact skill bytes"],
         # fileauth.py is in this boundary because CONTROL_PATHS is what
         # actually enforces "trust comes from the graph, which only the owner
         # writes" — delete that one line and an agent marks its own skill

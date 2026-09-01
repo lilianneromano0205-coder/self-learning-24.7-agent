@@ -10,8 +10,9 @@ day one, and a platform that hard-codes `subprocess.run` can never move.
 
 So execution is an INTERFACE with four backends, chosen by one setting:
 
-    [agent] sandbox = "host"      # this machine, policy-gated (default)
-                     "docker"     # a throwaway container, network off
+    [agent] sandbox = "docker"    # throwaway container, network off (DEFAULT)
+                     "host"       # this machine, policy-gated — developer-only,
+                                  # refused unless allow_unsafe_host = true
                      "e2b"        # hosted Firecracker microVM  (E2B_API_KEY)
                      "daytona"    # hosted dev sandbox      (DAYTONA_API_KEY)
 

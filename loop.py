@@ -1044,19 +1044,17 @@ class Agent:
         return providers[name]
 
     def _api_key(self, prov):
-        if "api_key_env" in prov:
-            key = os.environ.get(prov["api_key_env"], "")
-            if key:
-                return key
-        if "api_key" in prov:
-            return prov["api_key"]
-        if "api_key_file" in prov:
-            try:
-                with open(prov["api_key_file"], "r", encoding="utf-8") as f:
-                    return f.read().strip()
-            except OSError:
-                pass
-        return ""
+        """Delegates to the ONE credential model (credentials.resolve).
+
+        This used to be a private re-implementation, and it had quietly
+        drifted: it did not know about agent.env and did not resolve a
+        relative key file against the expert root, so a provider that
+        credentials.key_present() called funded could be refused here as
+        keyless. Two resolvers for one authority is the exact defect class
+        this platform keeps finding in itself; test_invariants pins this
+        delegation so the fork cannot return."""
+        import credentials
+        return credentials.resolve(prov, self.root)
 
     def _collect_cards(self, task, text):
         """Collect UI cards an agent emitted. The catalogue is closed: an
@@ -1655,9 +1653,13 @@ class Agent:
                     token = procedure.begin_action(
                         self.root, task["id"], "write_file",
                         {"path": args["path"], "content": args["content"]})
-                os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
-                with open(p, "w", encoding="utf-8") as f:
-                    f.write(args["content"])
+                # ONE mutation semantic: fileauth decided WHERE above
+                # (_safe_path); fileauth also decides HOW — atomic temp-and-
+                # replace, so a crash mid-write leaves the previous file
+                # whole. A second open("w") here was a fork of the file
+                # authority's write semantics; test_invariants pins this.
+                import fileauth
+                fileauth.write_text(self.root, args["path"], args["content"])
                 if token:
                     procedure.finish_action(self.root, task["id"], token, True)
             except Exception:
@@ -1689,6 +1691,7 @@ class Agent:
                 spec = tabular.canonical(str(args.get("spec") or ""))
             except ValueError as e:
                 return f"ERROR: {e}"
+            import fileauth
             try:
                 import procedure
                 capture = {"source": args["source"], "path": args["path"],
@@ -1705,14 +1708,14 @@ class Agent:
                     with open(src2, "r", encoding="utf-8", errors="replace") as f:
                         secondary = f.read()
                 out = tabular.apply(spec, primary, secondary)
-                os.makedirs(os.path.dirname(dst) or ".", exist_ok=True)
-                with open(dst, "w", encoding="utf-8") as f:
-                    f.write(out)
+                # same single mutation semantic as write_file: atomic, via
+                # the file authority
+                fileauth.write_text(self.root, args["path"], out)
                 if token:
                     procedure.finish_action(self.root, task["id"], token, True)
                 return (f"ok, derived {max(0, out.count(chr(10)) - 1)} data "
                         f"row(s) into {args['path']}")
-            except (OSError, ValueError) as e:
+            except (OSError, ValueError, fileauth.Denied) as e:
                 if token:
                     try:
                         procedure.finish_action(self.root, task["id"], token, False)
