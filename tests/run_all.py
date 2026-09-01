@@ -56,7 +56,8 @@ TESTS = ["test_resume.py", "test_lock.py", "test_json_toolcall.py",
          "test_memory_benchmarks.py", "test_memory_policy.py",
          "test_skill_attribution.py", "test_advanced_learning.py",
          "test_research_discovery.py", "test_release_checks.py",
-         "test_loop_learning_controls.py", "test_capability_graph.py"]
+         "test_loop_learning_controls.py", "test_capability_graph.py",
+         "test_use_cases.py"]
 
 
 def main():

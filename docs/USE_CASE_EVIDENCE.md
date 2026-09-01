@@ -189,7 +189,101 @@ sound good:
 
 ---
 
-## 4. The boundaries, kept visible on purpose
+## 4. Round two — use cases added WITH their demonstrations
+
+"Can we implement it?" is answered here the same way as everywhere else in
+this repository: by running it. The first three below were executed end to
+end through the shipped CLIs (`fleet.py`, `loop.py`, `prospective.py`) on
+mock providers, each verdict read from ledgers, never from prose. The run
+prints `ALL THREE DEMONSTRATED` and exits nonzero if any ledger disagrees.
+
+### DEMONSTRATED by execution — and held green by CI
+
+These three are now `tests/test_use_cases.py` in the acceptance suite: every
+future push must re-demonstrate them on Ubuntu and Windows across three
+Python versions, or the build goes red. A demonstration that ran once is a
+story; a demonstration CI must repeat is a property.
+
+**R1. The reconciliation desk** — the unit cell of every reconciliation
+mesh, continuous close and AI-BPO economics. Two weeks of orders-vs-bank
+reconciliation ran as ordinary gated tasks whose gate RECOMPUTES the truth
+from the two input ledgers and demands an exact match — the worker's output
+is never trusted, it is re-derived. Both weeks verified; the platform then
+induced `proc-reconciliation` unprompted, inventing its own `path` and
+`content` parameters, and correctly held it at **candidate** — repetition
+earns a proposal, only an owner-sealed suite earns trust. This is the
+"human task → AI task → learned capability" transition executed on business
+data, not described.
+
+**R2. The monitoring sentinel** — the unit cell of the zero-manual-
+monitoring company and of contracts-as-events. One armed intention:
+WHEN `status.log` gains "ERROR" THEN queue a gated investigation. A drain
+over a healthy log queued **zero** tasks — silence is the correct output of
+normal state. The moment the ERROR line appeared, exactly one task fired,
+ran, and passed its own mechanical gate. No model watched anything; the
+condition is evaluated deterministically by the scheduler, which is why it
+cannot get bored, distracted or hallucinate an incident.
+
+**R3. The no-relearning loop** — the unit cell of the zero-relearning
+company and institutional memory as an asset. A task failed its gate; the
+harness (not the model) filed the failure as
+`WHEN false_success: done_check never passed…` with a remedy. The very next
+task in that course had the warning **injected into its compiled context
+before it ran** — verified by reading the actual context window, which
+contains the `-> DO` line. A diagnosed failure warned the successor
+mechanically; nobody had to remember.
+
+### COMPOSES — every required primitive verified, assembly not yet run
+
+- **R4. Obligations calendar / SLA arbitration pack** — contract dates and
+  breach conditions as armed intentions (`--at`, `--in-days`,
+  `--when-check`), each firing evidence-collection tasks. R2 is its unit
+  cell; the remaining work is per-contract interpretation, which stays
+  professional-human.
+- **R5. Procedure re-validation fleet** — a routine that re-runs every
+  proven procedure against its sealed suite nightly, so trust decays the
+  moment reality drifts. `procedure.evaluate` + `routines.py` are both
+  verified; this is the maintenance discipline a procedure marketplace
+  requires.
+- **R6. Ablation-as-a-service** — someone claims a prompt trick helps;
+  `skills.run_ablation` answers causally with a matched held-out sign test
+  (`test_skill_attribution.py`). Selling causal verdicts on other people's
+  prompt folklore is a real service the machinery already performs.
+- **R7. Model-fleet cost governor** — budgets, per-attempt spend
+  attribution, the daily breaker and `metrics.py` are all verified; the
+  composition is a sentinel (R2 shape) over spend ledgers that surfaces only
+  exceptions.
+- **R8. Data-pipeline contract enforcement** — `--when-check` probes as
+  schema-drift tripwires between producer and consumer directories; R2 plus
+  a comparison gate (R1 shape).
+- **R9. Solo-operator chief of staff, local-first** — an inbox folder as
+  the intake surface (`inbox/` scanning is tested), gated tasks for the
+  recurring administration, gotchas for this machine's quirks (this repo
+  already holds several about OneDrive and Windows paths — learned the
+  verified way). Personal, private, no cloud custody.
+- **R10. Scientific replication desk** — a paper's claims decomposed into
+  the research planner's dependency graph with counterevidence tracked
+  (`test_research_discovery.py` pins retrieval ≠ support); output is a
+  replication checklist whose unresolved nodes are honest.
+
+### NEEDS X — the missing piece named
+
+- **R11. Public-tender / procurement watcher** (e.g. Moroccan and EU
+  portals): the desk shape is R2 + research, both verified — NEEDS the
+  owner-enabled general-web discovery lane and a browser connector proven
+  through the Capability Frontier.
+- **R12. Multilingual back-office** (French/Arabic/English invoices and
+  correspondence): R1's gate pattern carries unchanged — NEEDS a
+  document-extraction capability acquired and probe-proven per format.
+- **R13. Spreadsheet-native finance ops**: R1 on `.xlsx` instead of CSV —
+  NEEDS an excel capability on a routed worker (`workers.py` routing by
+  capability is verified; the connector is the acquisition).
+- **R14. Email-in / email-out operations**: intake and dispatch as governed
+  effects — NEEDS a mail connector, and every send crosses the effect
+  ledger and approval authority (both verified) rather than being a tool
+  call.
+
+## 5. The boundaries, kept visible on purpose
 
 - **Deterministic adapters are narrow**: write_file/copy_file. Browser, HTTP,
   database and spreadsheet operations run through agents today; compiling
