@@ -1,7 +1,12 @@
 # DESIGN — Phase 4: Capability Signatures (shadow)
 
-**Branch:** `phase4/capability-signatures` · **Status:** DESIGN (nothing
-below is built until this document's benchmark exists) · **Contract:**
+**Branch:** `phase4/capability-signatures` · **Status:** BUILT — the
+preregistered benchmark below is `tests/test_capability_signatures.py` in
+the acceptance suite; all six properties hold. Implementation:
+`signatures.py` (of_runbook / shadow_match / agreement / report + CLI)
+and one guarded `signature_shadow` event in `_try_procedure_route`.
+Routing authority unchanged; SIG-001 remains the only door. ·
+**Contract:**
 [VISION_CONTRACT.md](../VISION_CONTRACT.md) binds every decision. ·
 **Audit gate:** per the 2026-09-02 checkpoint audit, this phase ships in
 SHADOW only — it augments the deterministic lexical matchers, changes no
