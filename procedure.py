@@ -109,6 +109,18 @@ def _sealed(state, section, identity):
 
 GATE_ACCEPTANCE = "harness_gate"
 
+# ------------------------------------------------- Procedure IR V2 bounds
+# The IR is TOTAL by construction: every loop is bounded at validate time
+# AND at bind time, retries are capped, call depth is capped, cycles are
+# refused. Anything unbounded is not a procedure, it is a program wearing
+# a procedure's name.
+FOREACH_MAX = 32
+RETRY_MAX = 3
+CALL_DEPTH_MAX = 4
+NEST_MAX = 6
+DETERMINISTIC_TOOLS = ("write_file", "copy_file", "transform_table",
+                       "db_transaction")
+
 
 def begin_trajectory(root, task_id, judge_id=None, inputs=None, family="unspecified",
                      gate=None):
@@ -465,10 +477,91 @@ def compile(root, name, trajectory_ids, triggers):
     sequences = [[item for item in t["actions"]
                   if item["action"]["tool"] not in ("read_file", "db_query")]
                  for t in trajectories]
-    if not sequences[0] or any(len(s) != len(sequences[0]) for s in sequences):
+    if not all(sequences):
+        raise ProcedureError("unaligned action sequence; refusing to drop mutations")
+    signatures = [tuple(item["action"]["tool"] for item in seq)
+                  for seq in sequences]
+    if len(set(signatures)) == 1:
+        steps, preconditions, effects, invariants, _targets = _compile_aligned(
+            trajectories, sequences, schema, minted, auto, "step")
+        provenance_structure = "straight-line"
+    elif len(set(signatures)) == 2 and auto:
+        # TWO SHAPES OF THE SAME JOB. The narrow induction rule from
+        # docs/DESIGN-P3: split by tool-sequence signature, compile each
+        # group as its own aligned branch, and admit exactly ONE
+        # deterministic guard — a write target whose existence, read from
+        # the recorded before-snapshots (never re-imagined), uniformly
+        # separated the runs. Zero guards or two candidate guards is
+        # ambiguity, and ambiguity refuses.
+        steps, preconditions, effects, invariants = \
+            _compile_if(trajectories, sequences, signatures, schema, minted)
+        provenance_structure = "if"
+    else:
+        raise ProcedureError(
+            "unaligned action sequence; refusing to drop mutations "
+            "(more than two run shapes, or sealed-judge evidence)")
+    rb = {"name": name, "triggers": triggers,
+          "procedure_version": 2 if provenance_structure == "if" else 1,
+          "steps": steps,
+          "operator": {"inputs": schema, "preconditions": preconditions, "effects": effects,
+                       "invariants": invariants, "cost_usd": 0.0,
+                       "cost_basis": "deterministic local adapters (file, table, sqlite); no provider calls",
+                       "latency_seconds": sum(sum(i["latency_seconds"] for i in seq) for seq in sequences) / len(sequences),
+                       "reversibility": "conditional", "authority": ["workspace-write"],
+                       "reliability": {"source": "induction only; independent evaluation required"}},
+          "provenance": {"compiled": True, "trajectory_ids": trajectory_ids,
+                         "acceptance_basis": ("harness_gate" if auto else "sealed_judge"),
+                         "inferred_parameters": list(minted),
+                         "induced_structure": provenance_structure,
+                         "input_hashes": [t["input_hash"] for t in trajectories],
+                         "family": trajectories[0]["family"], "alignment": "ordered complete mutating sequence"}}
+    problems = runbook.validate(rb)
+    if problems:
+        raise ProcedureError("invalid compiled procedure: " + "; ".join(problems))
+    os.makedirs(os.path.dirname(runbook.path(root, name)), exist_ok=True)
+    Path(runbook.path(root, name)).write_text(json.dumps(rb, indent=1, ensure_ascii=False), encoding="utf-8")
+    return rb
+
+
+def _compile_if(trajectories, sequences, signatures, schema, minted):
+    groups = {}
+    for trajectory, sequence, signature in zip(trajectories, sequences,
+                                               signatures):
+        groups.setdefault(signature, ([], []))
+        groups[signature][0].append(trajectory)
+        groups[signature][1].append(sequence)
+    (sig_a, (trajs_a, seqs_a)), (sig_b, (trajs_b, seqs_b)) = \
+        sorted(groups.items())
+    steps_a, _pre_a, _eff_a, _inv_a, targets_a = _compile_aligned(
+        trajs_a, seqs_a, schema, minted, True, "then")
+    steps_b, _pre_b, _eff_b, _inv_b, targets_b = _compile_aligned(
+        trajs_b, seqs_b, schema, minted, True, "else")
+    seen_a = {json.dumps(t, sort_keys=True): exists for t, exists in targets_a}
+    guards = []
+    for target, exists_b in targets_b:
+        key = json.dumps(target, sort_keys=True)
+        if key in seen_a and seen_a[key] != exists_b:
+            guards.append((target, seen_a[key]))
+    if len(guards) != 1:
+        raise ProcedureError(
+            f"if-induction refused: {len(guards)} discriminating existence "
+            f"guards between the two run shapes (need exactly one)")
+    target, exists_in_a = guards[0]
+    then_steps, else_steps = (steps_a, steps_b) if exists_in_a \
+        else (steps_b, steps_a)
+    step = {"kind": "if",
+            "predicate": {"predicate": "file_exists", "path": target},
+            "then": then_steps, "else": else_steps}
+    # branch-dependent effects are verified per leaf at run time; the
+    # operator level promises nothing it cannot promise for both branches
+    return [step], [], [], []
+
+
+def _compile_aligned(trajectories, sequences, schema, minted, auto, prefix):
+    if len(trajectories) == 0 or any(len(s) != len(sequences[0]) for s in sequences):
         raise ProcedureError("unaligned action sequence; refusing to drop mutations")
     steps, preconditions, effects, invariants = [], [], [], []
-    touched = []
+    touched, targets = [], []
     for index, aligned in enumerate(zip(*sequences)):
         actions = [item["action"] for item in aligned]
         tools = {a["tool"] for a in actions}
@@ -478,11 +571,10 @@ def compile(root, name, trajectory_ids, triggers):
         args = {key: _infer([a["args"][key] for a in actions], trajectories, schema,
                             key, minted if auto else None)
                 for key in actions[0]["args"]}
-        identity = f"step-{index + 1}"
+        identity = f"{prefix}-{index + 1}"
         step = {"id": identity, "depends_on": [steps[-1]["id"]] if steps else [],
                 "kind": ("deterministic"
-                         if tool in ("write_file", "copy_file",
-                                     "transform_table", "db_transaction")
+                         if tool in DETERMINISTIC_TOOLS
                          else "model"),
                 "action": {"tool": tool, "args": args}, "preconditions": [], "effects": []}
         if step["kind"] == "model":
@@ -534,30 +626,101 @@ def compile(root, name, trajectory_ids, triggers):
             step["effects"].append(effect)
             effects = [e for e in effects if e["path"] != target] + [effect]
             touched.append(target)
+            targets.append((target, True in before))
         steps.append(step)
-    rb = {"name": name, "triggers": triggers, "procedure_version": 1, "steps": steps,
-          "operator": {"inputs": schema, "preconditions": preconditions, "effects": effects,
-                       "invariants": invariants, "cost_usd": 0.0,
-                       "cost_basis": "deterministic local adapters (file, table, sqlite); no provider calls",
-                       "latency_seconds": sum(sum(i["latency_seconds"] for i in seq) for seq in sequences) / len(sequences),
-                       "reversibility": "conditional", "authority": ["workspace-write"],
-                       "reliability": {"source": "induction only; independent evaluation required"}},
-          "provenance": {"compiled": True, "trajectory_ids": trajectory_ids,
-                         "acceptance_basis": ("harness_gate" if auto else "sealed_judge"),
-                         "inferred_parameters": list(minted),
-                         "input_hashes": [t["input_hash"] for t in trajectories],
-                         "family": trajectories[0]["family"], "alignment": "ordered complete mutating sequence"}}
-    problems = runbook.validate(rb)
-    if problems:
-        raise ProcedureError("invalid compiled procedure: " + "; ".join(problems))
-    os.makedirs(os.path.dirname(runbook.path(root, name)), exist_ok=True)
-    Path(runbook.path(root, name)).write_text(json.dumps(rb, indent=1, ensure_ascii=False), encoding="utf-8")
-    return rb
+    return steps, preconditions, effects, invariants, targets
+
+
+def _validate_leaf(step):
+    if step.get("action", {}).get("tool") not in DETERMINISTIC_TOOLS:
+        raise ProcedureError("unknown deterministic adapter")
+    if not step.get("effects"):
+        raise ProcedureError("step must have mechanically observable effects")
+    for item in step.get("preconditions", []) + step["effects"]:
+        operators.validate_predicate(item)
+
+
+def _validate_v2_steps(steps, name, depth=0):
+    """The V2 IR, validated shut. Every construct is closed and bounded;
+    an unknown kind, an unbounded loop, an over-deep nest, a model step
+    smuggled into the trusted lane — all refuse with the reason."""
+    if not isinstance(steps, list) or not steps:
+        raise ProcedureError("v2 body must be a non-empty list of steps")
+    if depth > NEST_MAX:
+        raise ProcedureError(f"v2 nesting deeper than {NEST_MAX}")
+    for step in steps:
+        if not isinstance(step, dict):
+            raise ProcedureError("v2 step must be an object")
+        kind = step.get("kind")
+        keys = set(step) - {"id"}
+        if kind == "deterministic":
+            _validate_leaf(step)
+        elif kind == "if":
+            if keys != {"kind", "predicate", "then", "else"}:
+                raise ProcedureError("if takes predicate, then, else")
+            operators.validate_predicate(step["predicate"])
+            _validate_v2_steps(step["then"], name, depth + 1)
+            _validate_v2_steps(step["else"], name, depth + 1)
+        elif kind == "foreach":
+            if keys != {"kind", "items", "bind", "max", "body"}:
+                raise ProcedureError("foreach takes items, bind, max, body")
+            if not isinstance(step["max"], int) or \
+                    not 1 <= step["max"] <= FOREACH_MAX:
+                raise ProcedureError(
+                    f"foreach max must be 1..{FOREACH_MAX} — every loop is "
+                    f"bounded or it is not a procedure")
+            if not isinstance(step["bind"], str) or not step["bind"]:
+                raise ProcedureError("foreach bind must name its variable")
+            items = step["items"]
+            literal = (isinstance(items, list) and
+                       all(isinstance(x, str) for x in items) and
+                       len(items) <= step["max"])
+            declared = isinstance(items, dict) and set(items) == {"input"}
+            if not (literal or declared):
+                raise ProcedureError(
+                    "foreach items must be a bounded string list or a "
+                    "declared list input")
+            _validate_v2_steps(step["body"], name, depth + 1)
+        elif kind == "check":
+            if keys != {"kind", "predicate"}:
+                raise ProcedureError("check takes exactly a predicate")
+            operators.validate_predicate(step["predicate"])
+        elif kind == "retry":
+            if keys != {"kind", "times", "body"}:
+                raise ProcedureError("retry takes times and body")
+            if not isinstance(step["times"], int) or \
+                    not 1 <= step["times"] <= RETRY_MAX:
+                raise ProcedureError(f"retry times must be 1..{RETRY_MAX}")
+            _validate_v2_steps(step["body"], name, depth + 1)
+        elif kind == "call":
+            if keys != {"kind", "name", "inputs"}:
+                raise ProcedureError("call takes a runbook name and inputs")
+            import runbook
+            if not runbook._slug_ok(step["name"]):
+                raise ProcedureError("call must name a runbook slug")
+            if step["name"] == name:
+                raise ProcedureError("a procedure may not call itself")
+            if not isinstance(step["inputs"], dict):
+                raise ProcedureError("call inputs must be an object")
+        elif kind == "compensate":
+            if keys != {"kind", "body", "on_failure"}:
+                raise ProcedureError("compensate takes body and on_failure")
+            _validate_v2_steps(step["body"], name, depth + 1)
+            _validate_v2_steps(step["on_failure"], name, depth + 1)
+        elif kind == "model":
+            raise ProcedureError(
+                "model steps cannot appear inside a v2 trusted procedure — "
+                "novel cognition happens in the loop, never in the replay")
+        else:
+            raise ProcedureError(f"unknown v2 step kind {kind!r}")
 
 
 def validate(rb):
     try:
         operators.validate(rb.get("operator"))
+        if rb.get("procedure_version") == 2:
+            _validate_v2_steps(rb.get("steps"), rb.get("name"))
+            return []
         seen = set()
         for step in rb.get("steps", []):
             identity = step.get("id")
@@ -582,7 +745,126 @@ def validate(rb):
         return [str(exc)]
 
 
-def execute(root, rb, inputs, workspace=None, authority=None):
+def _bind_item(value, name, item):
+    """Resolve {"item": name} placeholders inside a foreach body."""
+    if isinstance(value, dict):
+        if set(value) == {"item"} and value["item"] == name:
+            return item
+        return {key: _bind_item(v, name, item) for key, v in value.items()}
+    if isinstance(value, list):
+        return [_bind_item(v, name, item) for v in value]
+    return value
+
+
+def _run_leaf(root, workspace, step, authority, receipts):
+    """One deterministic adapter action, verified exactly as v1 verifies it
+    — and for a db mutation, the per-file owner token is demanded HERE, at
+    the moment the bound target is finally known (a loop-bound database
+    cannot be derived statically, so it is checked dynamically instead of
+    being waved through)."""
+    action = _normalize(step["action"])
+    if action["tool"] == "db_transaction":
+        token = "db-write:" + str(action["args"]["database"]).replace("\\", "/")
+        if token not in authority:
+            raise ProcedureError(
+                f"required authority was not granted: missing {token}")
+    if not all(operators.observe(workspace, item)
+               for item in step.get("preconditions", [])):
+        raise ProcedureError("step precondition changed")
+    before = _snapshot(workspace, action)
+    _perform(workspace, action)
+    after = _snapshot(workspace, action)
+    if action["tool"] == "copy_file" and \
+            after["path"]["hash"] != before["source"]["hash"]:
+        raise ProcedureError("copy effect content differs from observed source")
+    if not all(operators.observe(workspace, item)
+               for item in step.get("effects", [])):
+        raise ProcedureError("step effect did not verify")
+    receipts.append({"kind": "deterministic", "id": step.get("id"),
+                     "tool": action["tool"], "ok": True})
+
+
+def _run_v2(root, workspace, steps, authority, stack, receipts):
+    for step in steps:
+        kind = step["kind"]
+        if kind == "deterministic":
+            _run_leaf(root, workspace, step, authority, receipts)
+        elif kind == "if":
+            took = "then" if operators.observe(workspace, step["predicate"]) \
+                else "else"
+            receipts.append({"kind": "if", "took": took})
+            _run_v2(root, workspace, step[took], authority, stack, receipts)
+        elif kind == "check":
+            if not operators.observe(workspace, step["predicate"]):
+                raise ProcedureError(
+                    "CHECK failed: "
+                    + json.dumps(step["predicate"], sort_keys=True)[:160])
+            receipts.append({"kind": "check", "ok": True})
+        elif kind == "foreach":
+            items = step["items"]
+            if not isinstance(items, list) or any(
+                    not isinstance(x, str) for x in items):
+                raise ProcedureError("foreach items did not bind to a "
+                                     "string list")
+            if len(items) > step["max"]:
+                raise ProcedureError(
+                    f"foreach received {len(items)} items over its declared "
+                    f"bound {step['max']} — refused before any side effect")
+            for item in items:
+                _run_v2(root, workspace,
+                        _bind_item(step["body"], step["bind"], item),
+                        authority, stack, receipts)
+            receipts.append({"kind": "foreach", "iterations": len(items)})
+        elif kind == "retry":
+            last = None
+            for attempt in range(1, step["times"] + 1):
+                try:
+                    _run_v2(root, workspace, step["body"], authority, stack,
+                            receipts)
+                    receipts.append({"kind": "retry", "attempts": attempt,
+                                     "ok": True})
+                    break
+                except ProcedureError as exc:
+                    last = exc
+            else:
+                receipts.append({"kind": "retry", "attempts": step["times"],
+                                 "ok": False})
+                raise ProcedureError(
+                    f"retry exhausted after {step['times']} attempts: {last}")
+        elif kind == "call":
+            import runbook
+            name = step["name"]
+            if name in stack:
+                raise ProcedureError(
+                    "call cycle refused: " + " -> ".join(stack + [name]))
+            if len(stack) >= CALL_DEPTH_MAX:
+                raise ProcedureError(f"call depth exceeds {CALL_DEPTH_MAX}")
+            if runbook.status(root, name) != "proven":
+                raise ProcedureError(
+                    f"call target {name!r} is not PROVEN — composition "
+                    f"stands only on proven pieces, fail closed")
+            result = execute(root, runbook.load(root, name),
+                             step.get("inputs") or {}, workspace=workspace,
+                             authority=authority, _stack=stack + [name])
+            if not result["ok"]:
+                raise ProcedureError(
+                    f"called procedure {name!r} failed: {result['why']}")
+            receipts.append({"kind": "call", "name": name, "ok": True})
+        elif kind == "compensate":
+            try:
+                _run_v2(root, workspace, step["body"], authority, stack,
+                        receipts)
+                receipts.append({"kind": "compensate", "compensated": False})
+            except ProcedureError as exc:
+                # the cleanup runs and must verify its own effects — and the
+                # procedure STILL fails: compensation is never success
+                _run_v2(root, workspace, step["on_failure"], authority,
+                        stack, receipts)
+                receipts.append({"kind": "compensate", "compensated": True})
+                raise ProcedureError(f"body failed; compensation ran: {exc}")
+
+
+def execute(root, rb, inputs, workspace=None, authority=None, _stack=None):
     workspace = workspace or root
     authority = set(["workspace-write"] if authority is None else authority)
     done = []
@@ -590,6 +872,20 @@ def execute(root, rb, inputs, workspace=None, authority=None):
         operators.check_inputs(workspace, rb["operator"]["inputs"], inputs)
         bound = operators.bind(rb, inputs)
         op = bound["operator"]
+        if not set(op["authority"]) <= authority:
+            raise ProcedureError("required authority was not granted: missing "
+                                 + ", ".join(sorted(set(op["authority"])
+                                                    - authority)))
+        if not all(operators.observe(workspace, item) for item in op["preconditions"] + op["invariants"]):
+            raise ProcedureError("operator precondition or invariant is not satisfied")
+        if rb.get("procedure_version") == 2:
+            _run_v2(root, workspace, bound["steps"], authority,
+                    list(_stack or [rb.get("name", "?")]), done)
+            if not all(operators.observe(workspace, item) for item in op["effects"]):
+                raise ProcedureError("final effects did not verify")
+            return {"ok": True, "accepted": False, "steps": done, "why": "",
+                    "stopped_at": 0, "subs": []}
+        # ------------------------------------------------ v1 straight line
         # Authority is DERIVED from what the bound steps will actually touch,
         # not only from what the author declared: a db step demands the
         # owner-granted token for exactly that database file, so a proven
@@ -608,8 +904,6 @@ def execute(root, rb, inputs, workspace=None, authority=None):
             if step["kind"] == "model":
                 raise ProcedureError("model-required step; deterministic execution stops")
             _snapshot(workspace, _normalize(step["action"]))
-        if not all(operators.observe(workspace, item) for item in op["preconditions"] + op["invariants"]):
-            raise ProcedureError("operator precondition or invariant is not satisfied")
         for step in bound["steps"]:
             if not all(operators.observe(workspace, item) for item in step["preconditions"]):
                 raise ProcedureError("step precondition changed")

@@ -1,8 +1,15 @@
 # DESIGN — Phase 3: Procedure Compiler V2
 
-**Branch:** `phase3/procedure-compiler-v2` · **Status:** DESIGN (nothing
-below is built until this document's benchmark exists) · **Contract:**
-[VISION_CONTRACT.md](../VISION_CONTRACT.md) binds every decision.
+**Branch:** `phase3/procedure-compiler-v2` · **Status:** BUILT — the
+preregistered benchmark below is `tests/test_procedure_v2.py` in the
+acceptance suite; all nine properties hold, including both IF branches
+replayed on live tasks with zero model calls, and the induction rule
+compiling an IF from two run shapes while refusing an ambiguous split.
+Implementation: `procedure.py` (`_validate_v2_steps`, `_run_v2`/`_run_leaf`
+executor with per-leaf db-token demand, `_compile_aligned`/`_compile_if`
+induction), `operators.py` gains the bounded `strings` input kind. ·
+**Contract:** [VISION_CONTRACT.md](../VISION_CONTRACT.md) binds every
+decision.
 
 ## The problem, stated from evidence
 

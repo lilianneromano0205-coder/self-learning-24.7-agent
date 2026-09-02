@@ -351,7 +351,8 @@ for _name, _code, _description in (
                                  "test_capability_graph.py",
                                  "test_tabular.py", "test_use_cases.py",
                                  "test_operator_runtime.py",
-                                 "test_verifier_factory.py"]
+                                 "test_verifier_factory.py",
+                                 "test_procedure_v2.py"]
                                 if _name == "procedural-learning"
                                 else ["test_advanced_learning.py"]),
                       "invariants": ["offline tests never establish model lift", "judges remain independent"],
