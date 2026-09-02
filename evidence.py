@@ -367,9 +367,30 @@ def run_suite(capture_path=None):
     return out, failed
 
 
+FAILED_LINE_RE = re.compile(r"^FAILED: (test_\w+\.py)\b")
+RUNALL_TAIL_RE = re.compile(r"^\d+ executed: \d+ passed, \d+ skipped, "
+                            r"(\d+) failed")
+
+
 def parse(output):
-    """-> {test file: {"sections": [...], "passed": bool}}"""
+    """-> {test file: {"sections": [...], "passed": bool}}
+
+    A `--from` log produced by run_all.py under ONE pipe is exactly the
+    shape run_suite()'s docstring warns about: the parent's `=== test ===`
+    headers and each child's stdout/stderr flush independently, so a
+    passing test's own OK line can land under the NEXT header, leaving its
+    section empty. Parsed naively, that reported a green test as FAILING —
+    the inverse of the UNITTEST_OK_RE bug, and just as corrosive: a report
+    that can cry wolf teaches its reader to ignore wolves.
+
+    run_all's tail is authoritative — it counts EXIT CODES and names every
+    failed file in a `FAILED: <name>` line. So when that tail is present,
+    a test with no recognized pass marker and no skip is failed ONLY if
+    the tail names it; otherwise its verdict is the exit code's (passed)
+    and only its observations are lost to the interleaving, which the
+    report can afford — verdicts cannot."""
     per, current = {}, None
+    named_failed, tail_seen = set(), False
     for line in output.splitlines():
         line = line.strip()
         m = TEST_RE.match(line)
@@ -377,6 +398,13 @@ def parse(output):
             current = m.group(1)
             per.setdefault(current, {"sections": [], "passed": False,
                                      "skipped": None})
+            continue
+        m = FAILED_LINE_RE.match(line)
+        if m:
+            named_failed.add(m.group(1))
+            continue
+        if RUNALL_TAIL_RE.match(line):
+            tail_seen = True
             continue
         if current is None:
             continue
@@ -390,6 +418,19 @@ def parse(output):
         m = SKIP_RE.match(line)
         if m:
             per[current]["skipped"] = m.group(2).strip() or "no reason given"
+    if tail_seen:
+        for name, rec in per.items():
+            if not rec["passed"] and not rec["skipped"] \
+                    and name not in named_failed:
+                rec["passed"] = True
+        # the authority cuts BOTH ways: a test the tail names failed is
+        # failed, however green a stray PASS line inside its section looks
+        # (a test can print PASS and then die in teardown — the exit code
+        # saw it, the prose did not)
+        for name in named_failed:
+            if name in per:
+                per[name]["passed"] = False
+                per[name]["skipped"] = None
     return per
 
 

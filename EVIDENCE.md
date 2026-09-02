@@ -1,6 +1,6 @@
 # Evidence — why we believe this works
 
-Generated 2026-09-01T20:56:12 from an actual suite run: **139/142 tests passed**, **675 observations** recorded.
+Generated 2026-09-01T20:58:57 from an actual suite run: **140/142 tests passed**, **675 observations** recorded.
 
 Each test below prints its own sentence describing what it proved; those sentences are quoted verbatim, not summarised. Every system also carries a **blind spot** — what these tests do not cover.
 
@@ -15,7 +15,7 @@ Each test below prints its own sentence describing what it proved; those sentenc
 | 3. Work systems | **proven** | 23/23 | 115 |
 | 4. Memory institution | **proven** | 22/22 | 76 |
 | 5. Improvement & governance | **proven** | 15/15 | 55 |
-| 6. Control plane & interop | **FAILING** | 20/21 | 120 |
+| 6. Control plane & interop | **proven** | 21/21 | 120 |
 | 7. The six authorities | **proven** | 3/3 | 36 |
 | 8. Proof, missions and long-horizon work | **proven** | 5/5 | 27 |
 | 9. Computers, capability and organization | **proven except skipped** | 7/8 | 41 |
@@ -465,8 +465,7 @@ Each test below prints its own sentence describing what it proved; those sentenc
 
 *panel, live events, cards, chief, doctor, preflight, backup, providers, MCP, A2A federation, traces*
 
-**Verdict: FAILING** — 20 of 21 declared tests ran and passed, producing 120 observations.
-**FAILING:** test_ui_auth_hardening.py
+**Verdict: proven** — 21 of 21 declared tests ran and passed, producing 120 observations.
 
 <details><summary>What the tests observed (120)</summary>
 
