@@ -120,12 +120,15 @@ TOOL_DEFS = [
                 "workspace. Give database (file path) and query (a single "
                 "SELECT/WITH statement; deterministic functions only — no "
                 "clock, no random). Returns rows as JSON: values are "
-                "int | string | null; approximate REAL values refuse."),
+                "int | string | null; approximate REAL values refuse. "
+                "Optional attach (JSON object alias → {path, mode}) joins "
+                "sibling databases read-only, queried as alias.table."),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "database": {"type": "string"},
                     "query": {"type": "string"},
+                    "attach": {"type": "string"},
                 },
                 "required": ["database", "query"],
             },
@@ -146,13 +149,25 @@ TOOL_DEFS = [
                 "harness executes everything, then checks every assertion "
                 "INSIDE the transaction: all true → commit; any false → "
                 "rollback and the database is untouched. Declare at least "
-                "one assertion — an unasserted mutation refuses."),
+                "one assertion — an unasserted mutation refuses. Optional "
+                "contract: preconditions (JSON list of {query, equals} "
+                "observed BEFORE any statement — one false and nothing is "
+                "mutated), invariants (JSON list of {query} that must return "
+                "the same rows before and after, or {query, equals} pinned "
+                "both times), and attach (JSON object alias → {path, mode "
+                '"read"|"write"}) joining sibling databases to the SAME '
+                "transaction so they commit or roll back together; refer to "
+                "them as alias.table. Write-attached files must also be in "
+                "db_write; read-attached ones are held read-only."),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "database": {"type": "string"},
                     "statements": {"type": "string"},
                     "assertions": {"type": "string"},
+                    "preconditions": {"type": "string"},
+                    "invariants": {"type": "string"},
+                    "attach": {"type": "string"},
                 },
                 "required": ["database", "statements", "assertions"],
             },
@@ -1973,7 +1988,11 @@ class Agent:
                         self.root, task["id"], "db_query",
                         {"database": args["database"],
                          "query": str(args.get("query") or "")})
-                rows = dbstate.query(dbfile, str(args.get("query") or ""))
+                import operators
+                rows = dbstate.query(
+                    dbfile, str(args.get("query") or ""),
+                    attach=operators.resolved_attach(
+                        self.root, str(args.get("attach") or ""), "read"))
                 if token:
                     procedure.finish_action(self.root, task["id"], token, True)
                 return truncate(json.dumps(rows, ensure_ascii=False))
@@ -1993,36 +2012,65 @@ class Agent:
             allowed = {str(p).replace("\\", "/")
                        for p in (self.cfg.get("agent", {}).get("db_write")
                                  or [])}
-            if rel not in allowed:
-                return (f"ERROR: database {rel!r} is not in the owner's "
-                        f"db_write allowlist (settings.toml [agent] "
-                        f"db_write). Ask the owner to add it; nothing "
-                        f"self-grants.")
-            try:
-                dbfile = self._safe_path(rel, write=True)
-            except ValueError as e:
-                return f"ERROR: {e}"
             token = None
             import dbstate
+            import fileauth
+            import operators
             import procedure
             try:
                 statements = dbstate.canonical_statements(
                     str(args.get("statements") or ""))
                 assertions = dbstate.canonical_assertions(
                     str(args.get("assertions") or ""))
+                # the transactional contract (docs/DESIGN-P7): optional,
+                # canonical, and absent when empty so the capture stays
+                # identical to a plain transaction's
+                contract = {}
+                for key, canon in (("preconditions", dbstate.canonical_conditions),
+                                   ("invariants", dbstate.canonical_invariants),
+                                   ("attach", dbstate.canonical_attach)):
+                    value = canon(str(args.get(key) or ""))
+                    if value not in ("[]", "{}"):
+                        contract[key] = value
             except ValueError as e:
+                return f"ERROR: {e}"
+            # every database this transaction may WRITE — the main one and
+            # each write-attached sibling — must be on the owner's list
+            writes = [rel] + [
+                entry["path"] for entry in json.loads(
+                    contract.get("attach") or "{}").values()
+                if entry["mode"] == "write"]
+            for path in writes:
+                if path not in allowed:
+                    return (f"ERROR: database {path!r} is not in the owner's "
+                            f"db_write allowlist (settings.toml [agent] "
+                            f"db_write). Ask the owner to add it; nothing "
+                            f"self-grants.")
+            try:
+                dbfile = self._safe_path(rel, write=True)
+                attached = operators.resolved_attach(
+                    self.root, contract.get("attach"), "write")
+            except (ValueError, fileauth.Denied) as e:
                 return f"ERROR: {e}"
             try:
                 if procedure.active_trajectory(self.root, task["id"]):
                     token = procedure.begin_action(
                         self.root, task["id"], "db_transaction",
                         {"database": rel, "statements": statements,
-                         "assertions": assertions})
-                dbstate.transact(dbfile, statements, assertions)
+                         "assertions": assertions, **contract})
+                dbstate.transact(dbfile, statements, assertions,
+                                 preconditions=contract.get("preconditions"),
+                                 invariants=contract.get("invariants"),
+                                 attach=attached)
                 if token:
                     procedure.finish_action(self.root, task["id"], token, True)
-                return (f"ok, transaction committed on {rel}; every declared "
-                        f"assertion observed true")
+                return (f"ok, transaction committed on {rel}"
+                        + (f" with {', '.join(sorted(attached))} attached"
+                           if attached else "")
+                        + "; every declared assertion observed true"
+                        + ("; preconditions and invariants held"
+                           if contract.get("preconditions")
+                           or contract.get("invariants") else ""))
             except (OSError, ValueError) as e:
                 if token:
                     try:
@@ -3506,11 +3554,23 @@ class Agent:
                     "runbook": name, "why": str(e)[:160]}))
                 continue
             if not result.get("ok"):
-                try:
-                    runbook.record(self.root, name, False,
-                                   why=str(result.get("why", ""))[:200])
-                except Exception:
-                    pass
+                why = str(result.get("why", ""))[:200]
+                # A guard that says "not now" is not evidence against the
+                # procedure: a step precondition (the state the work was
+                # learned on — docs/DESIGN-P7) that no longer holds refuses
+                # the replay before any mutation and is logged as such,
+                # without the failure that would eventually quarantine a
+                # procedure for correctly declining.
+                inapplicable = "precondition" in why
+                self.log.info(json.dumps({
+                    "event": "procedure_route_refused", "task": task["id"],
+                    "runbook": name, "why": why,
+                    "applicable": not inapplicable}))
+                if not inapplicable:
+                    try:
+                        runbook.record(self.root, name, False, why=why)
+                    except Exception:
+                        pass
                 continue
             passed, evidence = self.check_done(task)
             try:
