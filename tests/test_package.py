@@ -369,6 +369,65 @@ def check_a_skip_is_not_a_failure(work):
           f"reads UNPROVEN rather than proven")
 
 
+def check_interleaved_logs_cannot_cry_wolf(_work):
+    """A green test whose OK line drifted under the NEXT header is not red.
+
+    A `--from` log written by run_all.py under one pipe interleaves: the
+    parent's `=== test ===` headers and each child's output flush
+    independently, so a passing test's own PASS/OK can land in the next
+    test's section, leaving its own section empty. Parsed naively that
+    published **FAILING** off a completely green suite — the exact
+    cry-wolf failure check_a_skip_is_not_a_failure documents, arriving
+    through a different door. Measured live: test_ui_auth_hardening
+    passed (exit 0) and EVIDENCE.md called it FAILING.
+
+    run_all's tail counts EXIT CODES and names every failed file. That
+    tail is authoritative: with it present, an unmarked section may lose
+    its observations to the interleaving, never its verdict — and a test
+    the tail DOES name failed stays failed, however green its section
+    looks."""
+    sysname = "1. Harness & loop"
+    tests = evidence.SYSTEMS[sysname]["tests"]
+    victim, neighbor = tests[0], tests[1]
+    lines = []
+    for t in tests:
+        lines.append(f"=== {t} ===")
+        if t == victim:
+            continue                      # its output flushed late…
+        if t == neighbor:                 # …and landed HERE instead
+            lines.append(f"[obs] {victim} observed something, late")
+            lines.append(f"PASS {victim[:-3]}")
+        lines.append(f"[obs] {t} observed something")
+        lines.append(f"PASS {t[:-3]}")
+    tail = (f"{len(tests)} executed: {len(tests)} passed, 0 skipped, "
+            f"0 failed")
+    rep = evidence.build("\n".join(lines + [tail]))
+    sysrep = next(x for x in rep["systems"] if x["system"] == sysname)
+    assert sysrep["verdict"] != "FAILING" and victim not in \
+        sysrep["tests_failed"], (
+        "a green test with interleaved output was published as FAILING — "
+        "the report cried wolf off exit-code-green evidence", sysrep)
+
+    # …and the tail cuts the other way too: a named failure STAYS failed
+    # even when a stray PASS line sits inside its section
+    bad = []
+    for t in tests:
+        bad.append(f"=== {t} ===")
+        bad.append(f"PASS {t[:-3]}")
+    bad.append(f"FAILED: {victim}")
+    bad.append(f"{len(tests)} executed: {len(tests) - 1} passed, 0 skipped, "
+               f"1 failed")
+    rep2 = evidence.build("\n".join(bad))
+    sysrep2 = next(x for x in rep2["systems"] if x["system"] == sysname)
+    assert victim in sysrep2["tests_failed"] or \
+        sysrep2["verdict"] == "FAILING", (
+        "a failure named by run_all's authoritative tail was laundered "
+        "into a pass", sysrep2)
+    print("[interleave] a green test whose OK drifted under the next "
+          "header stays green (verdict from exit codes, observations from "
+          "what could be attributed) — and a tail-named failure stays red")
+
+
 def check_evidence_refuses_to_invent(work):
     """`evidence.py` builds its report from an actual suite run. The property
     worth holding is that it cannot report a verdict it did not observe."""

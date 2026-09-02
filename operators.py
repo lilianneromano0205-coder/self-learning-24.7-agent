@@ -31,7 +31,13 @@ def check_inputs(root, schema, inputs):
         good = ((kind in ("string", "path") and isinstance(value, str)) or
                 (kind == "integer" and type(value) is int) or
                 (kind == "number" and type(value) in (int, float) and math.isfinite(value)) or
-                (kind == "boolean" and type(value) is bool))
+                (kind == "boolean" and type(value) is bool) or
+                # a bounded list of strings — the only collection kind, for
+                # foreach bodies; the bound keeps every loop total
+                (kind == "strings" and isinstance(value, list)
+                 and len(value) <= 32
+                 and all(isinstance(x, str) and len(x) <= 4096
+                         for x in value)))
         if not good:
             raise OperatorError(f"input {key} must be {kind}")
         if kind == "path":
@@ -121,7 +127,8 @@ def validate(op):
     if not isinstance(op, dict):
         raise OperatorError("operator must be an object")
     if not isinstance(op.get("inputs"), dict) or any(
-            value not in ("path", "string", "integer", "number", "boolean")
+            value not in ("path", "string", "integer", "number", "boolean",
+                          "strings")
             for value in op["inputs"].values()):
         raise OperatorError("operator needs typed inputs")
     for key in ("preconditions", "effects", "invariants"):
