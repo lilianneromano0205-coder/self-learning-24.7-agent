@@ -17,6 +17,15 @@ deterministic state world must show, before it becomes permanent, that
                        suite -> PROVEN -> zero-model replay under the task's
                        own INDEPENDENT git gate
   8. REGISTRATION      the tool pair, the predicate and the audit entry exist
+  9. CLEAN INDEX       a commit from a dirty index refuses with the staged
+                       change untouched; from a clean index the commit holds
+                       EXACTLY the declared paths — the host's git is the
+                       witness, not the adapter (docs/DESIGN-P6.1, finding 1)
+
+Claim envelope (docs/DESIGN-P6.1): determinism and restore are proved from
+a CLEAN INDEX in an adapter-initialized repository, without a concurrent
+actor and without a process kill mid-verb; `ref_state_digest` covers refs
+and the symbolic HEAD only. Nothing outside that envelope is claimed.
 
 Mock providers stand in for the model; the machinery under test is the
 platform's. The zero-model claim is enforced the hard way: the routed
@@ -240,7 +249,7 @@ def check_determinism():
     b = os.path.join(_arena("det-b"), "r")
     ha, hb = _sequence(a), _sequence(b)
     assert ha and ha == hb, (ha, hb)
-    assert gitstate.state_digest(a) == gitstate.state_digest(b)
+    assert gitstate.ref_state_digest(a) == gitstate.ref_state_digest(b)
     assert not os.path.exists(os.path.join(a, ".git", "hooks"))
     with open(os.path.join(a, ".git", "config"), "rb") as f:
         assert f.read() == gitstate.CANONICAL_CONFIG.encode("utf-8")
@@ -399,7 +408,7 @@ def check_tamper_fails_closed():
     assert not os.path.exists(os.path.join(repo, "SENTINEL")), \
         "the planted hook must never run"
     assert _real_git(repo, "rev-parse", "HEAD").stdout.strip() == head
-    assert gitstate.state_digest(repo) == "tampered"
+    assert gitstate.ref_state_digest(repo) == "tampered"
     assert operators.observe(root, {"predicate": "repo_satisfies", "path": rel,
                                     "assertions": asserts(
                                         {"kind": "head_is", "name": "main"})}) \
@@ -423,6 +432,49 @@ def check_tamper_fails_closed():
     print("[tamper] a planted pre-commit hook and an edited .git/config each "
           "made every operation refuse — fail closed — and the hook never "
           "ran; the canonical control files restored, work resumed")
+
+
+# --------------------------------------------------------- 9. clean index
+
+def check_dirty_index_refuses():
+    """Finding 1 of docs/DESIGN-P6.1: a plain `git commit` commits everything
+    staged, so the semantic commit refuses to start from a dirty index — and
+    the host's git, not the adapter, witnesses that a commit from a clean
+    index holds exactly the declared paths."""
+    repo = os.path.join(_arena("dirty"), "r")
+    head = _sequence(repo)
+    _write(repo, "other.txt", b"staged earlier\n")
+    assert _real_git(repo, "add", "other.txt").returncode == 0
+    _write(repo, "notes.md", b"beta\n")
+    refuses("clean index", gitstate.apply_op, repo,
+            op(verb="commit", paths=["notes.md"], message="beta"),
+            asserts({"kind": "rev_count", "ref": "HEAD", "equals": 2}))
+    assert _real_git(repo, "rev-parse", "HEAD").stdout.strip() == head
+    assert _real_git(repo, "diff", "--cached", "--name-only").stdout.split() \
+        == ["other.txt"], "the pre-existing staged change must be untouched"
+    assert gitstate.index_clean(repo) is False
+    # from a clean index, with another file modified but unlisted, the
+    # commit holds EXACTLY the declared path — read by the host's git
+    assert _real_git(repo, "reset", "-q").returncode == 0
+    assert gitstate.index_clean(repo) is True
+    landed = gitstate.apply_op(
+        repo, op(verb="commit", paths=["notes.md"], message="beta"),
+        asserts({"kind": "rev_count", "ref": "HEAD", "equals": 2},
+                {"kind": "file_at_ref", "ref": "HEAD", "path": "notes.md",
+                 "sha256": sha(b"beta\n")}))
+    assert landed["head"] != head
+    tree = _real_git(repo, "show", "--name-only", "--format=", "HEAD").stdout.split()
+    assert tree == ["notes.md"], tree
+    assert _real_git(repo, "status", "--porcelain").stdout.strip() == "?? other.txt", \
+        "the unlisted file stays untracked and unchanged"
+    assert landed["refs"] == gitstate.ref_state_digest(repo)
+    _write(repo, "notes.md", b"gamma\n")
+    assert gitstate.ref_state_digest(repo) == landed["refs"], \
+        "a worktree edit is not in the REF digest — by name"
+    print("[clean-index] a commit from a dirty index refused with the staged "
+          "change untouched; from a clean index the commit held exactly the "
+          "declared path — read by the host's git, not the adapter — and the "
+          "ref digest ignores the worktree, as its name says")
 
 
 # ---------------------------------------------------------- 6. authority
@@ -616,6 +668,7 @@ def main():
     check_failed_effect_restores()
     check_merge_conflict_is_refused_and_restored()
     check_tamper_fails_closed()
+    check_dirty_index_refuses()
     check_authority_is_owner_granted(home)
     check_end_to_end_learning(home)
     print("PASS test_git_operators")

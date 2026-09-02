@@ -44,7 +44,13 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-SECTION_RE = re.compile(r"^\[([a-z0-9_-]+)\]\s+(.*)$", re.I)
+# A test's observation label may carry spaces and a few marks ("[phase 1]",
+# "[csv->sql]", "[re-exam failure]"); it never carries a colon, which is
+# what keeps run_all's "[skipped: ...]" note and a tool's "[UNSAFE developer
+# host: ...]" out of the count. The old grammar ([a-z0-9_-] only) silently
+# dropped every spaced label, so ~20 observations the suite printed never
+# reached this document (docs/DESIGN-P6.1, finding 10).
+SECTION_RE = re.compile(r"^\[([a-z0-9][a-z0-9_ .><\-/]{0,39})\]\s+(.*)$", re.I)
 TEST_RE = re.compile(r"^=== (test_\w+\.py) ===$")
 PASS_RE = re.compile(r"^PASS (\S+)")
 # A unittest file ends with a bare "OK" (or "OK (skipped=1)"), never "PASS
@@ -191,7 +197,8 @@ SYSTEMS = {
         "what": "one mandatory gateway per kind of power — execution, file, "
                 "credential, model gateway, effect, control plane — plus the "
                 "invariant tests that enumerate every caller of each",
-        "tests": ["test_invariants.py", "test_controlplane.py",
+        "tests": ["test_invariants.py", "test_promotion_leakage.py",
+                  "test_controlplane.py",
                   "test_execution_containment.py"],
         "blind": "these tests enumerate every path in THIS tree. They cannot "
                  "see a path added by a plugin, an MCP server or a future "

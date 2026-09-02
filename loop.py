@@ -3440,17 +3440,34 @@ class Agent:
         # lexical floor keeps sole authority until SIG-001's measured
         # comparison says otherwise. A failure here must never cost a task
         # its route, so the whole lens is one guarded side effect.
+        lexical = []
         try:
             import signatures
             lexical = sorted({h["name"] for h in hits
                               if h.get("status") == "proven"})
-            structural = signatures.shadow_match(self.root, task)
+            failures = []
+            structural = signatures.shadow_match(self.root, task, failures)
             self.log.info(json.dumps({
                 "event": "signature_shadow", "task": task["id"],
                 "lexical": lexical, "structural": structural,
                 "agreement": signatures.agreement(lexical, structural)}))
-        except Exception:
-            pass
+            for failure in failures:
+                self.log.info(json.dumps({
+                    "event": "signature_shadow_failure", "task": task["id"],
+                    "runbook": failure["runbook"], "error": failure["error"],
+                    "lexical": lexical}))
+        except Exception as e:
+            # The live route never pays for the experiment — but a dropped
+            # observation biases SIG-001 toward the tasks the shadow
+            # handled (docs/DESIGN-P6.1, finding 8), so the miss is logged
+            # with its error class instead of vanishing.
+            try:
+                self.log.info(json.dumps({
+                    "event": "signature_shadow_failure", "task": task["id"],
+                    "runbook": None, "error": type(e).__name__,
+                    "lexical": lexical}))
+            except Exception:
+                pass
         for hit in hits:
             name = hit["name"]
             if hit.get("status") != "proven":

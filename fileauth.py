@@ -34,9 +34,11 @@ crash mid-write cannot leave a half-file where a whole one was.
 """
 
 import errno
+import hashlib
 import json
 import os
 import time
+import uuid
 
 # ------------------------------------------------------------------- zones
 
@@ -161,6 +163,13 @@ CONTROL_NAMES_IN = {
     # in the workspace ledger is now re-derived rather than trusted — see
     # sources.tier_of.
     "courses": {"source-overrides.json"},
+    # proof/observations.jsonl is what proof.evaluate derives every proof
+    # LEVEL from — hash-bound evidence that a subsystem earned its badge.
+    # proof/ is the agent's workspace for proof packs, and the ledger inside
+    # it was writable too: a worker could append observations and lift a
+    # capability's badge without any test having run. Found by the
+    # promotion-leakage suite (docs/DESIGN-P6.1, finding 11).
+    "proof": {"observations.jsonl"},
 }
 RUNTIME_DIRS = {"logs", "contexts", "checkpoints", "events", "archive"}
 # the agent's own workspace: everything it is FOR
@@ -281,7 +290,10 @@ def write_text(root, rel, text, actor="agent", encoding="utf-8"):
     truncated one, and two writers cannot share a scratch name."""
     p = resolve(root, rel, "write", actor)
     os.makedirs(os.path.dirname(p) or root, exist_ok=True)
-    tmp = f"{p}.{os.getpid()}.{int(time.time() * 1000) % 100000}.tmp"
+    # a UUID, not PID + milliseconds: two writers in one process aiming at
+    # one target inside the same millisecond must never share a scratch
+    # name (docs/DESIGN-P6.1, finding 6)
+    tmp = f"{p}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
     with open(tmp, "w", encoding=encoding) as f:
         f.write(text)
     for attempt in range(8):
@@ -298,13 +310,29 @@ def write_text(root, rel, text, actor="agent", encoding="utf-8"):
     return p
 
 
+def read_bytes(root, rel, actor="agent"):
+    p = resolve(root, rel, "read", actor)
+    with open(p, "rb") as f:
+        return f.read()
+
+
+def sha256_bytes(root, rel, actor="agent"):
+    """The digest of a file AS BYTES — the only honest evidence for a
+    binary artifact. A text decode with replacement lets different files
+    share one hash (docs/DESIGN-P6.1, finding 4)."""
+    return hashlib.sha256(read_bytes(root, rel, actor)).hexdigest()
+
+
 def write_bytes(root, rel, data, actor="agent"):
     """The binary twin of write_text — same containment, same atomic
     temp-beside-target-then-replace — for artifacts that are not text (a
     workbook). One mutation semantic, whatever the payload."""
     p = resolve(root, rel, "write", actor)
     os.makedirs(os.path.dirname(p) or root, exist_ok=True)
-    tmp = f"{p}.{os.getpid()}.{int(time.time() * 1000) % 100000}.tmp"
+    # a UUID, not PID + milliseconds: two writers in one process aiming at
+    # one target inside the same millisecond must never share a scratch
+    # name (docs/DESIGN-P6.1, finding 6)
+    tmp = f"{p}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
     with open(tmp, "wb") as f:
         f.write(data)
     for attempt in range(8):

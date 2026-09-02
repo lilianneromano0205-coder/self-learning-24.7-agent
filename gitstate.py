@@ -357,11 +357,14 @@ def _tracked_dirty(repo):
                 repo=repo).stdout.strip()
 
 
-def state_digest(repo):
-    """One digest over every ref and the symbolic HEAD — the before/after
-    evidence a trajectory records for a repository, the way it records a
-    file's hash. None for a non-repository; 'tampered' when the control
-    files fail verification, so the record says so instead of guessing."""
+def ref_state_digest(repo):
+    """One digest over every ref and the symbolic HEAD — REFS ONLY, and
+    named so: the worktree, the index and untracked files are not in it
+    (docs/DESIGN-P6.1, finding 3). It is the before/after evidence a
+    trajectory records for a repository's history, beside an explicit
+    index_clean observation. None for a non-repository; 'tampered' when
+    the control files fail verification, so the record says so instead of
+    guessing."""
     if not is_repository(repo):
         return None
     try:
@@ -495,6 +498,29 @@ def _init(repo):
     return undo
 
 
+def _index_clean(repo):
+    """True when the index holds nothing beyond HEAD — or nothing at all on
+    an unborn branch. Anything else is treated as dirty, including an
+    error from git: the pre-state a semantic mutation requires is proved,
+    never assumed."""
+    if _rev(repo, "HEAD"):
+        return _git(["diff", "--cached", "--quiet"], repo=repo,
+                    check=False).returncode == 0
+    return not _git(["ls-files", "--stage"], repo=repo).stdout.strip()
+
+
+def index_clean(repo):
+    """The index observation trajectory evidence records beside the ref
+    digest; None for a non-repository or a tampered one."""
+    if not is_repository(repo):
+        return None
+    try:
+        _verify(repo)
+        return _index_clean(repo)
+    except ValueError:
+        return None
+
+
 def _commit(repo, op):
     for rel in op["paths"]:
         full = os.path.join(repo, *rel.split("/"))
@@ -503,6 +529,15 @@ def _commit(repo, op):
     branch = _head_branch(repo)
     if branch is None:
         _fail("HEAD is detached; the adapter only commits on a branch")
+    # THE CLEAN-INDEX PRECONDITION (docs/DESIGN-P6.1, finding 1): `git
+    # commit` commits everything staged, not only what this verb stages,
+    # so a file someone staged earlier would ride along and the commit
+    # would no longer hold exactly the declared paths. The adapter does
+    # not reconstruct arbitrary index state; it refuses to start from one.
+    if not _index_clean(repo):
+        _fail("commit refuses: the index already holds staged changes — a "
+              "semantic commit begins from a clean index, so the commit "
+              "holds exactly the declared paths and nothing staged before")
     before = _rev(repo, "HEAD")
 
     def undo():
@@ -596,4 +631,4 @@ def apply_op(repo, op_text, assertions_text):
             _fail(f"effect did not hold — repository restored: "
                   f"{_canonical(assertion)[:120]} observed {got!r}")
     return {"verb": op["verb"], "head": _rev(repo, "HEAD"),
-            "branch": _head_branch(repo), "state": state_digest(repo)}
+            "branch": _head_branch(repo), "refs": ref_state_digest(repo)}

@@ -156,8 +156,9 @@ REGISTRY = {
         "code": ["controlplane.py", "fileauth.py", "execution.py",
                  "sandbox.py", "policy.py", "loop.py"],
         "tests": ["test_controlplane.py", "test_invariants.py",
-                  "test_hardening.py", "test_guardrails.py"],
-        "stress_tests": ["test_controlplane.py"],
+                  "test_hardening.py", "test_guardrails.py",
+                  "test_promotion_leakage.py"],
+        "stress_tests": ["test_controlplane.py", "test_promotion_leakage.py"],
         "live": "a docker container refuses a write to /work/settings.toml",
     },
     "credential-authority": {

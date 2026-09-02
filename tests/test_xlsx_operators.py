@@ -29,6 +29,7 @@ import json
 import os
 import sys
 import tempfile
+import warnings
 import zipfile
 
 from common import AGENT_DIR, PY, make_sandbox, run_drain
@@ -253,6 +254,27 @@ def check_refusals(home):
     refuses("not a workbook", xlsxstate.read_table, plain, "Data")
     refuses("not acceptable", xlsxstate.canonical_sheet, "bad/name")
     refuses("control character", xlsxstate.export_bytes, "a\n\x01\n", "S")
+    # ambiguity is refused, not interpreted (docs/DESIGN-P6.1, finding 5)
+    refuses("duplicate cell", xlsxstate.read_table, mk("dupcell.xlsx", SHEET.replace(
+        '<c r="B2"><v>3</v></c>', '<c r="B2"><v>3</v></c><c r="B2"><v>4</v></c>')),
+        "Data")
+    refuses("duplicate row", xlsxstate.read_table, mk("duprow.xlsx", SHEET.replace(
+        '<row r="3">', '<row r="2">')), "Data")
+    refuses("numbered from 1", xlsxstate.read_table, mk("row0.xlsx", SHEET.replace(
+        '<row r="1">', '<row r="0">')), "Data")
+    refuses("stored as 0 or 1", xlsxstate.read_table, mk("bool.xlsx", SHEET.replace(
+        '<c r="B3" t="b"><v>1</v></c>', '<c r="B3" t="b"><v>2</v></c>')), "Data")
+    dup = os.path.join(arena, "dupmember.xlsx")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with zipfile.ZipFile(dup, "w") as zf:
+            zf.writestr("[Content_Types].xml", "<Types/>")
+            zf.writestr("xl/workbook.xml", WORKBOOK)
+            zf.writestr("xl/workbook.xml", WORKBOOK.replace("Data", "Other"))
+            zf.writestr("xl/_rels/workbook.xml.rels", RELS)
+            zf.writestr("xl/sharedStrings.xml", SHARED)
+            zf.writestr("xl/worksheets/sheet7.xml", SHEET)
+    refuses("duplicate member", xlsxstate.read_table, dup, "Data")
     # the worker tool: a schema violation refuses before the CSV lands
     desk = fleet.create(home, "Refusal Desk", "checks workbook refusals")
     _settings(desk, ["m"])
@@ -273,8 +295,33 @@ def check_refusals(home):
     assert out.startswith("ERROR") and "not found" in out, out
     print("[refusals] formula, merged and error cells, a DOCTYPE, an escaping "
           "member, a missing sheet, an oversized grid, a non-workbook, a bad "
-          "sheet name, a control character and a schema violation each "
-          "refused by name before any side effect")
+          "sheet name, a control character, a schema violation, duplicate "
+          "cells, duplicate rows, row zero, a malformed boolean and a "
+          "duplicate package member each refused by name before any side "
+          "effect")
+
+
+def check_evidence_hashes_workbook_bytes():
+    """Finding 4 of docs/DESIGN-P6.1: a lossy text decode lets two different
+    files share one hash; workbook evidence must be the bytes."""
+    import fileauth
+    root = _arena("bytes")
+    os.makedirs(os.path.join(root, "out"))
+    for name, data in (("a.xlsx", b"\xff"), ("b.xlsx", b"\xfe")):
+        with open(os.path.join(root, "out", name), "wb") as f:
+            f.write(data)
+    assert fileauth.read_text(root, "out/a.xlsx") == \
+        fileauth.read_text(root, "out/b.xlsx"), "the decode reads them as one"
+
+    def evidence(name):
+        return procedure._snapshot(root, {
+            "tool": "xlsx_export",
+            "args": {"source": "x.csv", "path": f"out/{name}", "sheet": "S"}})
+    assert evidence("a.xlsx")["path"]["hash"] != evidence("b.xlsx")["path"]["hash"]
+    assert evidence("a.xlsx")["path"]["hash"] == fileauth.sha256_bytes(root, "out/a.xlsx")
+    print("[byte-evidence] two workbooks that decode to the same text but "
+          "differ in bytes carry different trajectory evidence — hashed as "
+          "the bytes they are")
 
 
 # ------------------------------------------------------ 5. typed import
@@ -484,6 +531,7 @@ def main():
     check_exact_round_trip()
     check_foreign_workbook()
     check_refusals(home)
+    check_evidence_hashes_workbook_bytes()
     check_typed_import_feeds_the_table_world(home)
     check_end_to_end_learning(home)
     print("PASS test_xlsx_operators")
