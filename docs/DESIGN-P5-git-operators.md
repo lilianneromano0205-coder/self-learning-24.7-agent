@@ -1,8 +1,14 @@
 # DESIGN — Phase 5: Git semantic operators
 
-**Branch:** `phase5/git-operators` · **Status:** DESIGN (this document is
-committed before any code; it flips to BUILT only when the preregistered
-benchmark below is green in the acceptance suite) · **Contract:**
+**Branch:** `phase5/git-operators` · **Status:** BUILT — the preregistered
+benchmark below is `tests/test_git_operators.py` in the acceptance suite;
+all eight properties hold (first run: identical commit `381e342a…` in two
+arenas; `procedure_compiled` from two gated trajectories; PROVEN on a
+sealed fresh suite with an empty-note edge case; `procedure_route` with
+`model_calls: 0` under an independent `git` gate). Implementation:
+`gitstate.py`, `repo_satisfies` in `operators.py`, the `git_op` leaf
+through `procedure.py`, the `git_op`/`git_query` tool pair in `loop.py`,
+`[agent] git_write` in `settings.toml`. · **Contract:**
 [VISION_CONTRACT.md](../VISION_CONTRACT.md) binds every decision. ·
 **Audit order:** the 2026-09-02 checkpoint audit names the operator-universe
 expansion order after Phase 4 — *"1. Git semantic operators — because

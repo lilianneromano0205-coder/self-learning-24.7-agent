@@ -161,6 +161,65 @@ TOOL_DEFS = [
     {
         "type": "function",
         "function": {
+            "name": "git_query",
+            "description": (
+                "Read-only observation of a git repository in the workspace "
+                "(one this platform's git_op initialized). Give repo "
+                "(directory path) and query — a JSON object: "
+                '{"kind":"status"} (branch, head, clean_tracked, entries), '
+                '{"kind":"log","max":20} ([[hash, subject], ...]), '
+                '{"kind":"show","ref":"HEAD","path":"f.txt"} (file text at a '
+                'ref), {"kind":"branches"}. Deterministic plumbing only.'),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": {"type": "string"},
+                    "query": {"type": "string"},
+                },
+                "required": ["repo", "query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_op",
+            "description": (
+                "Mutate a git repository with ONE closed verb whose effect "
+                "is verified. Give repo (directory path — must be in the "
+                "owner's git_write allowlist in settings.toml), op — a JSON "
+                'object, one of {"verb":"init"}, {"verb":"commit","paths":'
+                '[...],"message":"..."} (stages exactly those repo-relative '
+                'paths and commits them), {"verb":"branch","name":n}, '
+                '{"verb":"switch","name":n}, {"verb":"merge","name":n}, '
+                '{"verb":"tag","name":n} — and assertions, a JSON list of '
+                'observations that must hold afterwards: {"kind":'
+                '"branch_exists"|"branch_absent"|"tag_exists"|"head_is",'
+                '"name":n}, {"kind":"ancestor","ancestor":r,"descendant":r}, '
+                '{"kind":"file_at_ref","ref":r,"path":p,"text":"..."} (or '
+                '"sha256":hex for exact bytes), {"kind":"clean_worktree"}, '
+                '{"kind":"rev_count","ref":r,"equals":n}. The harness runs '
+                "the verb, then checks every assertion: all true → kept; any "
+                "false → the repository is restored to its pre-verb state "
+                "and the call refuses. Identity and time are pinned, so the "
+                "same content always yields the same commit hash. There is "
+                "no push/pull/fetch/clone/rebase/reset: repository work that "
+                "must reach a remote goes through the owner. Declare at "
+                "least one assertion — an unasserted mutation refuses."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": {"type": "string"},
+                    "op": {"type": "string"},
+                    "assertions": {"type": "string"},
+                },
+                "required": ["repo", "op", "assertions"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "propose_verifier",
             "description": (
                 "File a CANDIDATE verifier: a mechanical definition of done "
@@ -1919,6 +1978,67 @@ class Agent:
                     except Exception:
                         pass
                 return f"ERROR: {e}"
+        if name == "git_query":
+            # observation, not mutation: read-only plumbing through the
+            # adapter, which first verifies the repository's control files
+            try:
+                repo = self._safe_path(args["repo"])
+            except (KeyError, ValueError) as e:
+                return f"ERROR: {e}"
+            import gitstate
+            try:
+                return truncate(json.dumps(
+                    gitstate.query(repo, str(args.get("query") or "")),
+                    ensure_ascii=False))
+            except (OSError, ValueError) as e:
+                return f"ERROR: {e}"
+        if name == "git_op":
+            # THE OWNER NAMES THE REPOSITORIES A WORKER MAY MUTATE — the
+            # same grant surface as db_write: empty (the default) means
+            # every git_op refuses, fail closed, and the refusal says which
+            # line to add. The verb is data from a closed set; the adapter
+            # builds the command, so no model text reaches a shell.
+            rel = str(args.get("repo") or "").replace("\\", "/")
+            allowed = {str(p).replace("\\", "/")
+                       for p in (self.cfg.get("agent", {}).get("git_write")
+                                 or [])}
+            if rel not in allowed:
+                return (f"ERROR: repository {rel!r} is not in the owner's "
+                        f"git_write allowlist (settings.toml [agent] "
+                        f"git_write). Ask the owner to add it; nothing "
+                        f"self-grants.")
+            try:
+                repo = self._safe_path(rel, write=True)
+            except ValueError as e:
+                return f"ERROR: {e}"
+            token = None
+            import gitstate
+            import procedure
+            try:
+                op = gitstate.canonical_op(str(args.get("op") or ""))
+                assertions = gitstate.canonical_assertions(
+                    str(args.get("assertions") or ""))
+            except ValueError as e:
+                return f"ERROR: {e}"
+            try:
+                if procedure.active_trajectory(self.root, task["id"]):
+                    token = procedure.begin_action(
+                        self.root, task["id"], "git_op",
+                        {"repo": rel, "op": op, "assertions": assertions})
+                receipt = gitstate.apply_op(repo, op, assertions)
+                if token:
+                    procedure.finish_action(self.root, task["id"], token, True)
+                return (f"ok, git {receipt['verb']} applied on {rel} "
+                        f"(branch {receipt['branch']}, head "
+                        f"{(receipt['head'] or 'none')[:12]}); every declared "
+                        f"assertion observed true")
+            except (OSError, ValueError) as e:
+                if token:
+                    try:
+                        procedure.finish_action(self.root, task["id"], token, False)
+                    except Exception:
+                        pass
+                return f"ERROR: {e}"
         if name == "propose_verifier":
             # THE FACTORY DOOR. A worker may manufacture a gate PROPOSAL —
             # structurally valid predicate data with its provenance stamped
@@ -3201,12 +3321,15 @@ class Agent:
             try:
                 # the deterministic route holds exactly the authority the
                 # OWNER declared: workspace writes, plus db-write for each
-                # database named in settings.toml [agent] db_write. Nothing
-                # here can grant itself more.
+                # database named in settings.toml [agent] db_write, plus
+                # git-write for each repository in [agent] git_write.
+                # Nothing here can grant itself more.
+                agent_cfg = self.cfg.get("agent", {})
                 grant = {"workspace-write"} | {
                     "db-write:" + str(p).replace("\\", "/")
-                    for p in (self.cfg.get("agent", {}).get("db_write")
-                              or [])}
+                    for p in (agent_cfg.get("db_write") or [])} | {
+                    "git-write:" + str(p).replace("\\", "/")
+                    for p in (agent_cfg.get("git_write") or [])}
                 result = procedure.execute(self.root, rb, inputs,
                                            authority=grant)
             except Exception as e:

@@ -38,6 +38,10 @@ db_write = []                       # SQLite files (relative paths) a worker's
                                     # zero-model route may write. EMPTY grants
                                     # nothing: every db mutation refuses until
                                     # the owner names its file here.
+git_write = []                      # git repositories (relative directories)
+                                    # a worker's git_op may mutate and the
+                                    # zero-model route may commit into. EMPTY
+                                    # grants nothing, exactly like db_write.
 inbox_settle_seconds = 10           # ignore files still being copied in
 max_task_retries = 3                # retries of a failed task before it rests
 candidates_max = 5                  # test-time compute: attempts to score

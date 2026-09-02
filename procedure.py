@@ -1,9 +1,9 @@
 """Conservative workflow induction from harness-observed, independently graded actions.
 
 File write/copy semantics, closed-set table transforms (tabular.py, typed by
-tabletypes.py), and screened SQLite transactions (dbstate.py) have
-deterministic adapters. Unknown tools remain
-model-required barriers. A candidate never authors its graders or its receipts.
+tabletypes.py), screened SQLite transactions (dbstate.py) and closed-verb
+Git repository operations (gitstate.py) have deterministic adapters.
+Unknown tools remain model-required barriers. A candidate never authors its graders or its receipts.
 Authority state uses the same external org boundary as goal-contract seals.
 """
 import copy
@@ -119,7 +119,7 @@ RETRY_MAX = 3
 CALL_DEPTH_MAX = 4
 NEST_MAX = 6
 DETERMINISTIC_TOOLS = ("write_file", "copy_file", "transform_table",
-                       "db_transaction")
+                       "db_transaction", "git_op")
 
 
 def begin_trajectory(root, task_id, judge_id=None, inputs=None, family="unspecified",
@@ -176,12 +176,14 @@ def _normalize(action):
     action = copy.deepcopy(action)
     action.setdefault("args", {})
     if action["tool"] in ("write_file", "copy_file", "read_file",
-                          "transform_table", "db_transaction", "db_query"):
+                          "transform_table", "db_transaction", "db_query",
+                          "git_op"):
         required = {"write_file": ("path", "content"), "copy_file": ("source", "path"),
                     "read_file": ("path",),
                     "transform_table": ("source", "path", "spec"),
                     "db_transaction": ("database", "statements", "assertions"),
-                    "db_query": ("database", "query")}[action["tool"]]
+                    "db_query": ("database", "query"),
+                    "git_op": ("repo", "op", "assertions")}[action["tool"]]
         if any(not isinstance(action["args"].get(key), str) for key in required):
             raise ProcedureError("file actions require string arguments")
         if action["tool"] == "transform_table":
@@ -210,7 +212,14 @@ def _normalize(action):
         if action["tool"] == "db_query":
             import dbstate
             dbstate._screen(action["args"]["query"], read_only=True)
-        for key in ("path", "source", "source2", "database"):
+        if action["tool"] == "git_op":
+            import gitstate
+            # the same rule as SQL: screened and canonicalized HERE, so a
+            # verb the closed set refuses never becomes evidence
+            action["args"]["op"] = gitstate.canonical_op(action["args"]["op"])
+            action["args"]["assertions"] = gitstate.canonical_assertions(
+                action["args"]["assertions"])
+        for key in ("path", "source", "source2", "database", "repo"):
             if key in action["args"] and isinstance(action["args"][key], str):
                 action["args"][key] = action["args"][key].replace("\\", "/")
     return action
@@ -218,6 +227,14 @@ def _normalize(action):
 
 def _snapshot(root, action):
     result = {}
+    if action["tool"] == "git_op":
+        # a repository's before/after evidence is the digest of every ref
+        # and its HEAD — the file family's hash, for a directory of history
+        import gitstate
+        path = fileauth.resolve(root, action["args"]["repo"], "write", "agent")
+        result["repo"] = {"exists": gitstate.is_repository(path),
+                          "hash": gitstate.state_digest(path)}
+        return result
     for key in ("path", "source", "source2", "database"):
         value = action["args"].get(key)
         if action["tool"] not in ("write_file", "copy_file", "read_file",
@@ -298,6 +315,18 @@ def finish_action(root, task_id, token, succeeded):
                 success = success and ok
             except (OSError, ValueError, fileauth.Denied):
                 success = False
+        if action["tool"] == "git_op":
+            # re-observed through the adapter's read-only plumbing,
+            # independent of the tool's own restore-on-failure gate
+            import gitstate
+            try:
+                ok, _why = gitstate.check_assertions(
+                    fileauth.resolve(root, action["args"]["repo"],
+                                     "read", "agent"),
+                    action["args"]["assertions"])
+                success = success and ok
+            except (OSError, ValueError, fileauth.Denied):
+                success = False
         item.update({"complete": True, "succeeded": success, "after": after,
                      "latency_seconds": max(0, time.time() - item["started"])})
         return success
@@ -330,6 +359,10 @@ def _perform(root, action):
         import dbstate
         dbstate.query(fileauth.resolve(root, args["database"], "read", "agent"),
                       args["query"])
+    elif action["tool"] == "git_op":
+        import gitstate
+        gitstate.apply_op(fileauth.resolve(root, args["repo"], "write", "agent"),
+                          args["op"], args["assertions"])
     elif action["tool"] == "read_file":
         fileauth.read_text(root, args["path"])
     else:
@@ -579,6 +612,20 @@ def _compile_aligned(trajectories, sequences, schema, minted, auto, prefix):
                 "action": {"tool": tool, "args": args}, "preconditions": [], "effects": []}
         if step["kind"] == "model":
             step["reason"] = "tool has no trusted deterministic semantic adapter"
+        elif tool == "git_op":
+            # the repository family: the target is a directory, so it takes
+            # no file-existence guard (the verb carries its own state
+            # discipline — init refuses an existing repository, every other
+            # verb refuses a missing or tampered one) and offers no IF
+            # guard; its effect is the declared assertions re-observed
+            if isinstance(args.get("repo"), dict):
+                schema[args["repo"]["input"]] = "path"
+            target = args["repo"]
+            effect = {"predicate": "repo_satisfies", "path": target,
+                      "assertions": args["assertions"]}
+            step["effects"].append(effect)
+            effects = [e for e in effects if e["path"] != target] + [effect]
+            touched.append(target)
         else:
             for key in ("path", "source", "source2", "database"):
                 if isinstance(args.get(key), dict):
@@ -731,9 +778,7 @@ def validate(rb):
             if step.get("kind") not in ("deterministic", "model"):
                 raise ProcedureError("step must be explicit deterministic or model-required")
             if step["kind"] == "deterministic":
-                if step.get("action", {}).get("tool") not in (
-                        "write_file", "copy_file", "transform_table",
-                        "db_transaction"):
+                if step.get("action", {}).get("tool") not in DETERMINISTIC_TOOLS:
                     raise ProcedureError("unknown deterministic adapter")
                 if not step.get("effects"):
                     raise ProcedureError("step must have mechanically observable effects")
@@ -765,6 +810,11 @@ def _run_leaf(root, workspace, step, authority, receipts):
     action = _normalize(step["action"])
     if action["tool"] == "db_transaction":
         token = "db-write:" + str(action["args"]["database"]).replace("\\", "/")
+        if token not in authority:
+            raise ProcedureError(
+                f"required authority was not granted: missing {token}")
+    if action["tool"] == "git_op":
+        token = "git-write:" + str(action["args"]["repo"]).replace("\\", "/")
         if token not in authority:
             raise ProcedureError(
                 f"required authority was not granted: missing {token}")
@@ -896,6 +946,9 @@ def execute(root, rb, inputs, workspace=None, authority=None, _stack=None):
             if step.get("action", {}).get("tool") == "db_transaction":
                 required.add("db-write:" + str(step["action"]["args"]
                                                ["database"]).replace("\\", "/"))
+            if step.get("action", {}).get("tool") == "git_op":
+                required.add("git-write:" + str(step["action"]["args"]
+                                                ["repo"]).replace("\\", "/"))
         if not required <= authority:
             raise ProcedureError("required authority was not granted: missing "
                                  + ", ".join(sorted(required - authority)))
