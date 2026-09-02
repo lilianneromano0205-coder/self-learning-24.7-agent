@@ -1,8 +1,23 @@
 # DESIGN — Phase 7: Transactional contracts (broader SQL operations)
 
-**Branch:** `phase7/transactional-contracts` · **Status:** DESIGN (committed
-before any code; flips to BUILT only when the preregistered benchmark
-below is green in the acceptance suite) · **Contract:**
+**Branch:** `phase7/transactional-contracts` · **Status:** BUILT — the
+preregistered benchmark below is `tests/test_transactional_contracts.py`
+in the acceptance suite; all seven properties hold (first run: a guarded
+transfer refused with nothing mutated; a broken invariant rolled back
+whole; ledger and audit committed as one and rolled back as one; a
+read-attached file could not be written; write attaches demanded their own
+`db-write:` token; `procedure_compiled` with a `db_satisfies_all` step
+PRECONDITION; PROVEN on a sealed fresh suite; `procedure_route` with
+`model_calls: 0`; and a replay the ledger could not cover logged
+`procedure_route_refused … step precondition changed, applicable: false`
+with both files untouched and the procedure still proven). Implementation:
+`dbstate.py` widened (`canonical_conditions`, `canonical_invariants`,
+`canonical_attach`, URI connections, `_attach`, `transact(...,
+preconditions, invariants, attach)`), `operators.resolved_attach` +
+`db_satisfies_all.attach`, the `db_transaction` leaf through
+`procedure.py` (`_db_tokens`, state precondition emitted by the compiler),
+the tool contract in `loop.py`, and the `procedure_route_refused` event
+that distinguishes "not now" from failure. · **Contract:**
 [VISION_CONTRACT.md](../VISION_CONTRACT.md) binds every decision. ·
 **Audit order:** the 2026-09-02 checkpoint audit's operator-universe order
 after XLSX — *"3. Broader SQL transactional operations — the current
@@ -154,3 +169,25 @@ stdlib-only, and the audit's "more adapters" is answered here as more
 *semantics* on the substrate that exists. Multi-file atomicity is SQLite's
 rollback-journal guarantee, stated as such and enforced by refusing WAL —
 not a distributed transaction.
+
+## Claim envelope (required by docs/DESIGN-P6.1)
+
+The word *transaction* is used here exactly as SQLite uses it, and the
+benchmark proves no more than this:
+
+| Property | Preconditions | Excluded states | Oracle |
+|---|---|---|---|
+| precondition refuses before mutation | one SQLite connection, `BEGIN IMMEDIATE` | — | independent `sqlite3` read of both files |
+| invariant rolls back whole | same | — | same |
+| two files, one commit / one rollback | every file rollback-journaled (WAL refused); rollback-journal super-journal | a process kill between journal and commit (SQLite's own guarantee, not re-tested here); **file + database + git groupings do not exist** — a procedure step mutates one world | independent `sqlite3` read |
+| guard on replay | the compiled step carries the declared precondition | a guard the worker never declared | `procedure_route_refused` with the ledger untouched |
+| concurrent writers | `BEGIN IMMEDIATE` serializes; a held lock makes the second transaction refuse after SQLite's timeout, never last-write-wins | TOCTOU between two *separate* transactions (each is a single locked transaction, so there is no window inside one) | SQLite lock semantics |
+
+There is no durable cross-world journal because there is no cross-world
+grouping to journal; if a later phase groups worlds, it needs the journal
+the audit describes, and until then the honest name for any such grouping
+is *compensated multi-resource execution*, not a transaction. This phase
+was rebased onto Phase 6.1 (clean-index Git, byte-hashed evidence,
+promotion-leakage suite) so that it sits on semantics already hardened;
+attached-database evidence in trajectories is hashed as bytes for the same
+reason workbooks are.

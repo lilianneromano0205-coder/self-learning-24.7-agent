@@ -46,6 +46,27 @@ def check_inputs(root, schema, inputs):
             fileauth.resolve(root, value, "write", "agent")
 
 
+def resolved_attach(root, text, mode):
+    """Canonical attach text {alias: {path, mode}} -> the same with every
+    path resolved inside `root`. mode "read" observes everything read-only
+    (an assertion re-observed later); mode "write" resolves write-mode
+    entries for writing — the per-file token is the caller's to demand."""
+    if not text:
+        return {}
+    import json
+    import dbstate
+    if isinstance(text, dict):
+        raise OperatorError("attach must be canonical JSON text")
+    out = {}
+    for alias, entry in json.loads(dbstate.canonical_attach(text)).items():
+        write = mode == "write" and entry["mode"] == "write"
+        out[alias] = {"path": fileauth.resolve(root, entry["path"],
+                                               "write" if write else "read",
+                                               "agent"),
+                      "mode": "write" if write else "read"}
+    return out
+
+
 def validate_predicate(item):
     if not isinstance(item, dict) or item.get("predicate") not in (
             "file_exists", "file_absent", "file_equals", "file_derives",
@@ -64,6 +85,17 @@ def validate_predicate(item):
         raise OperatorError("table_satisfies needs a constraint")
     if item["predicate"] == "db_satisfies_all" and "assertions" not in item:
         raise OperatorError("db_satisfies_all needs assertions")
+    if item["predicate"] == "db_satisfies_all" and "attach" in item and not (
+            isinstance(item["attach"], dict) and set(item["attach"]) == {"input"}):
+        # sibling databases an assertion reads across: canonical text (or a
+        # declared input that binds to one), never a loose object
+        if not isinstance(item["attach"], str):
+            raise OperatorError("db_satisfies_all attach must be canonical JSON text")
+        import dbstate
+        try:
+            dbstate.canonical_attach(item["attach"])
+        except ValueError as exc:
+            raise OperatorError(str(exc))
     if item["predicate"] == "repo_satisfies" and "assertions" not in item:
         raise OperatorError("repo_satisfies needs assertions")
     if item["predicate"] == "sheet_equals_table" and (
@@ -158,7 +190,9 @@ def observe(root, predicate):
         # stands — the SQL analog of file_derives.
         import dbstate
         try:
-            ok, _why = dbstate.check_assertions(path, predicate["assertions"])
+            ok, _why = dbstate.check_assertions(
+                path, predicate["assertions"],
+                attach=resolved_attach(root, predicate.get("attach"), "read"))
         except (OSError, ValueError, fileauth.Denied):
             return False
         return ok

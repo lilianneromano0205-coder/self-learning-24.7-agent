@@ -217,6 +217,20 @@ def _normalize(action):
                 action["args"]["statements"])
             action["args"]["assertions"] = dbstate.canonical_assertions(
                 action["args"]["assertions"])
+            # the transactional contract (docs/DESIGN-P7): optional, each
+            # canonical; nothing declared is nothing captured, so a step
+            # without a contract aligns exactly as it did before
+            for key, canon in (("preconditions", dbstate.canonical_conditions),
+                               ("invariants", dbstate.canonical_invariants),
+                               ("attach", dbstate.canonical_attach)):
+                if key in action["args"]:
+                    if not isinstance(action["args"][key], str):
+                        raise ProcedureError("file actions require string arguments")
+                    value = canon(action["args"][key])
+                    if value in ("[]", "{}"):
+                        del action["args"][key]
+                    else:
+                        action["args"][key] = value
         if action["tool"] == "db_query":
             import dbstate
             dbstate._screen(action["args"]["query"], read_only=True)
@@ -262,15 +276,26 @@ def _snapshot(root, action):
         mode = "write" if key == _WRITE_KEY.get(action["tool"]) else "read"
         path = fileauth.resolve(root, value, mode, "agent")
         exists = os.path.isfile(path)
-        # a workbook is bytes: a lossy text decode would let two different
-        # files carry one hash, so the workbook argument of the xlsx
-        # adapters is digested as the bytes it is (docs/DESIGN-P6.1, 4)
-        binary = key == "path" and action["tool"] in ("xlsx_import",
-                                                      "xlsx_export")
+        # a workbook or a database is bytes: a lossy text decode would let
+        # two different files carry one hash, so the workbook argument of
+        # the xlsx adapters and every database file are digested as the
+        # bytes they are (docs/DESIGN-P6.1, 4)
+        binary = key == "database" or (
+            key == "path" and action["tool"] in ("xlsx_import", "xlsx_export"))
         result[key] = {"exists": exists,
                        "hash": ((fileauth.sha256_bytes(root, value) if binary
                                  else digest(fileauth.read_text(root, value)))
                                 if exists else None)}
+    if action["tool"] == "db_transaction" and action["args"].get("attach"):
+        # attached siblings are evidence too: their before/after hashes —
+        # bytes, like every database file, because a SQLite file is not text
+        for alias, entry in json.loads(action["args"]["attach"]).items():
+            full = fileauth.resolve(root, entry["path"], "read", "agent")
+            exists = os.path.isfile(full)
+            result["attach:" + alias] = {
+                "exists": exists,
+                "hash": fileauth.sha256_bytes(root, entry["path"])
+                if exists else None}
     return result
 
 
@@ -335,7 +360,9 @@ def finish_action(root, task_id, token, succeeded):
                 ok, _why = dbstate.check_assertions(
                     fileauth.resolve(root, action["args"]["database"],
                                      "read", "agent"),
-                    action["args"]["assertions"])
+                    action["args"]["assertions"],
+                    attach=operators.resolved_attach(
+                        root, action["args"].get("attach"), "read"))
                 success = success and ok
             except (OSError, ValueError, fileauth.Denied):
                 success = False
@@ -405,7 +432,11 @@ def _perform(root, action):
     elif action["tool"] == "db_transaction":
         import dbstate
         dbstate.transact(fileauth.resolve(root, args["database"], "write", "agent"),
-                         args["statements"], args["assertions"])
+                         args["statements"], args["assertions"],
+                         preconditions=args.get("preconditions"),
+                         invariants=args.get("invariants"),
+                         attach=operators.resolved_attach(
+                             root, args.get("attach"), "write"))
     elif action["tool"] == "db_query":
         import dbstate
         dbstate.query(fileauth.resolve(root, args["database"], "read", "agent"),
@@ -738,6 +769,20 @@ def _compile_aligned(trajectories, sequences, schema, minted, auto, prefix):
                 # re-observed against the database as it stands
                 effect = {"predicate": "db_satisfies_all", "path": target,
                           "assertions": args["assertions"]}
+                if "attach" in args:
+                    effect["attach"] = args["attach"]
+                if "preconditions" in args:
+                    # THE FIRST STATE PRECONDITION IN THE IR (docs/DESIGN-P7):
+                    # the step applies only when the database is in the
+                    # condition it was learned on; a replay anywhere else
+                    # refuses at "step precondition changed", before any
+                    # mutation — the guard the work itself declared
+                    guard_state = {"predicate": "db_satisfies_all",
+                                   "path": target,
+                                   "assertions": args["preconditions"]}
+                    if "attach" in args:
+                        guard_state["attach"] = args["attach"]
+                    step["preconditions"].append(guard_state)
             elif tool == "xlsx_import":
                 # the CSV IS the sheet's grid, re-read at any later moment
                 effect = {"predicate": "sheet_equals_table",
@@ -874,6 +919,19 @@ def validate(rb):
         return [str(exc)]
 
 
+def _db_tokens(args):
+    """Every db-write token a bound db_transaction demands: the main
+    database, plus each sibling attached in write mode. Read attaches
+    demand nothing beyond workspace read — SQLite holds them read-only."""
+    tokens = {"db-write:" + str(args["database"]).replace("\\", "/")}
+    if args.get("attach"):
+        import dbstate
+        for entry in json.loads(dbstate.canonical_attach(args["attach"])).values():
+            if entry["mode"] == "write":
+                tokens.add("db-write:" + entry["path"])
+    return tokens
+
+
 def _bind_item(value, name, item):
     """Resolve {"item": name} placeholders inside a foreach body."""
     if isinstance(value, dict):
@@ -893,10 +951,11 @@ def _run_leaf(root, workspace, step, authority, receipts):
     being waved through)."""
     action = _normalize(step["action"])
     if action["tool"] == "db_transaction":
-        token = "db-write:" + str(action["args"]["database"]).replace("\\", "/")
-        if token not in authority:
+        missing = _db_tokens(action["args"]) - set(authority)
+        if missing:
             raise ProcedureError(
-                f"required authority was not granted: missing {token}")
+                "required authority was not granted: missing "
+                + ", ".join(sorted(missing)))
     if action["tool"] == "git_op":
         token = "git-write:" + str(action["args"]["repo"]).replace("\\", "/")
         if token not in authority:
@@ -1028,8 +1087,7 @@ def execute(root, rb, inputs, workspace=None, authority=None, _stack=None):
         required = set(op["authority"])
         for step in bound["steps"]:
             if step.get("action", {}).get("tool") == "db_transaction":
-                required.add("db-write:" + str(step["action"]["args"]
-                                               ["database"]).replace("\\", "/"))
+                required |= _db_tokens(step["action"]["args"])
             if step.get("action", {}).get("tool") == "git_op":
                 required.add("git-write:" + str(step["action"]["args"]
                                                 ["repo"]).replace("\\", "/"))
