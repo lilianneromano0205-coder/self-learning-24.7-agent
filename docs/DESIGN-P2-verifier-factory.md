@@ -1,7 +1,13 @@
 # DESIGN — Phase 2: Verifier Factory
 
-**Branch:** `phase2/verifier-factory` · **Status:** DESIGN (nothing below is
-built until this document's benchmark exists) · **Contract:**
+**Branch:** `phase2/verifier-factory` · **Status:** BUILT — the
+preregistered benchmark below is `tests/test_verifier_factory.py` in the
+acceptance suite; all eight properties hold. Implementation: `verifier.py`
+(specs as predicate data; propose/calibrate/promote/gate; owner CLI),
+worker tool `propose_verifier` (candidates with provenance, zero
+authority), `check_done` verifier branch (trusted-verifier verdicts are
+L0 with no shell and no model), and verifier-gated tasks enter the
+learning loop like any gated work. · **Contract:**
 [VISION_CONTRACT.md](../VISION_CONTRACT.md) binds every decision.
 
 ## The problem, stated from evidence

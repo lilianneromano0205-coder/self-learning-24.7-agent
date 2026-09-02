@@ -161,6 +161,35 @@ TOOL_DEFS = [
     {
         "type": "function",
         "function": {
+            "name": "propose_verifier",
+            "description": (
+                "File a CANDIDATE verifier: a mechanical definition of done "
+                "as DATA — typed params plus predicate checks over the "
+                "observable algebra (file_exists/file_equals/file_derives/"
+                "table_conforms/table_satisfies/db_satisfies_all) with "
+                '{"input": param} placeholders. Give name (slug), criteria '
+                "(the success statement it mechanizes), params (JSON object "
+                "name->type of path|string|integer|number|boolean) and "
+                "checks (JSON list of predicates). Filing grants NOTHING: "
+                "the owner must calibrate it against cases it accepts AND "
+                "cases it rejects, then promote — only then can it gate "
+                "work. Propose one when you notice a recurring success "
+                "criterion that a mechanical check could carry."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "criteria": {"type": "string"},
+                    "params": {"type": "string"},
+                    "checks": {"type": "string"},
+                },
+                "required": ["name", "criteria", "params", "checks"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "run_command",
             "description": "Run a shell command with a hard timeout. Returns exit code, stdout, stderr.",
             "parameters": {
@@ -844,7 +873,8 @@ class Agent:
     def add_task(self, role, goal, memory_files=None, course=None,
                  attempt=1, base_goal=None, done_check=None, lineage=None,
                  stop=None, mission=None, criterion=None,
-                 judge_id=None, inputs=None, family=None, task_class=None):
+                 judge_id=None, inputs=None, family=None, task_class=None,
+                 verifier=None, verifier_params=None):
         tid = uuid.uuid4().hex[:12]
         # TASK CLASS — assigned at the single gateway every task passes
         # through, because every downstream conditioner (routing profiles,
@@ -885,6 +915,12 @@ class Agent:
             "mission": mission,
             "criterion": criterion,
             "done_check": done_check,   # shell command that must exit 0 to finish
+            # a TRUSTED verifier (verifier.py) may gate instead of — or
+            # alongside — done_check: its verdict is pure predicate
+            # observation, no shell, no model. Candidates fail closed.
+            "verifier": verifier,
+            "verifier_params": (verifier_params
+                                if isinstance(verifier_params, dict) else None),
             "stop": stop,
             "task_class": task_class,
             # OPTIONAL procedural-learning contract: an owner-sealed judge id
@@ -1618,27 +1654,50 @@ class Agent:
         layers: policy decides what may run, sandbox decides what it can see.
         """
         cmd = task.get("done_check")
-        if not cmd:
+        vname = task.get("verifier")
+        if not cmd and not vname:
             return True, ""
-        # ONE gateway (execution.py, manual §19): policy screens it, the
-        # untrusted-skill guard runs, the sandbox scrubs the environment, and
-        # the whole thing is traced — the same stack run_command gets.
-        import execution
-        try:
-            rc, out, err = execution.run(
-                "gate", cmd, self.root, cfg=self.cfg,
-                role=task.get("role", "default"), task=task.get("id"),
-                timeout=self.command_timeout, reason="definition of done")
-        except execution.Refused as e:
-            self.log.info(json.dumps({"event": "gate_refused_by_policy",
-                                      "task": task.get("id"),
-                                      "reason": str(e)[:200]}))
-            return False, f"done_check refused: {e}"
-        body = ((out or "") + (err or "")).strip()
-        l0_evidence = f"exit={rc}\n{truncate(body, 2000)}"
+        l0_ok, verifier_line = True, ""
+        if vname:
+            # A TRUSTED VERIFIER'S VERDICT IS L0: pure predicate observation
+            # — no shell, no model — re-derived by the harness right now.
+            # Anything short of "trusted verifier observed all checks true"
+            # fails closed, including a candidate someone hoped would count:
+            # the calibrate-and-promote lifecycle is the only door.
+            import verifier as _verifier
+            v_ok, v_why = _verifier.gate(self.root, vname,
+                                         task.get("verifier_params") or {})
+            l0_ok = l0_ok and v_ok
+            verifier_line = (f"verifier {vname}: "
+                             f"{'PASS' if v_ok else 'FAIL'} — {v_why}")
+            self.log.info(json.dumps({
+                "event": "gate_verifier", "task": task.get("id"),
+                "verifier": vname, "passed": bool(v_ok)}))
+        if cmd:
+            # ONE gateway (execution.py, manual §19): policy screens it, the
+            # untrusted-skill guard runs, the sandbox scrubs the environment,
+            # and the whole thing is traced — the same stack run_command gets.
+            import execution
+            try:
+                rc, out, err = execution.run(
+                    "gate", cmd, self.root, cfg=self.cfg,
+                    role=task.get("role", "default"), task=task.get("id"),
+                    timeout=self.command_timeout, reason="definition of done")
+            except execution.Refused as e:
+                self.log.info(json.dumps({"event": "gate_refused_by_policy",
+                                          "task": task.get("id"),
+                                          "reason": str(e)[:200]}))
+                return False, f"done_check refused: {e}"
+            body = ((out or "") + (err or "")).strip()
+            l0_ok = l0_ok and rc == 0
+            l0_evidence = f"exit={rc}\n{truncate(body, 2000)}"
+            if verifier_line:
+                l0_evidence = f"{verifier_line}\n{l0_evidence}"
+        else:
+            l0_evidence = verifier_line
         try:
             import verification
-            report = verification.run(self, task, (rc == 0, l0_evidence))
+            report = verification.run(self, task, (l0_ok, l0_evidence))
             task["verification"] = {
                 "passed": report["passed"],
                 "decided_by": report["decided_by"],
@@ -1860,6 +1919,35 @@ class Agent:
                     except Exception:
                         pass
                 return f"ERROR: {e}"
+        if name == "propose_verifier":
+            # THE FACTORY DOOR. A worker may manufacture a gate PROPOSAL —
+            # structurally valid predicate data with its provenance stamped
+            # — and that is all it may do. The proposal has zero authority:
+            # it cannot gate anything until the owner calibrates it against
+            # cases it must accept AND cases it must reject, and promotes.
+            # The thing being graded never defines what passing means.
+            import verifier
+            try:
+                spec = {"name": str(args.get("name") or ""),
+                        "criteria": str(args.get("criteria") or ""),
+                        "params": json.loads(str(args.get("params") or "{}")),
+                        "checks": json.loads(str(args.get("checks") or "[]"))}
+            except ValueError as e:
+                return f"ERROR: params/checks are not valid JSON: {e}"
+            try:
+                record = verifier.propose(
+                    self.root, spec,
+                    proposed_by=f"task {task['id']} role {task.get('role')}",
+                    actor="agent")
+            except ValueError as e:
+                return f"ERROR: {e}"
+            self.log.info(json.dumps({
+                "event": "verifier_proposed", "task": task["id"],
+                "verifier": record["name"], "status": record["status"]}))
+            return (f"filed verifier {record['name']!r} as CANDIDATE with "
+                    f"your provenance. It grants nothing: the owner must "
+                    f"calibrate it (accept AND reject cases) and promote it "
+                    f"before it can gate any work.")
         if name == "run_command":
             cmd = args["cmd"]
             with open(os.path.join(self.logs_dir, "commands.log"), "a", encoding="utf-8") as f:
@@ -3020,7 +3108,8 @@ class Agent:
         # mechanical verdict; that is enough to REMEMBER what happened.
         # It is not enough to trust it, and it does not become enough:
         # gate-captured evidence can only ever yield a candidate.
-        if not (task.get("judge_id") or task.get("done_check")):
+        if not (task.get("judge_id") or task.get("done_check")
+                or task.get("verifier")):
             return
         try:
             import procedure
@@ -3029,7 +3118,9 @@ class Agent:
                 task.get("inputs") if isinstance(task.get("inputs"), dict) else None,
                 family=(task.get("family") or task.get("course")
                         or task.get("task_class") or "unspecified"),
-                gate=task.get("done_check"))
+                gate=(task.get("done_check")
+                      or (f"verifier:{task['verifier']}"
+                          if task.get("verifier") else None)))
             self.log.info(json.dumps({
                 "event": "trajectory_opened", "task": task["id"],
                 "judge": task.get("judge_id"),
@@ -3053,7 +3144,8 @@ class Agent:
         # Requiring typed inputs here meant the commonest repeated job — the
         # same report, written the same way, every week — could never take
         # the free path.
-        if task.get("procedure_route_tried") or not task.get("done_check"):
+        if task.get("procedure_route_tried") or not (
+                task.get("done_check") or task.get("verifier")):
             return False
         inputs = task.get("inputs") if isinstance(task.get("inputs"), dict) else {}
         task["procedure_route_tried"] = True
@@ -3144,7 +3236,8 @@ class Agent:
         they are compiled into a CANDIDATE procedure and any owner-sealed
         suite is run against it. Compile refusals are ordinary events: most
         experience should not become a procedure, and the refusal says why."""
-        if not (task.get("judge_id") or task.get("done_check")):
+        if not (task.get("judge_id") or task.get("done_check")
+                or task.get("verifier")):
             return
         try:
             from evaluation_policy import disabled
@@ -3159,7 +3252,7 @@ class Agent:
             # the gate verdict the harness itself recorded for this task —
             # check_done's result, not anything the worker said about it
             gate_passed = None
-            if task.get("done_check"):
+            if task.get("done_check") or task.get("verifier"):
                 # check_done files its verdict on the task; `passed` is what
                 # the verification authority decided, with L0 supreme
                 gate_passed = (task.get("verification") or {}).get("passed")
