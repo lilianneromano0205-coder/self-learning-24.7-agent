@@ -330,6 +330,10 @@ ALLOWED_RAW = {
               "policy/approvals inside mcp.py itself)",
     "benchmark.py": "ARM A deliberately runs a bare model with no harness; "
                     "its CHECK commands go through the authority as op='gate'",
+    "learn_bench.py": "LEARN-001 owner-side instrument: drives loop.py by "
+                      "argv exactly like demo.py/benchmark.py; every task it "
+                      "queues runs under the loop's own authority stack, and "
+                      "no model input reaches the argv",
 }
 
 _SUBPROC_RE = re.compile(r"subprocess\.(run|Popen|call|check_output)\(|os\.system\(")

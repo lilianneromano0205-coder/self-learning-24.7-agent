@@ -10,7 +10,7 @@ continuously, prove what they did, and remember what they learned.**
 ![mutations](https://img.shields.io/badge/mutation%20tests-56%2F56%20killed-brightgreen)
 ![license](https://img.shields.io/badge/license-AGPL--3.0-orange)
 
-108 Python modules · 142 acceptance tests · one HTML control panel · no
+109 Python modules · 142 acceptance tests · one HTML control panel · no
 database, no framework, no build step. Python 3.11+ and your own API keys.
 
 ```bash
