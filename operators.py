@@ -49,7 +49,8 @@ def check_inputs(root, schema, inputs):
 def validate_predicate(item):
     if not isinstance(item, dict) or item.get("predicate") not in (
             "file_exists", "file_absent", "file_equals", "file_derives",
-            "table_conforms", "table_satisfies", "db_satisfies_all") \
+            "table_conforms", "table_satisfies", "db_satisfies_all",
+            "repo_satisfies") \
             or "path" not in item:
         raise OperatorError("unsupported mechanically observable predicate")
     if item["predicate"] == "file_equals" and "value" not in item:
@@ -63,6 +64,8 @@ def validate_predicate(item):
         raise OperatorError("table_satisfies needs a constraint")
     if item["predicate"] == "db_satisfies_all" and "assertions" not in item:
         raise OperatorError("db_satisfies_all needs assertions")
+    if item["predicate"] == "repo_satisfies" and "assertions" not in item:
+        raise OperatorError("repo_satisfies needs assertions")
 
 
 def observe(root, predicate):
@@ -71,6 +74,19 @@ def observe(root, predicate):
     kind = predicate["predicate"]
     if kind == "file_absent":
         return not os.path.lexists(path)
+    if kind == "repo_satisfies":
+        # a repository is a directory, so it is observed before the file
+        # check below: every declared assertion re-observed against the
+        # repository as it stands, through the adapter's own read-only
+        # plumbing — the git analog of db_satisfies_all. A tampered or
+        # missing repository reads as "no longer true", never as an
+        # exception a caller must guess at.
+        import gitstate
+        try:
+            ok, _why = gitstate.check_assertions(path, predicate["assertions"])
+        except (OSError, ValueError, fileauth.Denied):
+            return False
+        return ok
     if not os.path.isfile(path) or os.path.islink(path):
         return False
     if kind == "file_exists":
