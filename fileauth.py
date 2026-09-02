@@ -298,6 +298,29 @@ def write_text(root, rel, text, actor="agent", encoding="utf-8"):
     return p
 
 
+def write_bytes(root, rel, data, actor="agent"):
+    """The binary twin of write_text — same containment, same atomic
+    temp-beside-target-then-replace — for artifacts that are not text (a
+    workbook). One mutation semantic, whatever the payload."""
+    p = resolve(root, rel, "write", actor)
+    os.makedirs(os.path.dirname(p) or root, exist_ok=True)
+    tmp = f"{p}.{os.getpid()}.{int(time.time() * 1000) % 100000}.tmp"
+    with open(tmp, "wb") as f:
+        f.write(data)
+    for attempt in range(8):
+        try:
+            os.replace(tmp, p)
+            return p
+        except PermissionError:
+            time.sleep(0.05 * (attempt + 1))
+        except OSError as e:
+            if e.errno != errno.EACCES:
+                raise
+            time.sleep(0.05 * (attempt + 1))
+    os.replace(tmp, p)
+    return p
+
+
 def write_json(root, rel, obj, actor="agent", indent=1):
     return write_text(root, rel,
                       json.dumps(obj, indent=indent, ensure_ascii=False) + "\n",
