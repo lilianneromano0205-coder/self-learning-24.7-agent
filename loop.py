@@ -3162,6 +3162,24 @@ class Agent:
             hits = runbook.match(self.root, task["goal"])
         except Exception:
             return False
+        # SHADOW, NEVER AUTHORITY (docs/DESIGN-P4): beside every lexical
+        # match, ask which proven procedures fit this task STRUCTURALLY —
+        # typed inputs against typed schema, no words — and log the
+        # disagreement. Routing below reads `hits` exactly as before; the
+        # lexical floor keeps sole authority until SIG-001's measured
+        # comparison says otherwise. A failure here must never cost a task
+        # its route, so the whole lens is one guarded side effect.
+        try:
+            import signatures
+            lexical = sorted({h["name"] for h in hits
+                              if h.get("status") == "proven"})
+            structural = signatures.shadow_match(self.root, task)
+            self.log.info(json.dumps({
+                "event": "signature_shadow", "task": task["id"],
+                "lexical": lexical, "structural": structural,
+                "agreement": signatures.agreement(lexical, structural)}))
+        except Exception:
+            pass
         for hit in hits:
             name = hit["name"]
             if hit.get("status") != "proven":

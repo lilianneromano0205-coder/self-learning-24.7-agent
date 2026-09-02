@@ -165,7 +165,7 @@ SYSTEMS = {
                   "test_procedural_learning.py", "test_scheduler_verifier.py",
                   "test_advanced_learning.py", "test_tabular.py",
                   "test_operator_runtime.py", "test_verifier_factory.py",
-                  "test_procedure_v2.py"],
+                  "test_procedure_v2.py", "test_capability_signatures.py"],
         "blind": "promotion and routing decisions are proven against seeded "
                  "outcome ledgers, not against months of real measured "
                  "performance. The design gate checks mechanics and the known "

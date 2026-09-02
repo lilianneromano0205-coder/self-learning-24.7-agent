@@ -337,7 +337,8 @@ for _name, _code, _description in (
     # point of the proof system.
     ("procedural-learning",
      ["procedure.py", "operators.py", "runbook.py", "tabular.py",
-      "tabletypes.py", "dbstate.py", "verifier.py", "capability_graph.py"],
+      "tabletypes.py", "dbstate.py", "verifier.py", "signatures.py",
+      "capability_graph.py"],
      "Independently judged trajectories compile into an executable procedure "
      "that a later matching task runs deterministically, with the task's own "
      "gate still deciding acceptance."),
@@ -352,7 +353,8 @@ for _name, _code, _description in (
                                  "test_tabular.py", "test_use_cases.py",
                                  "test_operator_runtime.py",
                                  "test_verifier_factory.py",
-                                 "test_procedure_v2.py"]
+                                 "test_procedure_v2.py",
+                                 "test_capability_signatures.py"]
                                 if _name == "procedural-learning"
                                 else ["test_advanced_learning.py"]),
                       "invariants": ["offline tests never establish model lift", "judges remain independent"],
