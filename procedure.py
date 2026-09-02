@@ -119,7 +119,13 @@ RETRY_MAX = 3
 CALL_DEPTH_MAX = 4
 NEST_MAX = 6
 DETERMINISTIC_TOOLS = ("write_file", "copy_file", "transform_table",
-                       "db_transaction", "git_op")
+                       "db_transaction", "git_op", "xlsx_import", "xlsx_export")
+# the one argument each adapter MUTATES; every other file argument is read
+_WRITE_KEY = {"write_file": "path", "copy_file": "path",
+              "transform_table": "path", "db_transaction": "database",
+              "xlsx_export": "path", "xlsx_import": "out"}
+_SNAPSHOT_TOOLS = ("write_file", "copy_file", "read_file", "transform_table",
+                   "db_transaction", "db_query", "xlsx_import", "xlsx_export")
 
 
 def begin_trajectory(root, task_id, judge_id=None, inputs=None, family="unspecified",
@@ -177,13 +183,15 @@ def _normalize(action):
     action.setdefault("args", {})
     if action["tool"] in ("write_file", "copy_file", "read_file",
                           "transform_table", "db_transaction", "db_query",
-                          "git_op"):
+                          "git_op", "xlsx_import", "xlsx_export"):
         required = {"write_file": ("path", "content"), "copy_file": ("source", "path"),
                     "read_file": ("path",),
                     "transform_table": ("source", "path", "spec"),
                     "db_transaction": ("database", "statements", "assertions"),
                     "db_query": ("database", "query"),
-                    "git_op": ("repo", "op", "assertions")}[action["tool"]]
+                    "git_op": ("repo", "op", "assertions"),
+                    "xlsx_import": ("path", "sheet", "out"),
+                    "xlsx_export": ("source", "path", "sheet")}[action["tool"]]
         if any(not isinstance(action["args"].get(key), str) for key in required):
             raise ProcedureError("file actions require string arguments")
         if action["tool"] == "transform_table":
@@ -219,7 +227,16 @@ def _normalize(action):
             action["args"]["op"] = gitstate.canonical_op(action["args"]["op"])
             action["args"]["assertions"] = gitstate.canonical_assertions(
                 action["args"]["assertions"])
-        for key in ("path", "source", "source2", "database", "repo"):
+        if action["tool"] in ("xlsx_import", "xlsx_export"):
+            import xlsxstate
+            action["args"]["sheet"] = xlsxstate.canonical_sheet(action["args"]["sheet"])
+            if "schema" in action["args"]:
+                import tabletypes
+                if not isinstance(action["args"]["schema"], str):
+                    raise ProcedureError("file actions require string arguments")
+                action["args"]["schema"] = tabletypes.canonical_schema(
+                    action["args"]["schema"])
+        for key in ("path", "source", "source2", "database", "repo", "out"):
             if key in action["args"] and isinstance(action["args"][key], str):
                 action["args"][key] = action["args"][key].replace("\\", "/")
     return action
@@ -235,15 +252,11 @@ def _snapshot(root, action):
         result["repo"] = {"exists": gitstate.is_repository(path),
                           "hash": gitstate.state_digest(path)}
         return result
-    for key in ("path", "source", "source2", "database"):
+    for key in ("path", "source", "source2", "database", "out"):
         value = action["args"].get(key)
-        if action["tool"] not in ("write_file", "copy_file", "read_file",
-                                  "transform_table", "db_transaction",
-                                  "db_query") or not value:
+        if action["tool"] not in _SNAPSHOT_TOOLS or not value:
             continue
-        mode = ("write" if (key == "path" and action["tool"] != "read_file")
-                or (key == "database" and action["tool"] == "db_transaction")
-                else "read")
+        mode = "write" if key == _WRITE_KEY.get(action["tool"]) else "read"
         path = fileauth.resolve(root, value, mode, "agent")
         exists = os.path.isfile(path)
         result[key] = {"exists": exists, "hash": digest(fileauth.read_text(root, value)) if exists else None}
@@ -327,6 +340,33 @@ def finish_action(root, task_id, token, succeeded):
                 success = success and ok
             except (OSError, ValueError, fileauth.Denied):
                 success = False
+        if action["tool"] == "xlsx_import":
+            # RE-DERIVE: the CSV on disk must equal the grid the workbook
+            # yields right now, through the adapter that produced it
+            import xlsxstate
+            try:
+                text = xlsxstate.read_table(
+                    fileauth.resolve(root, action["args"]["path"], "read", "agent"),
+                    action["args"]["sheet"])
+                if "schema" in action["args"]:
+                    import tabletypes
+                    tabletypes.conforms(action["args"]["schema"], text)
+                success = success and after["out"]["hash"] == digest(text)
+            except (OSError, ValueError, fileauth.Denied):
+                success = False
+        if action["tool"] == "xlsx_export":
+            # the workbook on disk must be, byte for byte, what the source
+            # table yields through the adapter now
+            import xlsxstate
+            try:
+                data = xlsxstate.export_bytes(
+                    fileauth.read_text(root, action["args"]["source"]),
+                    action["args"]["sheet"])
+                with open(fileauth.resolve(root, action["args"]["path"],
+                                           "read", "agent"), "rb") as f:
+                    success = success and f.read() == data
+            except (OSError, ValueError, fileauth.Denied):
+                success = False
         item.update({"complete": True, "succeeded": success, "after": after,
                      "latency_seconds": max(0, time.time() - item["started"])})
         return success
@@ -363,6 +403,22 @@ def _perform(root, action):
         import gitstate
         gitstate.apply_op(fileauth.resolve(root, args["repo"], "write", "agent"),
                           args["op"], args["assertions"])
+    elif action["tool"] == "xlsx_import":
+        import xlsxstate
+        text = xlsxstate.read_table(
+            fileauth.resolve(root, args["path"], "read", "agent"), args["sheet"])
+        if "schema" in args:
+            import tabletypes
+            tabletypes.conforms(args["schema"], text)
+        fileauth.write_text(root, args["out"], text)
+    elif action["tool"] == "xlsx_export":
+        import xlsxstate
+        text = fileauth.read_text(root, args["source"])
+        if "schema" in args:
+            import tabletypes
+            tabletypes.conforms(args["schema"], text)
+        fileauth.write_bytes(root, args["path"],
+                             xlsxstate.export_bytes(text, args["sheet"]))
     elif action["tool"] == "read_file":
         fileauth.read_text(root, args["path"])
     else:
@@ -627,12 +683,13 @@ def _compile_aligned(trajectories, sequences, schema, minted, auto, prefix):
             effects = [e for e in effects if e["path"] != target] + [effect]
             touched.append(target)
         else:
-            for key in ("path", "source", "source2", "database"):
+            for key in ("path", "source", "source2", "database", "out"):
                 if isinstance(args.get(key), dict):
                     schema[args[key]["input"]] = "path"
             # the mutated target: a file for the file family, the database
-            # for the SQL family
-            target_key = "database" if tool == "db_transaction" else "path"
+            # for the SQL family, the CSV an import writes
+            target_key = {"db_transaction": "database",
+                          "xlsx_import": "out"}.get(tool, "path")
             target = args[target_key]
             before = {item["before"][target_key]["exists"] for item in aligned}
             if len(before) != 1:
@@ -641,7 +698,9 @@ def _compile_aligned(trajectories, sequences, schema, minted, auto, prefix):
             step["preconditions"].append(guard)
             if target not in touched:
                 preconditions.append(guard)
-            for key in ("source", "source2"):
+            # what the step READS: an import reads the workbook at `path`
+            for key in (("path",) if tool == "xlsx_import"
+                        else ("source", "source2")):
                 if key in args:
                     source = {"predicate": "file_exists", "path": args[key]}
                     step["preconditions"].append(source)
@@ -668,9 +727,23 @@ def _compile_aligned(trajectories, sequences, schema, minted, auto, prefix):
                 # re-observed against the database as it stands
                 effect = {"predicate": "db_satisfies_all", "path": target,
                           "assertions": args["assertions"]}
+            elif tool == "xlsx_import":
+                # the CSV IS the sheet's grid, re-read at any later moment
+                effect = {"predicate": "sheet_equals_table",
+                          "path": args["path"], "sheet": args["sheet"],
+                          "table": target}
+            elif tool == "xlsx_export":
+                # the workbook's sheet IS the table it was exported from
+                effect = {"predicate": "sheet_equals_table", "path": target,
+                          "sheet": args["sheet"], "table": args["source"]}
             else:
                 effect = {"predicate": "file_equals", "path": target, "value": args["content"]}
             step["effects"].append(effect)
+            if tool == "xlsx_import" and "schema" in args:
+                # a TYPED import also promises what the table MEANS
+                step["effects"].append({"predicate": "table_conforms",
+                                        "path": target,
+                                        "schema": args["schema"]})
             effects = [e for e in effects if e["path"] != target] + [effect]
             touched.append(target)
             targets.append((target, True in before))
@@ -1055,6 +1128,14 @@ def evaluate(root, name, suite_id):
                     # as text and would not be reviewable if they could
                     import dbstate
                     dbstate.run_script(
+                        fileauth.resolve(arena, item["path"], "write", "agent"),
+                        item["content"])
+                elif item["path"].endswith(".xlsx"):
+                    # a workbook bootstraps from sealed CSV text through the
+                    # deterministic adapter, for the same reason: binary
+                    # fixtures cannot be sealed as text or reviewed
+                    import xlsxstate
+                    xlsxstate.write_workbook(
                         fileauth.resolve(arena, item["path"], "write", "agent"),
                         item["content"])
                 else:

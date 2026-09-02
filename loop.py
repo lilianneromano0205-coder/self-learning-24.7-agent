@@ -220,6 +220,58 @@ TOOL_DEFS = [
     {
         "type": "function",
         "function": {
+            "name": "xlsx_import",
+            "description": (
+                "Read one sheet of an .xlsx workbook into a CSV file, "
+                "exactly. Give path (the workbook), sheet (its name; default "
+                "Sheet1) and out (the CSV path to write). Cell values are "
+                "the stored text verbatim (10.50 stays 10.50); formulas, "
+                "merged cells and error cells refuse — a cached result is "
+                "not evidence. Optionally give schema (the same JSON column "
+                "typing transform_table accepts) and the import refuses "
+                "unless every value conforms. The CSV then feeds "
+                "transform_table like any other table."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "sheet": {"type": "string"},
+                    "out": {"type": "string"},
+                    "schema": {"type": "string"},
+                },
+                "required": ["path", "out"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "xlsx_export",
+            "description": (
+                "Write a CSV table as a NEW single-sheet .xlsx workbook, "
+                "deterministically. Give source (the CSV path), path (the "
+                "workbook to write) and sheet (its name; default Sheet1); "
+                "optionally schema, checked before writing. The workbook is "
+                "a pure function of the table — same table, same bytes — "
+                "so it can be verified and reproduced later. Numeric-looking "
+                "cells become number cells with their exact text; "
+                "everything else is text. No formulas are ever written: the "
+                "harness computes, the workbook records."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source": {"type": "string"},
+                    "path": {"type": "string"},
+                    "sheet": {"type": "string"},
+                    "schema": {"type": "string"},
+                },
+                "required": ["source", "path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "propose_verifier",
             "description": (
                 "File a CANDIDATE verifier: a mechanical definition of done "
@@ -2033,6 +2085,105 @@ class Agent:
                         f"{(receipt['head'] or 'none')[:12]}); every declared "
                         f"assertion observed true")
             except (OSError, ValueError) as e:
+                if token:
+                    try:
+                        procedure.finish_action(self.root, task["id"], token, False)
+                    except Exception:
+                        pass
+                return f"ERROR: {e}"
+        if name == "xlsx_import":
+            # THE HARNESS READS, THE MODEL ONLY CHOOSES. A sheet becomes the
+            # exact CSV the table world trusts — stored values verbatim,
+            # formulas refused — so workbook work joins the same capture,
+            # compile and zero-model replay path as every other table.
+            token = None
+            try:
+                src = self._safe_path(args["path"])
+                self._safe_path(args["out"], write=True)
+            except (KeyError, ValueError) as e:
+                return f"ERROR: {e}"
+            import xlsxstate
+            try:
+                sheet = xlsxstate.canonical_sheet(args.get("sheet") or None)
+                schema = None
+                if args.get("schema"):
+                    import tabletypes
+                    schema = tabletypes.canonical_schema(str(args["schema"]))
+            except ValueError as e:
+                return f"ERROR: {e}"
+            import fileauth
+            import procedure
+            try:
+                capture = {"path": args["path"], "sheet": sheet,
+                           "out": args["out"]}
+                if schema:
+                    capture["schema"] = schema
+                if procedure.active_trajectory(self.root, task["id"]):
+                    token = procedure.begin_action(
+                        self.root, task["id"], "xlsx_import", capture)
+                text = xlsxstate.read_table(src, sheet)
+                if schema:
+                    import tabletypes
+                    # conforms-or-refuse BEFORE the write: a typed import
+                    # never lands a non-conforming table on disk
+                    tabletypes.conforms(schema, text)
+                fileauth.write_text(self.root, args["out"], text)
+                if token:
+                    procedure.finish_action(self.root, task["id"], token, True)
+                return (f"ok, imported {max(0, text.count(chr(10)) - 1)} "
+                        f"row(s) from sheet {sheet} of {args['path']} into "
+                        f"{args['out']}"
+                        + (" (schema verified)" if schema else ""))
+            except (OSError, ValueError, fileauth.Denied) as e:
+                if token:
+                    try:
+                        procedure.finish_action(self.root, task["id"], token, False)
+                    except Exception:
+                        pass
+                return f"ERROR: {e}"
+        if name == "xlsx_export":
+            # the workbook is a pure function of the table: same table,
+            # same bytes, written through the file authority's atomic
+            # replace exactly like every other worker mutation
+            token = None
+            try:
+                src = self._safe_path(args["source"])
+                self._safe_path(args["path"], write=True)
+            except (KeyError, ValueError) as e:
+                return f"ERROR: {e}"
+            import xlsxstate
+            try:
+                sheet = xlsxstate.canonical_sheet(args.get("sheet") or None)
+                schema = None
+                if args.get("schema"):
+                    import tabletypes
+                    schema = tabletypes.canonical_schema(str(args["schema"]))
+            except ValueError as e:
+                return f"ERROR: {e}"
+            import fileauth
+            import procedure
+            try:
+                capture = {"source": args["source"], "path": args["path"],
+                           "sheet": sheet}
+                if schema:
+                    capture["schema"] = schema
+                if procedure.active_trajectory(self.root, task["id"]):
+                    token = procedure.begin_action(
+                        self.root, task["id"], "xlsx_export", capture)
+                with open(src, "r", encoding="utf-8", errors="replace") as f:
+                    text = f.read()
+                if schema:
+                    import tabletypes
+                    tabletypes.conforms(schema, text)
+                data = xlsxstate.export_bytes(text, sheet)
+                fileauth.write_bytes(self.root, args["path"], data)
+                if token:
+                    procedure.finish_action(self.root, task["id"], token, True)
+                return (f"ok, exported {max(0, text.count(chr(10)) - 1)} data "
+                        f"row(s) into sheet {sheet} of {args['path']} "
+                        f"({len(data)} bytes)"
+                        + (" (schema verified)" if schema else ""))
+            except (OSError, ValueError, fileauth.Denied) as e:
                 if token:
                     try:
                         procedure.finish_action(self.root, task["id"], token, False)

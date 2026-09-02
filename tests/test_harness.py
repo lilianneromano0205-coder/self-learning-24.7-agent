@@ -40,8 +40,9 @@ def main():
     names = [t["name"] for t in m["tools"]]
     assert names == ["read_file", "write_file", "transform_table",
                      "db_query", "db_transaction", "git_query", "git_op",
-                     "propose_verifier", "run_command", "finish_task",
-                     "subquery", "ask_human"], names
+                     "xlsx_import", "xlsx_export", "propose_verifier",
+                     "run_command", "finish_task", "subquery",
+                     "ask_human"], names
     rc = next(t for t in m["tools"] if t["name"] == "run_command")
     assert "student" in rc["denied_roles"], rc
     fin = next(t for t in m["tools"] if t["name"] == "finish_task")
@@ -56,7 +57,7 @@ def main():
         "prospective_fired" in m["loop_events"], \
         "events logged from prospective.py count as loop events"
     assert m["versions"]["code"]["loop.py"] and m["versions"]["prompts"]
-    print("[manifest] 12 tools with role allowlists, 9+ gates, policies, 14 "
+    print("[manifest] 14 tools with role allowlists, 9+ gates, policies, 14 "
           "memory tiers, budgets, events, file hashes - all read from "
           "what runs")
 

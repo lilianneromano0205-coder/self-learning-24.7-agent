@@ -50,7 +50,7 @@ def validate_predicate(item):
     if not isinstance(item, dict) or item.get("predicate") not in (
             "file_exists", "file_absent", "file_equals", "file_derives",
             "table_conforms", "table_satisfies", "db_satisfies_all",
-            "repo_satisfies") \
+            "repo_satisfies", "sheet_equals_table", "sheet_conforms") \
             or "path" not in item:
         raise OperatorError("unsupported mechanically observable predicate")
     if item["predicate"] == "file_equals" and "value" not in item:
@@ -66,6 +66,12 @@ def validate_predicate(item):
         raise OperatorError("db_satisfies_all needs assertions")
     if item["predicate"] == "repo_satisfies" and "assertions" not in item:
         raise OperatorError("repo_satisfies needs assertions")
+    if item["predicate"] == "sheet_equals_table" and (
+            "sheet" not in item or "table" not in item):
+        raise OperatorError("sheet_equals_table needs a sheet and a table")
+    if item["predicate"] == "sheet_conforms" and (
+            "sheet" not in item or "schema" not in item):
+        raise OperatorError("sheet_conforms needs a sheet and a schema")
 
 
 def observe(root, predicate):
@@ -90,6 +96,26 @@ def observe(root, predicate):
     if not os.path.isfile(path) or os.path.islink(path):
         return False
     if kind == "file_exists":
+        return True
+    if kind == "sheet_equals_table":
+        # The sheet's grid, re-read NOW through the workbook adapter, equals
+        # the CSV table structurally — the workbook analog of file_derives,
+        # serving both directions (an import's output, an export's source).
+        import xlsxstate
+        try:
+            return bool(xlsxstate.sheet_equals(
+                path, predicate["sheet"],
+                fileauth.read_text(root, predicate["table"])))
+        except (OSError, ValueError, fileauth.Denied):
+            return False
+    if kind == "sheet_conforms":
+        import tabletypes
+        import xlsxstate
+        try:
+            tabletypes.conforms(predicate["schema"],
+                                xlsxstate.read_table(path, predicate["sheet"]))
+        except (OSError, ValueError, fileauth.Denied):
+            return False
         return True
     if kind == "file_derives":
         # The output IS the deterministic transform of its sources, RIGHT NOW

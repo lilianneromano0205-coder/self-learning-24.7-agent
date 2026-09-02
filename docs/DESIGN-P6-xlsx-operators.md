@@ -1,8 +1,16 @@
 # DESIGN — Phase 6: XLSX semantic operators
 
-**Branch:** `phase6/xlsx-operators` · **Status:** DESIGN (committed before
-any code; flips to BUILT only when the preregistered benchmark below is
-green in the acceptance suite) · **Contract:**
+**Branch:** `phase6/xlsx-operators` · **Status:** BUILT — the preregistered
+benchmark below is `tests/test_xlsx_operators.py` in the acceptance suite;
+all seven properties hold (first run: byte-identical workbooks in two
+arenas; exact round trip; a foreign shared-string workbook read exactly;
+`procedure_compiled` from two gated trajectories; PROVEN on a sealed fresh
+suite whose workbooks were materialized from sealed CSV; `procedure_route`
+with `model_calls: 0` under an independent stdlib gate). Implementation:
+`xlsxstate.py`, `sheet_equals_table`/`sheet_conforms` in `operators.py`,
+the `xlsx_import`/`xlsx_export` leaves through `procedure.py` (with `.xlsx`
+suite materialization), the tool pair in `loop.py`, `fileauth.write_bytes`.
+· **Contract:**
 [VISION_CONTRACT.md](../VISION_CONTRACT.md) binds every decision. ·
 **Audit order:** the 2026-09-02 checkpoint audit's operator-universe order
 after Git — *"2. XLSX/Excel — because enormous amounts of human business
