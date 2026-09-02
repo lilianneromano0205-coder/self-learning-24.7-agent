@@ -179,3 +179,21 @@ Phases 1–4; the benchmark proves the harness mechanics of a fourth state
 world, not model lift. LIFT-001A and LEARN-001 remain the only door to
 economic claims and still wait on a provider key. No `push`: repository
 work that must reach a remote still goes through the model and the owner.
+
+## Claim envelope (added by Phase 6.1)
+
+The 2026-09-02 consolidated audit found that `commit` staged the declared
+paths and then ran a plain `git commit`, which commits *everything*
+staged; Phase 6.1 closed that with a **clean-index precondition** (a
+semantic commit refuses to start from a dirty index) and a host-git
+witness that the commit holds exactly the declared paths, and renamed
+`state_digest` to **`ref_state_digest`** because it covers refs and HEAD
+only. What the benchmark proves, and no more:
+
+| Property | Preconditions | Excluded states | Oracle |
+|---|---|---|---|
+| deterministic commit | same bytes, same verbs, adapter-initialized repo | hostile concurrent mutation | commit hash in two arenas |
+| exact commit | clean index (enforced) | dirty index (refused) | host `git show --name-only` |
+| restore on failed effect | clean index, adapter-initialized repo | process kill mid-verb | HEAD/refs/index/worktree via host git |
+| conflict refusal | clean tracked worktree (enforced) | — | host git: no `MERGE_HEAD`, same HEAD |
+| tamper fail-closed | control files as the adapter wrote them | a tamper mimicking the canonical bytes exactly | refusal before any git invocation |

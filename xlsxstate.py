@@ -149,7 +149,12 @@ def _open(path):
                 any(part in ("..", "") for part in name.split("/")):
             zf.close()
             _fail(f"member name escapes the package: {name!r}")
-    names = set(zf.namelist())
+    listed = zf.namelist()
+    names = set(listed)
+    if len(listed) != len(names):
+        zf.close()
+        _fail("duplicate member names in the package — which one is the "
+              "part? Ambiguity is refused, not interpreted")
     if "xl/workbook.xml" not in names or "[Content_Types].xml" not in names:
         zf.close()
         _fail("not a workbook: no xl/workbook.xml part")
@@ -205,8 +210,17 @@ def _grid(zf, part):
     rows, next_row = {}, 0
     for row in root.iter(_tag("row")):
         reference = row.get("r")
-        row_index = int(reference) - 1 if reference and reference.isdigit() \
-            else next_row
+        if reference is not None:
+            # rows are one-based in OOXML; anything else is not a row
+            if not reference.isdigit() or int(reference) < 1:
+                _fail(f"row reference {reference!r} is not acceptable "
+                      f"(rows are numbered from 1)")
+            row_index = int(reference) - 1
+        else:
+            row_index = next_row
+        if row_index in rows:
+            _fail(f"duplicate row {row_index + 1} — ambiguity is refused, "
+                  f"not interpreted")
         next_row = row_index + 1
         cells, next_col = {}, 0
         for cell in row.findall(_tag("c")):
@@ -218,6 +232,9 @@ def _grid(zf, part):
                 col_index = _column_index(match.group(1))
             else:
                 col_index = next_col
+            if col_index in cells:
+                _fail(f"duplicate cell {ref or col_index} in row "
+                      f"{row_index + 1} — ambiguity is refused, not interpreted")
             next_col = col_index + 1
             if cell.find(_tag("f")) is not None:
                 _fail(f"cell {ref or col_index} holds a formula — a cached "
@@ -237,8 +254,11 @@ def _grid(zf, part):
                 text = "".join(t.text or "" for t in inline.iter(_tag("t"))) \
                     if inline is not None else ""
             elif kind == "b":
-                text = "true" if value is not None and \
-                    (value.text or "").strip() == "1" else "false"
+                raw = (value.text or "").strip() if value is not None else ""
+                if raw not in ("0", "1"):
+                    _fail(f"cell {ref} boolean must be stored as 0 or 1, "
+                          f"got {raw!r}")
+                text = "true" if raw == "1" else "false"
             elif kind == "e":
                 _fail(f"cell {ref} holds an error value: refused")
             elif kind in ("n", "str"):

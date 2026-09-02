@@ -246,11 +246,14 @@ def _snapshot(root, action):
     result = {}
     if action["tool"] == "git_op":
         # a repository's before/after evidence is the digest of every ref
-        # and its HEAD — the file family's hash, for a directory of history
+        # and its symbolic HEAD — refs only, and named so: the worktree,
+        # the index and untracked files are not in it — beside whether the
+        # index is clean, the pre-state every semantic mutation requires
         import gitstate
         path = fileauth.resolve(root, action["args"]["repo"], "write", "agent")
         result["repo"] = {"exists": gitstate.is_repository(path),
-                          "hash": gitstate.state_digest(path)}
+                          "hash": gitstate.ref_state_digest(path),
+                          "index_clean": gitstate.index_clean(path)}
         return result
     for key in ("path", "source", "source2", "database", "out"):
         value = action["args"].get(key)
@@ -259,7 +262,15 @@ def _snapshot(root, action):
         mode = "write" if key == _WRITE_KEY.get(action["tool"]) else "read"
         path = fileauth.resolve(root, value, mode, "agent")
         exists = os.path.isfile(path)
-        result[key] = {"exists": exists, "hash": digest(fileauth.read_text(root, value)) if exists else None}
+        # a workbook is bytes: a lossy text decode would let two different
+        # files carry one hash, so the workbook argument of the xlsx
+        # adapters is digested as the bytes it is (docs/DESIGN-P6.1, 4)
+        binary = key == "path" and action["tool"] in ("xlsx_import",
+                                                      "xlsx_export")
+        result[key] = {"exists": exists,
+                       "hash": ((fileauth.sha256_bytes(root, value) if binary
+                                 else digest(fileauth.read_text(root, value)))
+                                if exists else None)}
     return result
 
 

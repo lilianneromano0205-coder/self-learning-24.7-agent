@@ -94,10 +94,18 @@ def compatible(root, rb, inputs):
         return False
 
 
-def shadow_match(root, task):
+def shadow_match(root, task, failures=None):
     """Every PROVEN procedure this task fits structurally, sorted. Reads
     the same trust ledger the route reads; proposes to a LOG, never to a
-    scheduler."""
+    scheduler.
+
+    A procedure the shadow could not even read is not silently skipped:
+    when the caller passes a `failures` list, each miss is appended as
+    {runbook, error} so the experiment knows its data is incomplete
+    (docs/DESIGN-P6.1, finding 8). Structural compatibility is a typed-
+    schema fit — it cannot tell two procedures with one schema and
+    different semantics apart, which is exactly why this lens has no
+    authority (finding 7)."""
     import runbook
     inputs = task.get("inputs") if isinstance(task.get("inputs"), dict) \
         else {}
@@ -111,7 +119,9 @@ def shadow_match(root, task):
                 continue
             if compatible(root, rb, inputs):
                 out.append(name)
-        except (ValueError, OSError):
+        except (ValueError, OSError, runbook.RunbookError) as exc:
+            if failures is not None:
+                failures.append({"runbook": name, "error": type(exc).__name__})
             continue
     return sorted(out)
 

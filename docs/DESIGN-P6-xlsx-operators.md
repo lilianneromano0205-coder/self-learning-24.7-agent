@@ -144,3 +144,19 @@ an existing multi-sheet workbook: `xlsx_export` creates a new workbook,
 and replacing one sheet inside a foreign workbook while preserving its
 other parts byte for byte is named as the next XLSX step, not done here.
 No formulas are ever written: the harness computes, the workbook records.
+
+## Claim envelope (added by Phase 6.1)
+
+The 2026-09-02 consolidated audit found that trajectory evidence hashed a
+workbook through a lossy text decode, and that several OOXML ambiguities
+were interpreted rather than refused. Phase 6.1 hashes the workbook
+argument of both adapters as **bytes** (`fileauth.sha256_bytes`) and
+refuses duplicate cell references, duplicate rows, row `0`, booleans other
+than `0`/`1`, and duplicate package members. What the benchmark proves:
+
+| Property | Preconditions | Excluded states | Oracle |
+|---|---|---|---|
+| byte determinism | same table, same sheet name | — | bytes in two arenas |
+| exact round trip | values the adapter wrote | formulas, merges, errors (refused) | CSV text equality |
+| foreign import | well-formed OOXML without the refused features | ambiguous OOXML (refused) | hand-built fixture |
+| evidence hashing | — | — | byte digest, never text |

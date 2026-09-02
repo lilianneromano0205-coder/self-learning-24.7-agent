@@ -1,8 +1,14 @@
 # DESIGN — Phase 6.1: Correctness hardening of the state substrate
 
-**Branch:** `phase6.1/correctness-hardening` · **Status:** DESIGN (committed
-before any code; flips to BUILT only when every item below is closed by a
-test that names its claim envelope) · **Contract:**
+**Branch:** `phase6.1/correctness-hardening` · **Status:** BUILT — every
+finding below is closed by a named test: `check_dirty_index_refuses`
+(host-git witness), the `ref_state_digest` rename with `index_clean`
+evidence, `check_evidence_hashes_workbook_bytes`, five OOXML refusals in
+`check_refusals`, UUID temp names, `check_same_schema_different_semantics_collide`,
+`check_shadow_failures_are_logged`, the archived manifest, the widened
+label grammar under `check_interleaved_logs_cannot_cry_wolf`, and
+`tests/test_promotion_leakage.py` — whose first run found
+`proof/observations.jsonl` agent-writable, now CONTROL. · **Contract:**
 [VISION_CONTRACT.md](../VISION_CONTRACT.md) binds every decision. ·
 **Audit gate:** the 2026-09-02 consolidated audit rated the biggest threat
 no longer as architectural drift but as **false competence** — "allowing a

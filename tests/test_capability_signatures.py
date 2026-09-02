@@ -213,6 +213,91 @@ def check_the_report_aggregates_the_ledger(root):
           "that authority stayed lexical")
 
 
+def _purge_rb():
+    """Same typed schema, same operator and effect kinds as digestion —
+    different semantics (it writes a purge marker, not a digest)."""
+    rb = copy.deepcopy(_digestion_rb())
+    rb["name"], rb["triggers"] = "proc-purge", ["purge"]
+    rb["steps"][0]["action"]["args"]["content"] = "purged\n"
+    rb["steps"][0]["effects"][0]["value"] = "purged\n"
+    rb["provenance"]["family"] = "purge"
+    return rb
+
+
+def check_same_schema_different_semantics_collide(root):
+    """Finding 7 of docs/DESIGN-P6.1, stated as a test rather than hidden:
+    structural compatibility is a typed-schema fit, so two proven procedures
+    with one schema and one operator/effect shape but different semantics
+    share a signature and are BOTH proposed. That is exactly why the shadow
+    has no authority; the two-sided requirement/capability signature is the
+    next SIG design, not this one."""
+    rb = _purge_rb()
+    io.open(runbook.path(root, rb["name"]), "w",
+            encoding="utf-8").write(json.dumps(rb))
+    procedure.seal_suite(root, "purge-suite", {
+        "family": "purge",
+        "cases": [{"id": f"p{i}", "edge": i == 2,
+                   "inputs": {"path": f"out/p{i}.md"}} for i in range(3)],
+        "checks": [{"predicate": "file_equals", "path": {"input": "path"},
+                    "value": "purged\n"}]})
+    verdict = procedure.evaluate(root, "proc-purge", "purge-suite")
+    assert verdict["accepted"] and verdict["status"] == "proven", verdict
+    assert signatures.of_runbook(rb)["signature_hash"] == \
+        signatures.of_runbook(_digestion_rb())["signature_hash"], \
+        "one schema, one operator, one effect kind: one signature for two semantics"
+    _script(root, "worker", [
+        {"tool": "write_file", "args": {"path": "out/w4.md",
+                                        "content": "digest\n"}},
+        {"tool": "finish_task", "args": {"summary": "assembled"}}])
+    agent = loop.Agent(root)
+    agent.add_task("r_worker", "assemble the monthly summary of notes",
+                   done_check=GATE + " out/w4.md", inputs={"path": "out/w4.md"})
+    assert run_drain(root, timeout=120) == 0
+    task = _tasks(root)[-1]
+    assert task["status"] == "done" and not task.get("procedure_routed"), task
+    shadows = [e for e in _events(root) if e.get("event") == "signature_shadow"
+               and e.get("task") == task["id"]]
+    assert shadows and shadows[-1]["structural"] == ["proc-digestion", "proc-purge"], \
+        shadows
+    assert shadows[-1]["agreement"] == "structural_only"
+    print("[collision] two proven procedures with one typed schema and one "
+          "operator/effect shape — write a digest, write a purge — share a "
+          "signature and were BOTH proposed for a paraphrase: schema "
+          "compatibility is not semantic identity, which is why the shadow "
+          "holds no authority")
+
+
+def check_shadow_failures_are_logged(root):
+    """Finding 8 of docs/DESIGN-P6.1: a shadow observation the guard had to
+    drop is logged with its error class, so SIG-001 knows its data is
+    incomplete instead of being biased toward the tasks the shadow handled.
+    A declared input the file authority refuses makes the structural check
+    itself fail — the live route is untouched, the miss is recorded."""
+    _script(root, "worker", [
+        {"tool": "write_file", "args": {"path": "out/w5.md",
+                                        "content": "digest\n"}},
+        {"tool": "finish_task", "args": {"summary": "assembled"}}])
+    agent = loop.Agent(root)
+    agent.add_task("r_worker", "assemble the quarterly summary of notes",
+                   done_check=GATE + " out/w5.md",
+                   inputs={"path": "settings.toml"})
+    assert run_drain(root, timeout=120) == 0
+    task = _tasks(root)[-1]
+    assert task["status"] == "done" and not task.get("procedure_routed"), task
+    failures = [e for e in _events(root)
+                if e.get("event") == "signature_shadow_failure"
+                and e.get("task") == task["id"]]
+    assert failures and failures[-1]["error"] == "Denied" and \
+        failures[-1]["runbook"] is None, failures
+    shadows = [e for e in _events(root) if e.get("event") == "signature_shadow"
+               and e.get("task") == task["id"]]
+    assert shadows == [], "a failed observation must not also count as one"
+    print("[shadow-failure] a structural check the guard had to drop was "
+          "logged as signature_shadow_failure with its error class — the "
+          "miss is data, not silence — while the live route completed the "
+          "task untouched")
+
+
 def main():
     home = make_sandbox("capability-signatures",
                         providers={"m": {"script": "s.json"}},
@@ -224,6 +309,8 @@ def main():
     check_lexical_routing_is_untouched(root)
     check_no_false_structural_match(root)
     check_the_report_aggregates_the_ledger(root)
+    check_same_schema_different_semantics_collide(root)
+    check_shadow_failures_are_logged(root)
     print("PASS test_capability_signatures")
 
 

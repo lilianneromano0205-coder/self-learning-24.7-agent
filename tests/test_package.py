@@ -423,9 +423,34 @@ def check_interleaved_logs_cannot_cry_wolf(_work):
         sysrep2["verdict"] == "FAILING", (
         "a failure named by run_all's authoritative tail was laundered "
         "into a pass", sysrep2)
+
+    # …and every observation a test DECLARES is counted, whatever its
+    # label's shape: "[phase 1]", "[csv->sql]", "[re-exam failure]" are
+    # observations; "[skipped: x]" (a colon) is a note, never one. The old
+    # grammar dropped the spaced ones silently, so the count under-read
+    # the suite while the verdict stayed green.
+    spaced = []
+    for t in tests:
+        spaced.append(f"=== {t} ===")
+        spaced.append(f"[obs] {t} observed something")
+        if t == victim:
+            spaced.append("[phase 1] a spaced label is an observation")
+            spaced.append("[csv->sql] so is an arrow")
+            spaced.append("[re-exam failure] and a hyphenated phrase")
+            spaced.append("[skipped: nope] a colon marks a note, not evidence")
+        spaced.append(f"PASS {t[:-3]}")
+    spaced.append(f"{len(tests)} executed: {len(tests)} passed, 0 skipped, "
+                  f"0 failed")
+    rep3 = evidence.build("\n".join(spaced))
+    sysrep3 = next(x for x in rep3["systems"] if x["system"] == sysname)
+    assert sysrep3["observations"] == len(tests) + 3, (
+        "declared observations were dropped or invented by the label "
+        "grammar", sysrep3["observations"], len(tests) + 3)
     print("[interleave] a green test whose OK drifted under the next "
           "header stays green (verdict from exit codes, observations from "
-          "what could be attributed) — and a tail-named failure stays red")
+          "what could be attributed) — a tail-named failure stays red — "
+          "and spaced observation labels are counted while colon notes "
+          "are not")
 
 
 def check_evidence_refuses_to_invent(work):
