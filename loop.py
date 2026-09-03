@@ -3694,14 +3694,9 @@ class Agent:
                 # database named in settings.toml [agent] db_write, plus
                 # git-write for each repository in [agent] git_write.
                 # Nothing here can grant itself more.
-                agent_cfg = self.cfg.get("agent", {})
-                grant = {"workspace-write"} | {
-                    "db-write:" + str(p).replace("\\", "/")
-                    for p in (agent_cfg.get("db_write") or [])} | {
-                    "git-write:" + str(p).replace("\\", "/")
-                    for p in (agent_cfg.get("git_write") or [])} | {
-                    "http-write:" + str(p)
-                    for p in (agent_cfg.get("http_write") or [])}
+                # ONE definition of the owner's grant, shared with the
+                # reconcilers (docs/DESIGN-P9a): procedure.owner_grant
+                grant = procedure.owner_grant(self.cfg)
                 result = procedure.execute(self.root, rb, inputs,
                                            authority=grant)
             except Exception as e:
@@ -4104,6 +4099,28 @@ class Agent:
                                        "error": str(e)}))
             return False
 
+    def _reconcile_tick(self):
+        """The standing controllers (docs/DESIGN-P9a): every armed
+        reconciler that is due observes its declared state and, on drift,
+        restores it with its PROVEN procedure under the owner's grant —
+        zero model calls, on the idle cycle, beside the prospective tick.
+        Returns True when a reconciler acted, so a --drain run makes one
+        more pass and sees the state settle."""
+        import reconciler
+        now = time.time()
+        throttle = 0 if getattr(self, "_drain_mode", False) else 20
+        if now - getattr(self, "_rc_last", 0) < throttle:
+            return False
+        self._rc_last = now
+        try:
+            s = reconciler.tick(self.root, self, cfg=self.cfg)
+            return bool(s.get("repaired") or s.get("failed") or s.get("blocked")
+                        or s.get("halted"))
+        except Exception as e:
+            self.log.error(json.dumps({"event": "reconcile_tick_failed",
+                                       "error": str(e)[:300]}))
+            return False
+
     def _maybe_queue_chain(self, task):
         """Pipeline chaining: [agent.chain] maps a finished role to the next
         role, e.g. ripper -> watcher, so ingested material is studied without
@@ -4259,7 +4276,8 @@ class Agent:
             task = self.next_task(state)
             if task is None:
                 self.heartbeat(note="idle")
-                if (self._prospective_tick() or self._inbox_tick()
+                if (self._prospective_tick() or self._reconcile_tick()
+                        or self._inbox_tick()
                         or self._gap_tick() or self._exam_tick()
                         or self._reexam_tick()):
                     continue

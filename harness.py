@@ -56,6 +56,7 @@ LEDGERS = [
     ("frontier/frontier.json", "capability frontier ledger"),
     ("acquisitions.json", "acquisition ledger"),
     ("training/registry.json", "training model registry"),
+    ("reconcilers.json", "reconciler declarations"),
 ]
 STALE_LOCK_SECONDS = 60
 CORE_FILES = ["loop.py", "context.py", "policy.py", "effects.py",

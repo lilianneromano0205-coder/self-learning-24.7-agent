@@ -1,7 +1,8 @@
 # Phase 9a — Reconcilers: the cluster-controller pattern as a standing responsibility (design, committed before code)
 
-**Status: DESIGN** (flips to BUILT when the preregistered benchmark below is
-green in the acceptance suite). **Branch:** `phase9a/reconcilers`.
+**Status: BUILT** (this document was committed first; the build commit
+follows it and cites this file; the benchmark below is green in the
+acceptance suite, on its first run). **Branch:** `phase9a/reconcilers`.
 
 ## The direction this phase opens
 
