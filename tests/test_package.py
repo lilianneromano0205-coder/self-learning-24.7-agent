@@ -126,6 +126,9 @@ def check_no_credential_ships(zpath):
         "tests/test_http_operators.py":
             "a fake bearer proving the http adapter sends it to the fixture "
             "server and nowhere else (docs/DESIGN-P8, property 4)",
+        "tests/test_sentinels.py":
+            "a fake bearer proving an http_changed sentinel reaches the "
+            "fixture with it and stores only hashes (docs/DESIGN-P9c, 4)",
     }
     unexpected = [(n, w) for n, w in suspicious if n not in FIXTURE_KEYS]
     assert not unexpected, (

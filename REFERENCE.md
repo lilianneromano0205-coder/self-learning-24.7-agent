@@ -8,7 +8,7 @@ written by reading the code, not from memory; where a claim could rot, the
 test that keeps it honest is named.
 
 **Scale, so you know what you are reading about:** 115 Python modules,
-one HTML file for the whole UI, 152 acceptance tests, zero third-party
+one HTML file for the whole UI, 153 acceptance tests, zero third-party
 dependencies. Python 3.11+ and your own API keys.
 
 ---
@@ -842,7 +842,7 @@ For fields an agent cannot execute: the answer must cite defined atoms or say
 
 ### Prospective memory — `prospective.py`
 
-Remembering to **act**, not just remembering facts. Seven kinds, every
+Remembering to **act**, not just remembering facts. Ten kinds, every
 one evaluated mechanically by the scheduler:
 
 | Kind | Fires when |
@@ -854,6 +854,9 @@ one evaluated mechanically by the scheduler:
 | `task_done` | a named task finishes — the chain workflows use |
 | `event` | a named event arrives at `/wake` |
 | `check` | a probe command exits 0, run as a gate through the execution authority and rate-limited (30 s floor) |
+| `file_changed` | a contained file's SHA-256 differs from the last one seen (removal and reappearance are changes; an identical rewrite is not); polite (`every_s`, 30 s floor); the first look is a baseline; fires once per change with both hashes in the goal and re-arms — docs/DESIGN-P9c |
+| `tree_changed` | a contained directory's manifest hash (paths, sizes, content hashes; `max_files` ≤ 2000) differs |
+| `http_changed` | the canonical readback of an owner-named endpoint path (Phase 8) hashes differently; a failed readback is not a change; only hashes are stored |
 
 Firing queues a normal gated task — a fired intention earns no shortcuts.
 `repeat: true` stays armed; consumed events are capped at 200.

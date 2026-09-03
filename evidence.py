@@ -126,7 +126,8 @@ SYSTEMS = {
                   "test_inbox.py", "test_material.py", "test_url.py",
                   "test_curriculum.py",
                   "test_e2e.py",
-                  "test_research_discovery.py", "test_reconciler.py"],
+                  "test_research_discovery.py", "test_reconciler.py",
+                  "test_sentinels.py"],
         "blind": "schedules are tested with tiny intervals inside one run. "
                  "Nothing here proves a month of unattended drift, clock "
                  "changes across daylight saving, or a real cron environment.",
