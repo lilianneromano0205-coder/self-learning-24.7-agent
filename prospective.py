@@ -81,11 +81,95 @@ def _contained(root, rel):
     return rel
 
 
+# CHANGE SENTINELS (docs/DESIGN-P9c): the crawler's three dull virtues —
+# remember what you saw (a hash), notice when it moves, be polite — as
+# intention kinds. A sentinel stores hashes, never content; the first look
+# is a baseline and never fires; an identical rewrite is not a change; a
+# change fires once, with the evidence in the goal, and re-arms.
+SENTINEL_KINDS = ("file_changed", "tree_changed", "http_changed")
+SENTINEL_MIN_EVERY_S = 30
+TREE_MAX_FILES = 2000
+_EMPTY = "0" * 64      # "nothing there": removal and reappearance are changes
+
+
+def _sha_file(path):
+    import hashlib
+    h = hashlib.sha256()
+    try:
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+    except OSError:
+        return _EMPTY
+    return h.hexdigest()
+
+
+def _sha_tree(path, max_files):
+    """A manifest hash: sorted relative paths, sizes and content hashes.
+    None past max_files, so a sentinel over a huge tree cannot become a
+    background disk scan nobody declared."""
+    import hashlib
+    if not os.path.isdir(path):
+        return _EMPTY
+    rows = []
+    for dirpath, dirnames, filenames in os.walk(path):
+        dirnames.sort()
+        for name in sorted(filenames):
+            full = os.path.join(dirpath, name)
+            rel = os.path.relpath(full, path).replace("\\", "/")
+            try:
+                size = os.path.getsize(full)
+            except OSError:
+                size = -1
+            rows.append(f"{rel}\t{size}\t{_sha_file(full)}")
+            if len(rows) > max_files:
+                return None
+    return hashlib.sha256("\n".join(rows).encode("utf-8")).hexdigest()
+
+
+def _sha_http(root, w):
+    """The canonical readback body's hash through the owner's endpoint
+    table (Phase 8): no host the owner did not name, no credential and no
+    body ever stored. None when the readback fails — an outage is not news."""
+    import hashlib
+    sys.path.insert(0, sys_path_dir)
+    import httpstate
+    try:
+        entry = httpstate.load_endpoint(root, w["endpoint"])
+        bearer = httpstate.resolve_token(entry, root)
+        body = httpstate.observe(entry, w["path"], w.get("query") or "{}",
+                                 bearer)
+    except (OSError, ValueError):
+        return None
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
 def add(root, when, then, note=""):
     kind = when.get("kind")
     if kind not in ("at", "every_days", "file_exists", "file_contains",
-                    "task_done", "event", "check"):
+                    "task_done", "event", "check") + SENTINEL_KINDS:
         raise ValueError(f"unknown condition kind: {kind}")
+    if kind in SENTINEL_KINDS:
+        if kind in ("file_changed", "tree_changed"):
+            when["path"] = _contained(root, when.get("path"))
+        if kind == "tree_changed":
+            mf = when.get("max_files", TREE_MAX_FILES)
+            if type(mf) is not int or not 1 <= mf <= TREE_MAX_FILES:
+                raise ValueError(f"tree_changed max_files must be 1..{TREE_MAX_FILES}")
+            when["max_files"] = mf
+            if _sha_tree(os.path.join(root, when["path"]), mf) is None:
+                raise ValueError(f"tree has more than {mf} files — refusing to "
+                                 f"become a disk scan nobody declared")
+        if kind == "http_changed":
+            sys.path.insert(0, sys_path_dir)
+            import httpstate
+            httpstate.load_endpoint(root, when.get("endpoint"))   # refuses unknown
+            when["path"] = httpstate.canonical_path(when.get("path"))
+            when["query"] = httpstate.canonical_query(when.get("query") or "")
+        when["every_s"] = max(SENTINEL_MIN_EVERY_S, int(when.get("every_s") or 300))
+        when["last_seen"] = 0.0
+        when["last_hash"] = None
+        when["pending"] = None
     if kind in ("file_exists", "file_contains"):
         when["path"] = _contained(root, when.get("path"))
     if kind == "file_contains" and not when.get("needle"):
@@ -211,6 +295,26 @@ def _due(root, it, agent, now, fired_map=None):
             return rc == 0
         except Exception:
             return False                     # an unrunnable probe never fires
+    if k in SENTINEL_KINDS:
+        if now - float(w.get("last_seen") or 0) < float(w.get("every_s", 300)):
+            return False                     # politeness: not even hashed
+        w["last_seen"] = now                 # persisted by the caller's save
+        if k == "file_changed":
+            current = _sha_file(os.path.join(root, w["path"]))
+        elif k == "tree_changed":
+            current = _sha_tree(os.path.join(root, w["path"]),
+                                w.get("max_files", TREE_MAX_FILES))
+        else:
+            current = _sha_http(root, w)
+        if current is None:
+            return False                     # unobservable now: not a change
+        if w.get("last_hash") is None:
+            w["last_hash"] = current         # baseline only, never a firing
+            return False
+        if current == w["last_hash"]:
+            return False
+        w["pending"] = {"old": w["last_hash"], "new": current}
+        return True
     return False
 
 
@@ -250,8 +354,13 @@ def _check_locked(root, agent=None):
     # probe rate-limiting bookkeeping (when.last_probe) mutates in _due;
     # it must persist even when nothing fires, or every idle tick re-runs
     # every probe subprocess and the rate limit is decorative
-    probe_before = {it["id"]: it["when"].get("last_probe")
-                    for it in items if it["when"].get("kind") == "check"}
+    # sentinels keep their own bookkeeping the same way: last_seen and
+    # last_hash move on a look that fires nothing, and must persist
+    probe_before = {it["id"]: (it["when"].get("last_probe"),
+                               it["when"].get("last_seen"),
+                               it["when"].get("last_hash"))
+                    for it in items
+                    if it["when"].get("kind") in ("check",) + SENTINEL_KINDS}
     fired_map = {x["id"]: x.get("fired_task") for x in items if x.get("fired_task")}
     for it in items:
         if it["status"] != "armed":
@@ -279,6 +388,18 @@ def _check_locked(root, agent=None):
                                  f"(payload fenced in context at events/{event_file})",
                 "check": lambda: f"the probe `{(w.get('cmd') or '')[:80]}` "
                                  f"exited 0 — the condition now holds",
+                "file_changed": lambda: (
+                    f"CHANGE DETECTED: file {w.get('path')} "
+                    f"{(w.get('pending') or {}).get('old', '')[:12]}… -> "
+                    f"{(w.get('pending') or {}).get('new', '')[:12]}…"),
+                "tree_changed": lambda: (
+                    f"CHANGE DETECTED: tree {w.get('path')} "
+                    f"{(w.get('pending') or {}).get('old', '')[:12]}… -> "
+                    f"{(w.get('pending') or {}).get('new', '')[:12]}…"),
+                "http_changed": lambda: (
+                    f"CHANGE DETECTED: {w.get('endpoint')}/{w.get('path')} "
+                    f"{(w.get('pending') or {}).get('old', '')[:12]}… -> "
+                    f"{(w.get('pending') or {}).get('new', '')[:12]}…"),
                 }[w["kind"]]()
         goal = (f"PROSPECTIVE INTENTION FIRED — {trig}.\n{then['goal']}"
                 + (f"\n(Why this was armed: {it['note']})" if it["note"] else ""))
@@ -302,6 +423,10 @@ def _check_locked(root, agent=None):
             fired_map[it["id"]] = tid      # later stages in this tick can chain
         if w["kind"] == "every_days":
             w["last"] = it["fired_at"]      # recurring: stays armed
+        elif w["kind"] in SENTINEL_KINDS:
+            # a sentinel stays armed with the new baseline: once per change
+            w["last_hash"] = (w.get("pending") or {}).get("new") or w.get("last_hash")
+            w["pending"] = None
         elif w["kind"] == "event":
             consumed = (w.get("consumed") or []) + [event_file]
             w["consumed"] = consumed[-200:]
@@ -310,8 +435,10 @@ def _check_locked(root, agent=None):
         else:
             it["status"] = "fired"
         fired += 1
-    probed = any(it["when"].get("last_probe") != probe_before.get(it["id"])
-                 for it in items if it["when"].get("kind") == "check")
+    probed = any((it["when"].get("last_probe"), it["when"].get("last_seen"),
+                  it["when"].get("last_hash")) != probe_before.get(it["id"])
+                 for it in items
+                 if it["when"].get("kind") in ("check",) + SENTINEL_KINDS)
     if fired or probed:
         save(root, items)
     return fired

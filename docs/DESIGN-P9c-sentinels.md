@@ -1,7 +1,8 @@
 # Phase 9c — Change sentinels: crawler-grade change detection beneath the model (design, committed before code)
 
-**Status: DESIGN** (flips to BUILT when the preregistered benchmark below is
-green in the acceptance suite). **Branch:** `phase9c/sentinels`. **Series:**
+**Status: BUILT** (this document was committed first; the build commit
+follows it and cites this file; the preregistered benchmark below is green
+in the acceptance suite). **Branch:** `phase9c/sentinels`. **Series:**
 docs/DESIGN-P9a-reconcilers.md maps the lineages; this is the third piece.
 
 ## The lineage

@@ -64,7 +64,7 @@ TESTS = ["test_resume.py", "test_lock.py", "test_json_toolcall.py",
          "test_xlsx_operators.py", "test_promotion_leakage.py",
          "test_transactional_contracts.py", "test_correctness_patch.py",
          "test_ledger_defects.py", "test_http_operators.py",
-         "test_reconciler.py", "test_watchdog.py"]
+         "test_reconciler.py", "test_watchdog.py", "test_sentinels.py"]
 
 
 def main():
