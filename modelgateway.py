@@ -65,7 +65,7 @@ LEDGER = os.path.join("logs", "model-calls.jsonl")
 # but naming them makes "which of these is eating the budget" answerable
 PURPOSES = ("step", "compaction", "replay", "benchmark", "probe",
             "candidate", "judge", "research", "transcription", "vision",
-            "unknown")
+            "subquery", "unknown")
 
 
 def _path(root):

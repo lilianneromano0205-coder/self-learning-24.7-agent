@@ -62,6 +62,7 @@ IN_ROOT = [
     ("training/registry.json", "training promotion registry"),
     ("training/runs/r1/manifest.json", "training verifier pin"),
     ("proof/observations.jsonl", "proof-level evidence ledger"),
+    ("memory/cases.jsonl", "the case ledger: did a fix hold, verified by a gate"),
     ("state.json", "task state, including every done_check"),
     ("settings.toml", "authority allowlists and providers"),
     ("identity.md", "a system prompt source"),

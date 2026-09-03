@@ -8,7 +8,7 @@ written by reading the code, not from memory; where a claim could rot, the
 test that keeps it honest is named.
 
 **Scale, so you know what you are reading about:** 112 Python modules,
-one HTML file for the whole UI, 148 acceptance tests, zero third-party
+one HTML file for the whole UI, 149 acceptance tests, zero third-party
 dependencies. Python 3.11+ and your own API keys.
 
 ---
@@ -22,7 +22,7 @@ dependencies. Python 3.11+ and your own API keys.
 5. [The context compiler](#5-the-context-compiler)
 6. [The memory institution](#6-the-memory-institution)
 7. [Knowing what it knows: sources, conflicts, standards, self](#7-knowing-what-it-knows)
-8. [Creating agents: the five lanes, eight roles, twenty templates](#8-creating-agents)
+8. [Creating agents: the five lanes, eight roles, twenty-four templates](#8-creating-agents)
 9. [The work systems](#9-the-work-systems)
 10. [Governance and improvement](#10-governance-and-improvement)
 11. [The control plane](#11-the-control-plane)
@@ -763,7 +763,7 @@ python designcheck.py out/index.html --root experts/<slug> --course design
 |---|---|---|
 | 🎓 **Trained expert** | `fleet.py create` + teach | studies whole courses into cited notes, proves skills, sits closed-book exams |
 | ⚡ **Quick specialist** | `quick.py "goal"` | briefed from files you drop and working in seconds, still caged by every gate |
-| 🧬 **From an archetype** | panel → template | one of 20 pre-built specialists |
+| 🧬 **From an archetype** | panel → template | one of 24 pre-built specialists |
 | 📚 **Learner** | panel → learner | give it a topic; it finds and ingests its own material |
 | 🤝 **Team** | `team.py run` | chosen specialists, lead decomposes, handoffs are files |
 
@@ -789,14 +789,20 @@ Each has a prompt in `prompts/` and a distinct job:
 Above them all: `constitution.md` (overrides everything) and `_grounding.md`
 (the tool contract, the fence rule, the escalation marker).
 
-### The twenty templates
+### The twenty-four templates
 
 `frontend-developer` · `ui-ux-designer` · `code-reviewer` · `data-analyst` ·
 `technical-writer` · `copywriter` · `seo-auditor` · `research-analyst` ·
 `contract-analyst` · `devops-runner` · `ux-reviewer` · `scout` ·
 `critic-sentinel` · `market-researcher` · `competitive-intel` ·
 `trend-forecaster` · `treasurer-analyst` · `tradeops-landed-cost` ·
-`local-radar` · `seo-orchestrator`
+`local-radar` · `seo-orchestrator` · `chief-of-staff` · `deep-researcher` ·
+`nightwatch` · `privacy-warden`
+
+The last four are the platform's answers to the 2026 agent-product
+categories (personal automation, compounding research, long-horizon
+optimisation, zero-egress operation), built on the same graders, earned
+trust and control-zoned ledgers as the rest.
 
 ```bash
 python templates.py                     # list them with their deliverables
@@ -836,14 +842,18 @@ For fields an agent cannot execute: the answer must cite defined atoms or say
 
 ### Prospective memory — `prospective.py`
 
-Remembering to **act**, not just remembering facts. Four kinds:
+Remembering to **act**, not just remembering facts. Seven kinds, every
+one evaluated mechanically by the scheduler:
 
 | Kind | Fires when |
 |---|---|
-| `every_days` | a period elapses |
+| `every_days` | a period elapses (re-arms itself) |
 | `at` | a timestamp passes |
-| `watch` | a file or folder changes |
+| `file_exists` | a contained path appears |
+| `file_contains` | a contained file gains a needle (read up to 2 MB) |
+| `task_done` | a named task finishes — the chain workflows use |
 | `event` | a named event arrives at `/wake` |
+| `check` | a probe command exits 0, run as a gate through the execution authority and rate-limited (30 s floor) |
 
 Firing queues a normal gated task — a fired intention earns no shortcuts.
 `repeat: true` stays armed; consumed events are capped at 200.

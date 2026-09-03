@@ -501,10 +501,10 @@ def main():
     # ladder is walked for real; where it does not, that part SKIPS OUT LOUD
     # rather than quietly installing on the host to stay green.
     if not _use_docker(sb) or not _sandbox_available(sb):
-        print("SKIP test_acquire: no isolated sandbox on this machine "
-              "(docker not available), so the install rungs cannot be "
-              "exercised without breaking the rule they protect. The "
-              "refusals above were all checked.")
+        print("SKIP test_acquire: no isolated sandbox for this run (the "
+              "settings do not select docker, or docker is unavailable), so "
+              "the install rungs cannot be exercised without breaking the "
+              "rule they protect. The refusals above were all checked.")
         return
     check_search_first(sb)
     check_malicious_fixture(sb)

@@ -2995,9 +2995,21 @@ function dlgTask(){
     <label class="lb">Course (optional)</label>
     <input class="field" id="ntCourse" placeholder="ties the task to one course's memory">
     <label class="lb">Definition of done (optional but powerful)</label>
-    <input class="field" id="ntCheck" placeholder="a command that must exit 0, e.g. python check.py">
-    <p class="muted" style="font-size:12px">With a done-check, the agent cannot claim
-    finished until the command passes — the single biggest anti-slop lever you have.</p>
+    <div class="row">
+      <select class="field" id="ntGate" style="max-width:260px">
+        <option value="">no gate — the agent's own word</option>
+        <option value="exists">exists — the deliverable file exists</option>
+        <option value="designcheck">designcheck — the interface passes the design gate</option>
+        <option value="citecheck">citecheck — every cited atom is defined</option>
+        <option value="verify">verify — the course's CHECK commands pass</option>
+        <option value="memcheck">memcheck — the course's memory is sound</option>
+      </select>
+      <input class="field" id="ntGateParam" placeholder="path (exists, designcheck, citecheck) or course (verify, memcheck)">
+    </div>
+    <p class="muted" style="font-size:12px">With a gate, the agent cannot claim
+    finished until the gate passes — the single biggest anti-slop lever you have.
+    Gates are named from the catalogue (<span class="mono">GET /api/gates</span>);
+    a free-form command is accepted only from the terminal, never over the network.</p>
     <label class="lb">Stop condition (every loop is defined by when it stops)</label>
     <input class="field" id="ntStop" placeholder="done when… e.g. all three files exist and the smoke test prints ok">
     <div class="row" style="margin-top:6px">
@@ -3016,10 +3028,15 @@ function stopFromForm(){
   return Object.values(stop).some(x=>x!==undefined)?stop:undefined;
 }
 async function doTask(){
+  const gate=document.getElementById("ntGate").value;
+  const gateParam=document.getElementById("ntGateParam").value.trim();
+  const doneCheck = gate ? (["verify","memcheck"].includes(gate)
+    ? {gate:gate, course:gateParam} : {gate:gate, path:gateParam}) : undefined;
+  if(gate && !gateParam){toast("the gate needs its path or course");return;}
   const body = {role:document.getElementById("ntRole").value,
     goal:document.getElementById("ntGoal").value.trim(),
     course:document.getElementById("ntCourse").value.trim()||undefined,
-    done_check:document.getElementById("ntCheck").value.trim()||undefined,
+    done_check:doneCheck,
     stop:stopFromForm()};
   if(!body.goal){toast("write the goal");return;}
   const r = await api('/api/experts/'+S.sel+'/task',{method:"POST",body});
@@ -4887,14 +4904,14 @@ function dlgInvite(){
       <option value="builder">builder — create agents, connect tools</option>
       <option value="admin">admin — secrets, budgets, people</option>
     </select>
-    <label class="lb">Your email (the actor doing the inviting)</label>
-    <input class="field" id="ivAs" placeholder="you@example.com">`,
+    <p class="muted" style="font-size:12px">The invitation is recorded against the
+    token you are signed in with — the server never takes an actor from the form.</p>`,
     [["Cancel","closeDlg()","ghost"],["Invite","doInvite()","pri"]]);
 }
 async function doInvite(){
   const v=id=>{const e=document.getElementById(id);return e?e.value.trim():"";};
   const r = await api('/api/org/users', {method:"POST",
-    body:{email:v("ivMail"), role:v("ivRole"), actor:v("ivAs")}});
+    body:{email:v("ivMail"), role:v("ivRole")}});
   closeDlg();
   toast(r && r.added ? `${r.added} added as ${r.role}` : ((r&&r.error)||"failed"));
   render();
