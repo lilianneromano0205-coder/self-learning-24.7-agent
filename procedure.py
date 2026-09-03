@@ -943,6 +943,50 @@ def _bind_item(value, name, item):
     return value
 
 
+# Phase 7.1 (docs/DESIGN-P7.1): every refusal carries a CODE from a closed
+# set, so the loop never infers "not applicable" from English. INAPPLICABLE
+# codes describe the world or the grant, not the procedure — a guard that
+# says "not now" is not evidence against the procedure. Everything else is
+# a failure and counts.
+INAPPLICABLE_CODES = ("PRECONDITION_MISMATCH", "AUTHORITY_MISSING",
+                      "MODEL_REQUIRED")
+FAILURE_CODES = ("EFFECT_FAILED", "CHECK_FAILED", "BOUND_EXCEEDED",
+                 "CALL_FAILED", "EXECUTION_ERROR")
+
+
+def _refuse(code, message):
+    if code not in INAPPLICABLE_CODES + FAILURE_CODES:
+        raise ValueError(f"unknown procedure reason code {code!r}")
+    exc = ProcedureError(message)
+    exc.code = code
+    return exc
+
+
+def outcome(ok, code=None):
+    """The structured half of an execute() result: status ok | inapplicable
+    | failed, with the reason code that decided it. A code outside the
+    closed set is a failure — fail closed, never fail applicable."""
+    if ok:
+        return {"status": "ok", "reason_code": None}
+    if code not in INAPPLICABLE_CODES + FAILURE_CODES:
+        code = "EXECUTION_ERROR"
+    return {"status": "inapplicable" if code in INAPPLICABLE_CODES
+            else "failed", "reason_code": code}
+
+
+def route_verdict(result):
+    """What the deterministic route does with a refused replay: (inapplicable,
+    reason_code). Reads the STRUCTURED fields only; a result with no status
+    is a failure (an executor that did not classify gets no benefit of the
+    doubt), and prose is never consulted."""
+    if result.get("ok"):
+        return False, None
+    code = result.get("reason_code")
+    if result.get("status") == "inapplicable" and code in INAPPLICABLE_CODES:
+        return True, code
+    return False, code if code in FAILURE_CODES else "EXECUTION_ERROR"
+
+
 def _run_leaf(root, workspace, step, authority, receipts):
     """One deterministic adapter action, verified exactly as v1 verifies it
     — and for a db mutation, the per-file owner token is demanded HERE, at
@@ -953,26 +997,27 @@ def _run_leaf(root, workspace, step, authority, receipts):
     if action["tool"] == "db_transaction":
         missing = _db_tokens(action["args"]) - set(authority)
         if missing:
-            raise ProcedureError(
-                "required authority was not granted: missing "
-                + ", ".join(sorted(missing)))
+            raise _refuse("AUTHORITY_MISSING",
+                          "required authority was not granted: missing "
+                          + ", ".join(sorted(missing)))
     if action["tool"] == "git_op":
         token = "git-write:" + str(action["args"]["repo"]).replace("\\", "/")
         if token not in authority:
-            raise ProcedureError(
-                f"required authority was not granted: missing {token}")
+            raise _refuse("AUTHORITY_MISSING",
+                          f"required authority was not granted: missing {token}")
     if not all(operators.observe(workspace, item)
                for item in step.get("preconditions", [])):
-        raise ProcedureError("step precondition changed")
+        raise _refuse("PRECONDITION_MISMATCH", "step precondition changed")
     before = _snapshot(workspace, action)
     _perform(workspace, action)
     after = _snapshot(workspace, action)
     if action["tool"] == "copy_file" and \
             after["path"]["hash"] != before["source"]["hash"]:
-        raise ProcedureError("copy effect content differs from observed source")
+        raise _refuse("EFFECT_FAILED",
+                      "copy effect content differs from observed source")
     if not all(operators.observe(workspace, item)
                for item in step.get("effects", [])):
-        raise ProcedureError("step effect did not verify")
+        raise _refuse("EFFECT_FAILED", "step effect did not verify")
     receipts.append({"kind": "deterministic", "id": step.get("id"),
                      "tool": action["tool"], "ok": True})
 
@@ -989,8 +1034,8 @@ def _run_v2(root, workspace, steps, authority, stack, receipts):
             _run_v2(root, workspace, step[took], authority, stack, receipts)
         elif kind == "check":
             if not operators.observe(workspace, step["predicate"]):
-                raise ProcedureError(
-                    "CHECK failed: "
+                raise _refuse(
+                    "CHECK_FAILED", "CHECK failed: "
                     + json.dumps(step["predicate"], sort_keys=True)[:160])
             receipts.append({"kind": "check", "ok": True})
         elif kind == "foreach":
@@ -1000,7 +1045,8 @@ def _run_v2(root, workspace, steps, authority, stack, receipts):
                 raise ProcedureError("foreach items did not bind to a "
                                      "string list")
             if len(items) > step["max"]:
-                raise ProcedureError(
+                raise _refuse(
+                    "BOUND_EXCEEDED",
                     f"foreach received {len(items)} items over its declared "
                     f"bound {step['max']} — refused before any side effect")
             for item in items:
@@ -1022,25 +1068,34 @@ def _run_v2(root, workspace, steps, authority, stack, receipts):
             else:
                 receipts.append({"kind": "retry", "attempts": step["times"],
                                  "ok": False})
-                raise ProcedureError(
+                # the last attempt's code travels: a retry that kept hitting
+                # a false guard is still inapplicable, not a failure
+                raise _refuse(
+                    getattr(last, "code", "EXECUTION_ERROR"),
                     f"retry exhausted after {step['times']} attempts: {last}")
         elif kind == "call":
             import runbook
             name = step["name"]
             if name in stack:
-                raise ProcedureError(
-                    "call cycle refused: " + " -> ".join(stack + [name]))
+                raise _refuse("CALL_FAILED",
+                              "call cycle refused: " + " -> ".join(stack + [name]))
             if len(stack) >= CALL_DEPTH_MAX:
-                raise ProcedureError(f"call depth exceeds {CALL_DEPTH_MAX}")
+                raise _refuse("CALL_FAILED",
+                              f"call depth exceeds {CALL_DEPTH_MAX}")
             if runbook.status(root, name) != "proven":
-                raise ProcedureError(
+                raise _refuse(
+                    "CALL_FAILED",
                     f"call target {name!r} is not PROVEN — composition "
                     f"stands only on proven pieces, fail closed")
             result = execute(root, runbook.load(root, name),
                              step.get("inputs") or {}, workspace=workspace,
                              authority=authority, _stack=stack + [name])
             if not result["ok"]:
-                raise ProcedureError(
+                # a callee whose guard did not hold makes the caller
+                # inapplicable too; a callee that failed is a failed call
+                code = result.get("reason_code")
+                raise _refuse(
+                    code if code in INAPPLICABLE_CODES else "CALL_FAILED",
                     f"called procedure {name!r} failed: {result['why']}")
             receipts.append({"kind": "call", "name": name, "ok": True})
         elif kind == "compensate":
@@ -1054,7 +1109,8 @@ def _run_v2(root, workspace, steps, authority, stack, receipts):
                 _run_v2(root, workspace, step["on_failure"], authority,
                         stack, receipts)
                 receipts.append({"kind": "compensate", "compensated": True})
-                raise ProcedureError(f"body failed; compensation ran: {exc}")
+                raise _refuse(getattr(exc, "code", "EXECUTION_ERROR"),
+                              f"body failed; compensation ran: {exc}")
 
 
 def execute(root, rb, inputs, workspace=None, authority=None, _stack=None):
@@ -1066,18 +1122,19 @@ def execute(root, rb, inputs, workspace=None, authority=None, _stack=None):
         bound = operators.bind(rb, inputs)
         op = bound["operator"]
         if not set(op["authority"]) <= authority:
-            raise ProcedureError("required authority was not granted: missing "
-                                 + ", ".join(sorted(set(op["authority"])
-                                                    - authority)))
+            raise _refuse("AUTHORITY_MISSING",
+                          "required authority was not granted: missing "
+                          + ", ".join(sorted(set(op["authority"]) - authority)))
         if not all(operators.observe(workspace, item) for item in op["preconditions"] + op["invariants"]):
-            raise ProcedureError("operator precondition or invariant is not satisfied")
+            raise _refuse("PRECONDITION_MISMATCH",
+                          "operator precondition or invariant is not satisfied")
         if rb.get("procedure_version") == 2:
             _run_v2(root, workspace, bound["steps"], authority,
                     list(_stack or [rb.get("name", "?")]), done)
             if not all(operators.observe(workspace, item) for item in op["effects"]):
-                raise ProcedureError("final effects did not verify")
+                raise _refuse("EFFECT_FAILED", "final effects did not verify")
             return {"ok": True, "accepted": False, "steps": done, "why": "",
-                    "stopped_at": 0, "subs": []}
+                    "stopped_at": 0, "subs": [], **outcome(True)}
         # ------------------------------------------------ v1 straight line
         # Authority is DERIVED from what the bound steps will actually touch,
         # not only from what the author declared: a db step demands the
@@ -1092,30 +1149,38 @@ def execute(root, rb, inputs, workspace=None, authority=None, _stack=None):
                 required.add("git-write:" + str(step["action"]["args"]
                                                 ["repo"]).replace("\\", "/"))
         if not required <= authority:
-            raise ProcedureError("required authority was not granted: missing "
-                                 + ", ".join(sorted(required - authority)))
+            raise _refuse("AUTHORITY_MISSING",
+                          "required authority was not granted: missing "
+                          + ", ".join(sorted(required - authority)))
         # Check all arguments before any side effect, including constants.
         for step in bound["steps"]:
             if step["kind"] == "model":
-                raise ProcedureError("model-required step; deterministic execution stops")
+                raise _refuse("MODEL_REQUIRED",
+                              "model-required step; deterministic execution stops")
             _snapshot(workspace, _normalize(step["action"]))
         for step in bound["steps"]:
             if not all(operators.observe(workspace, item) for item in step["preconditions"]):
-                raise ProcedureError("step precondition changed")
+                raise _refuse("PRECONDITION_MISMATCH", "step precondition changed")
             before = _snapshot(workspace, step["action"])
             _perform(workspace, step["action"])
             after = _snapshot(workspace, step["action"])
             if step["action"]["tool"] == "copy_file" and after["path"]["hash"] != before["source"]["hash"]:
-                raise ProcedureError("copy effect content differs from observed source")
+                raise _refuse("EFFECT_FAILED",
+                              "copy effect content differs from observed source")
             if not all(operators.observe(workspace, item) for item in step["effects"] + op["invariants"]):
-                raise ProcedureError("step effect or invariant did not verify")
+                raise _refuse("EFFECT_FAILED",
+                              "step effect or invariant did not verify")
             done.append({"id": step["id"], "ok": True})
         if not all(operators.observe(workspace, item) for item in op["effects"]):
-            raise ProcedureError("final effects did not verify")
-        return {"ok": True, "accepted": False, "steps": done, "why": "", "stopped_at": 0, "subs": []}
+            raise _refuse("EFFECT_FAILED", "final effects did not verify")
+        return {"ok": True, "accepted": False, "steps": done, "why": "",
+                "stopped_at": 0, "subs": [], **outcome(True)}
     except (OSError, ValueError, fileauth.Denied) as exc:
+        # an adapter's own ValueError (a screened statement, a refused path)
+        # carries no code and is therefore a FAILURE — never inapplicable
         return {"ok": False, "accepted": False, "steps": done, "why": str(exc),
-                "stopped_at": len(done) + 1, "subs": []}
+                "stopped_at": len(done) + 1, "subs": [],
+                **outcome(False, getattr(exc, "code", "EXECUTION_ERROR"))}
 
 
 def accepted_trajectories(root, family):

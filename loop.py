@@ -3560,11 +3560,13 @@ class Agent:
                 # learned on — docs/DESIGN-P7) that no longer holds refuses
                 # the replay before any mutation and is logged as such,
                 # without the failure that would eventually quarantine a
-                # procedure for correctly declining.
-                inapplicable = "precondition" in why
+                # procedure for correctly declining. The verdict is
+                # STRUCTURED (docs/DESIGN-P7.1): the executor names a status
+                # and a reason code; prose is never consulted here.
+                inapplicable, code = procedure.route_verdict(result)
                 self.log.info(json.dumps({
                     "event": "procedure_route_refused", "task": task["id"],
-                    "runbook": name, "why": why,
+                    "runbook": name, "why": why, "reason_code": code,
                     "applicable": not inapplicable}))
                 if not inapplicable:
                     try:
