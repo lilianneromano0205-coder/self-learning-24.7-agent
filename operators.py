@@ -71,9 +71,13 @@ def validate_predicate(item):
     if not isinstance(item, dict) or item.get("predicate") not in (
             "file_exists", "file_absent", "file_equals", "file_derives",
             "table_conforms", "table_satisfies", "db_satisfies_all",
-            "repo_satisfies", "sheet_equals_table", "sheet_conforms") \
+            "repo_satisfies", "sheet_equals_table", "sheet_conforms",
+            "http_satisfies") \
             or "path" not in item:
         raise OperatorError("unsupported mechanically observable predicate")
+    if item["predicate"] == "http_satisfies" and (
+            "endpoint" not in item or "readback" not in item):
+        raise OperatorError("http_satisfies needs an endpoint and a readback")
     if item["predicate"] == "file_equals" and "value" not in item:
         raise OperatorError("file_equals needs a value")
     if item["predicate"] == "file_derives" and (
@@ -123,6 +127,20 @@ def observe(root, predicate):
         try:
             ok, _why = gitstate.check_assertions(path, predicate["assertions"])
         except (OSError, ValueError, fileauth.Denied):
+            return False
+        return ok
+    if kind == "http_satisfies":
+        # The remote record IS this: the declared readback performed NOW
+        # through the owner's endpoint (docs/DESIGN-P8). A missing endpoint,
+        # an unset credential, a non-JSON answer, a body that differs: all
+        # read as "no longer true", never as an exception a caller must
+        # guess at. Observed before the file check — the target is remote.
+        import httpstate
+        try:
+            entry = httpstate.load_endpoint(root, predicate["endpoint"])
+            bearer = httpstate.resolve_token(entry, root)
+            ok, _why = httpstate.check(entry, predicate["readback"], bearer)
+        except (OSError, ValueError):
             return False
         return ok
     if not os.path.isfile(path) or os.path.islink(path):
