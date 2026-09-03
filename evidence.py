@@ -98,7 +98,8 @@ SYSTEMS = {
                   "test_candidates.py",
                   "test_retention.py", "test_context.py",
                   "test_loop_learning_controls.py",
-                  "test_use_cases.py", "test_vision_preservation.py"],
+                  "test_use_cases.py", "test_vision_preservation.py",
+                  "test_watchdog.py"],
         "blind": "every model call in these tests is the scripted mock "
                  "provider. They prove the harness holds around a model; they "
                  "prove nothing about any real provider's behaviour.",

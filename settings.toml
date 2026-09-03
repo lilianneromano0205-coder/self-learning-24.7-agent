@@ -59,6 +59,21 @@ http_write = []                     # endpoint NAMES (from the table below) a
 #                                       # unset = the endpoint refuses, it never
 #                                       # calls anonymously
 # max_bytes = 1048576                   # response cap
+#
+# FAULT PROTECTION (docs/DESIGN-P9b): declared limits with ONE response —
+# safe mode, held in safe_mode.json, which only the owner clears
+# (python watchdog.py clear --root <expert> --why "..."). Off until you turn
+# it on; the metrics are still reported by `python watchdog.py evaluate`.
+#
+# [agent.watchdog]
+# enabled = false
+# window_calls = 50            # the last N tool results considered
+# tool_error_rate_max = 0.6    # errors / calls over the window
+# crash_max = 3                # step_crash events inside window_s
+# refusal_streak_max = 8       # consecutive finish claims the gate refused
+# spend_usd_per_hour_max = 0   # 0 = off; model spend over the last window_s
+# disk_free_gb_min = 1.0
+# window_s = 3600
 inbox_settle_seconds = 10           # ignore files still being copied in
 max_task_retries = 3                # retries of a failed task before it rests
 candidates_max = 5                  # test-time compute: attempts to score

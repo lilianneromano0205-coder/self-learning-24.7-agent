@@ -1,7 +1,11 @@
 # Phase 9b — Watchdog and safe mode: spacecraft fault protection beneath the model (design, committed before code)
 
-**Status: DESIGN** (flips to BUILT when the preregistered benchmark below is
-green in the acceptance suite). **Branch:** `phase9b/watchdog`. **Series:**
+**Status: BUILT** (this document was committed first; the build commit
+follows it and cites this file; the benchmark below is green in the
+acceptance suite). **Branch:** `phase9b/watchdog`. One thing the benchmark
+settled while being built: a resumed task must not re-trip on the streak
+that entered safe mode, so `safe_mode_entered` and `task_resumed` both reset
+the refusal streak — a fault already responded to is not a new fault. **Series:**
 docs/DESIGN-P9a-reconcilers.md maps the lineages; this is the second piece.
 
 ## The lineage
