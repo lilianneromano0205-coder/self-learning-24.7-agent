@@ -80,6 +80,13 @@ IN_ROOT = [
     ("capabilities/x/__init__.py", "an acquired capability's install"),
     ("logs/effects.jsonl", "the exactly-once effects ledger"),
     ("logs/agent.log", "the event ledger every report reads"),
+    # the owner's twin (docs/DESIGN-P10): the kernel every window reads as
+    # the OWNER block, the episodes it was learned from, the sealed shadow
+    # predictions and the consent projection
+    ("twin/kernel.json", "the twin kernel — the owner's measured self-model"),
+    ("twin/episodes.jsonl", "the owner's decision episodes"),
+    ("twin/predictions.jsonl", "the sealed shadow-prediction ledger"),
+    ("twin/authority.json", "the twin consent projection"),
 ]
 
 

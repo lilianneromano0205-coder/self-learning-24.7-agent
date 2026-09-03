@@ -39,6 +39,10 @@ CORE_MODULES = ["loop", "ingest", "verify", "memcheck", "recall", "citecheck",
                 "goal", "contract", "runbook", "repair", "swarm",
                 "discover", "universal", "grants", "capability", "mastery",
                 "steer", "freshness",
+                # the owner's twin (docs/DESIGN-P10): the kernel and its
+                # arithmetic; a fleet whose owner-model cannot import is not
+                # healthy, because every window reads the OWNER block
+                "twin", "twinmath",
                 # the modules that DECIDE authority and trust were never on
                 # this list (docs/DESIGN-P7.2, finding 1): a doctor that does
                 # not import the file authority cannot say the platform is

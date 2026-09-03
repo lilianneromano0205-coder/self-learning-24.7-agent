@@ -74,6 +74,15 @@ http_write = []                     # endpoint NAMES (from the table below) a
 # spend_usd_per_hour_max = 0   # 0 = off; model spend over the last window_s
 # disk_free_gb_min = 1.0
 # window_s = 3600
+# THE OWNER'S TWIN (docs/DESIGN-P10): a measured model of how YOU decide,
+# learned from your own approvals, notes and recorded decisions, scored in
+# shadow against what you do next, and read into every window as the OWNER
+# block. Off until you consent: python twin.py consent grant --scope predict
+# (scopes nest predict < advise < draft < act; act only queues gated work).
+# The Super-Self and owner-voice drafts need a model role; name one here.
+#
+# [agent.twin]
+# role = "consultant"          # the role the Super-Self and drafts think with
 inbox_settle_seconds = 10           # ignore files still being copied in
 max_task_retries = 3                # retries of a failed task before it rests
 candidates_max = 5                  # test-time compute: attempts to score

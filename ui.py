@@ -1599,6 +1599,25 @@ class Handler(BaseHTTPRequestHandler):
                     self._json(ctx.recent(root, int(q.get("limit", ["20"])[0])))
             elif path == "/api/events":
                 self._events(q)
+            elif (m := re.fullmatch(r"/api/experts/([a-z0-9-]+)/twin", path)):
+                # the OWNER's twin (docs/DESIGN-P10): consent, the kernel,
+                # the benchmark, drift, open questions, and the shadow
+                # ledger — sealed predictions show a hash and nothing else
+                import twin
+                root = expert_root(self.home, m.group(1))
+                try:
+                    twin.tick(root)          # harvest + seal + resolve, cheap
+                except Exception:
+                    pass
+                st = twin.status(root)
+                st["questions"] = twin.questions(root, "open")
+                st["shadow"] = [
+                    {k: p.get(k) for k in ("id", "point", "at", "status",
+                                           "hit", "p_max", "brier", "tier",
+                                           "sealed", "actual")}
+                    for p in twin.predictions(root)[-30:]]
+                st["block"] = twin.render(root)
+                self._json(st)
             elif (m := re.fullmatch(r"/api/experts/([a-z0-9-]+)/self", path)):
                 # the agent's own factual self-model, exactly as it is
                 # compiled into its context
@@ -2065,6 +2084,61 @@ class Handler(BaseHTTPRequestHandler):
                                    endpoint=d.get("endpoint", ""))
                 self._json({"published": [sk["expert"] for sk in card["skills"]],
                             "fingerprint": card.get("key_fingerprint")})
+            elif path == "/api/twin":
+                # the owner's actions on their own twin (docs/DESIGN-P10).
+                # Consent is sealed under the learning authority; the actor
+                # behind the token is who is recorded; every reply carries
+                # the label because twin.py puts it there, not this route.
+                import twin
+                d = self._data
+                slug = (d.get("expert") or "").strip()
+                root = expert_root(self.home, slug)
+                action = d.get("action") or ""
+                if not (slug and os.path.isdir(root)):
+                    self._fail({"error": "expert is required"}, 400)
+                    return
+                who = getattr(self, "actor", "owner")
+                try:
+                    if action == "consent":
+                        out = (twin.consent_grant(root, d.get("scope") or "predict", who)
+                               if d.get("op") != "revoke"
+                               else twin.consent_revoke(root, who))
+                    elif action == "declare":
+                        out = twin.declare(root, d.get("text") or "", who)
+                    elif action == "observe":
+                        ep, new = twin.observe(
+                            root, d.get("situation") or {}, d.get("options") or [],
+                            d.get("choice"), kind=d.get("kind") or "decision",
+                            counterpart=d.get("counterpart"), why=d.get("why"),
+                            source="panel")
+                        out = {"episode": ep["id"], "new": new}
+                    elif action == "learn":
+                        out = twin.learn(root)
+                    elif action == "fidelity":
+                        out = twin.fidelity(root)
+                    elif action == "predict":
+                        out = twin.predict(root, d.get("situation") or {},
+                                           d.get("options") or [],
+                                           d.get("counterpart"))
+                    elif action == "answer":
+                        out = twin.answer(root, d.get("id") or "",
+                                          d.get("text") or "", who)
+                    elif action == "drift":
+                        out = (twin.drift_confirm(root, who) if d.get("op") == "confirm"
+                               else twin.drift_dismiss(root, who))
+                    elif action == "superself":
+                        out = twin.superself(root, loop.Agent(root),
+                                             d.get("situation") or {},
+                                             d.get("options") or [],
+                                             d.get("counterpart"))
+                    else:
+                        self._fail({"error": f"unknown twin action {action!r}"}, 400)
+                        return
+                    self._json(out)
+                except twin.Refused as e:
+                    self._fail({"error": str(e)}, 400)
+                except SystemExit as e:
+                    self._fail({"error": str(e)}, 403)
             elif path == "/api/steer":
                 # the owner's voice into a RUNNING pursuit. steer.py's laws
                 # hold here too: advice never grades, every note lands on

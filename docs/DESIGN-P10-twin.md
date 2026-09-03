@@ -1,8 +1,9 @@
 # Phase 10 — The Twin: a Self Kernel of the OWNER, beneath every agent (design, committed before code)
 
-**Status: DESIGN → BUILT** (this document is committed first; the build
-commit follows it and cites this file; the preregistered benchmark below
-must be green in the acceptance suite before the phase becomes permanent).
+**Status: BUILT** (this document was committed first; the build commit
+follows it and cites this file; the preregistered benchmark below is green
+in the acceptance suite — `tests/test_twin.py`, 13 checks — and the four
+mutation checks in `mutate_check.py` go red when a law is removed).
 **Branch:** `phase10/self-kernel`. **Series:** docs/DESIGN-P9a maps the
 pre-AI lineages the platform builds beneath the model; this phase opens a
 new lineage — the *person* the platform works for.
@@ -51,13 +52,18 @@ layers measurable rather than a persona.
 ## The research this rests on
 
 The ideation the owner supplied cites ten works; this design verified them
-and adds the mechanisms it borrows from each (the full dossier with URLs is
-in the build commit under `docs/research/P10-twin-research.md`):
+and adds the mechanisms it borrows from each (the full dossiers with URLs,
+about eighty citations, are in `docs/research/P10-twin-research-A.md` and
+`-B.md`; corrections found while verifying are folded in below):
 
-* **Park et al. 2024, *Generative Agent Simulations of 1,000 People*.**
-  Agents built from two-hour interviews reproduced General Social Survey
-  answers at **85 % of each participant's own two-week test-retest
-  consistency**. Two lessons are taken verbatim: (a) a clone is scored
+* **Park et al., arXiv 2411.10109** (v1 2024 *Generative Agent Simulations
+  of 1,000 People*; retitled in v3, June 2026, *LLM Agents Grounded in
+  Self-Reports Enable General-Purpose Simulation of Individuals*). Agents
+  built from two-hour interviews reproduced General Social Survey answers
+  at **83–86 % of each participant's own two-week test-retest
+  consistency** (74 % for demographics-only agents); incentivized
+  economic-game behavior was the hardest stratum (~0.66 normalized). Two
+  lessons are taken verbatim: (a) a clone is scored
   *normalized by the person's self-consistency*, never against a fictitious
   deterministic ground truth — so the kernel measures the owner's own
   retest agreement and reports fidelity as a fraction of it; (b) the
@@ -73,11 +79,12 @@ in the build commit under `docs/research/P10-twin-research.md`):
   post-action feedback, and implicit preferences degrade over long
   horizons unless they are made explicit. Hence the question ledger and the
   drift detector.
-* **GUIDE (Google Research), ShowUI-Aloha (arXiv 2601.07181), LearnAct
-  (arXiv 2504.13805).** Models are poor at inferring *intent* from raw
-  action streams; structured context (stated intent, the "why") changes the
-  result; a single structured demonstration lifted one GUI agent from
-  19.3 % to 51.7 %. So the episode format is `state → options → choice →
+* **GUIDE (arXiv 2603.25864, CVPR 2026), ShowUI-Aloha (arXiv 2601.07181),
+  LearnAct (arXiv 2504.13805).** Models are poor at inferring *intent* from
+  raw action streams (the best of eight multimodal models reached 44.6 % on
+  behavior-state detection); structured context (stated intent, the "why")
+  changes the result; a single structured demonstration lifted one GUI
+  agent from 19.3 % to 51.7 %. So the episode format is `state → options → choice →
   why → outcome`, structured, never a recording.
 * **Inverse reinforcement learning (Ziebart 2008 max-entropy IRL; Jeon,
   Milli & Dragan 2020 reward-rational implicit choice; Lazzati et al. 2026

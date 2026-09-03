@@ -106,7 +106,14 @@ CONTROL_DIRS = {"prompts", "approvals", "variants", "effects", "org",
                 # there); nothing in the platform writes the per-root one, so
                 # it existed only as an agent-forgeable alias for a
                 # fleet-attributed warning the next window is told to obey.
-                "commons"}
+                "commons",
+                # THE OWNER'S TWIN (docs/DESIGN-P10): the kernel that says how
+                # the person this fleet works for decides, the episodes it was
+                # learned from, the sealed shadow predictions and the consent
+                # projection. A worker that could write any of it would author
+                # its own owner — and the context compiler reads the kernel
+                # into every window as the OWNER block.
+                "twin"}
 # Root-relative paths that are CONTROL wherever they sit, because the
 # DIRECTORY around them is legitimately the agent's own workspace.
 #

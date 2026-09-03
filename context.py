@@ -41,6 +41,9 @@ DEFAULT_BUDGETS = {          # tokens (~4 chars each)
     # one thing whose loss makes every other token pointless (manual §11)
     "mission": 900,
     "self": 600,
+    # the OWNER block (docs/DESIGN-P10): how the person this fleet works for
+    # actually decides — measured from their decisions, never generated
+    "owner": 500,
     "commons": 1500,
     "course": 2500,
     "standards": 700,
@@ -56,8 +59,9 @@ DEFAULT_BUDGETS = {          # tokens (~4 chars each)
 # self first: an agent that knows what it has actually verified reads
 # everything after it differently. Authority and conflicts ride with the
 # course, because they are the rules for reading that material.
-ORDER = ["mission", "self", "commons", "course", "standards", "authority",
-         "conflicts", "cases", "gotchas", "premise", "skills", "memory_files"]
+ORDER = ["mission", "self", "owner", "commons", "course", "standards",
+         "authority", "conflicts", "cases", "gotchas", "premise", "skills",
+         "memory_files"]
 
 # ORDER is the BUDGET order — which source is filled first, and the order the
 # manifest reports. EMIT_ORDER is the order the blocks are WRITTEN into the
@@ -424,6 +428,18 @@ def compile(agent, task):
         try:
             model = _selfmodel.build(root, role, task, getattr(agent, "cfg", {}))
             src["self"].add_text("self", _selfmodel.render(model))
+        except Exception:
+            pass
+
+    # --- owner: how the person this fleet works for actually decides
+    # (docs/DESIGN-P10). Read from the twin kernel — a measured model of the
+    # owner's own decisions — and absent, not invented, when there is none.
+    if src["owner"].excluded is None:
+        try:
+            import twin as _twin
+            block = _twin.render(root)
+            if block:
+                src["owner"].add_text("owner", block)
         except Exception:
             pass
 

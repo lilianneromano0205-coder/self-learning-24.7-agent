@@ -3075,6 +3075,10 @@ async function renderMind(b){
     <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:12px">
       measured, never claimed</span></h3>
   <div class="body" id="selfBody"><span class="muted">loading…</span></div></div>
+  <div class="card"><h3>Twin — how YOU decide, as this expert has measured it
+    <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:12px">
+      sealed before you act, scored after, versioned when you change</span></h3>
+  <div class="body" id="twinBody"><span class="muted">loading…</span></div></div>
   <div class="card"><h3>Knowledge — sources, standards, disagreements
     <span class="spacer"></span><span class="muted" style="font-weight:400;font-size:12px">
       who outranks whom when the material fights</span></h3>
@@ -3101,8 +3105,115 @@ async function renderMind(b){
         transcripts are complete conversations; nothing here is ever silently deleted</div></div>
     </div>
   </div></div>`;
-  loadCtxWindows(); loadSelf(); loadKnowledge(); loadProcedures();
+  loadCtxWindows(); loadSelf(); loadTwin(); loadKnowledge(); loadProcedures();
   if (S.mindPath) openFile(S.mindPath);
+}
+/* THE TWIN (docs/DESIGN-P10). Everything on this card is read from
+   twin/ — consent is a sealed chain, the kernel is a hashed fit, a sealed
+   prediction shows its hash and nothing else until you decide, and the
+   label on every reply is put there by twin.py, not by this page. */
+async function twinAct(body){
+  body.expert = S.sel;
+  const r = await api('/api/twin', {method:'POST', body});
+  if (r && r.error) alert(r.error);
+  await loadTwin();
+  return r;
+}
+async function loadTwin(){
+  const el = document.getElementById("twinBody"); if(!el) return;
+  const t = await api('/api/experts/'+S.sel+'/twin');
+  if (!t || t.error){ el.innerHTML = `<span class="muted">${esc((t&&t.error)||"unavailable")}</span>`; return; }
+  const c = t.consent || {};
+  const scope = c.scope || null;
+  const k = t.kernel;
+  const f = t.fidelity;
+  const consentRow = `<div class="row" style="margin-bottom:8px;gap:8px;align-items:center">
+    ${scope ? `<span class="pill ok">consent: ${esc(scope)}</span>
+       <span class="muted" style="font-size:12px">sealed #${c.seq} by ${esc(c.by||"owner")} at ${esc(c.at||"")}</span>
+       <button class="btn sm ghost" onclick="twinAct({action:'consent',op:'revoke'})">revoke</button>`
+     : `<span class="pill warn">no consent — the twin does nothing</span>`}
+    <select id="twinScope" class="sm">${["predict","advise","draft","act"].map(s=>`<option ${s===scope?"selected":""}>${s}</option>`).join("")}</select>
+    <button class="btn sm" onclick="twinAct({action:'consent',op:'grant',scope:document.getElementById('twinScope').value})">grant scope</button>
+    ${c.verified===false?`<span class="pill bad">${esc(c.why||"TAMPER")}</span>`:""}
+  </div>`;
+  const ep = t.episodes || {};
+  const kernelRow = k ? `<div class="row" style="gap:6px;margin-bottom:6px">
+      <span class="pill">kernel v${k.version} · ${esc(k.hash)}</span>
+      <span class="pill">${k.n_fit} fit / ${k.n_holdout} held out</span>
+      <span class="pill">${k.proven_rules}/${k.rules} habits proven</span>
+      <span class="muted" style="font-size:12px">looks at: ${(k.attention||[]).map(a=>esc(a.feature.replace(/^(sit|feat|cp|sterm|term):/,''))).join(", ")||"—"}</span>
+    </div>` : `<p class="muted" style="font-size:12.5px">no kernel yet — ${ep.decisions||0} decision(s) recorded; approve or deny something, or record a decision below, then <b>learn</b>.</p>`;
+  const fidRow = f ? `<div class="row" style="gap:6px;margin-bottom:6px">
+      <span class="pill ${f.verdict==="high"?"ok":f.verdict==="INSUFFICIENT EVIDENCE"?"warn":f.verdict==="low"?"bad":""}">fidelity: ${esc(f.verdict)}</span>
+      ${f.choice_fidelity!=null?`<span class="pill" title="held-out argmax agreement">choice ${(f.choice_fidelity*100).toFixed(0)}%</span>`:""}
+      ${f.brier!=null?`<span class="pill" title="multi-class Brier">Brier ${f.brier}</span>`:""}
+      ${f.ece!=null?`<span class="pill" title="expected calibration error">ECE ${f.ece}</span>`:""}
+      ${f.high_confidence_error_rate!=null?`<span class="pill ${f.high_confidence_error_rate>0.05?"bad":"ok"}">high-confidence error ${(f.high_confidence_error_rate*100).toFixed(1)}%</span>`:""}
+      ${f.normalized_fidelity!=null?`<span class="pill" title="choice fidelity ÷ your own retest agreement">normalized ${f.normalized_fidelity}</span>`:""}
+      ${f.novel_fidelity!=null?`<span class="pill">novel ${(f.novel_fidelity*100).toFixed(0)}%</span>`:""}
+      ${(f.writing&&f.writing.owner_delta!=null)?`<span class="pill ${f.writing.closer_to_owner?"ok":"bad"}">writing Δ ${f.writing.owner_delta} vs stranger ${f.writing.stranger_delta}</span>`:""}
+    </div>${(f.not_measured||[]).length?`<div class="muted" style="font-size:12px;margin-bottom:6px">not measured: ${esc(f.not_measured.join(", "))}</div>`:""}` : "";
+  const drift = t.drift && t.drift.status==="open" ? `<div class="card" style="border-color:var(--warn);margin:8px 0"><div class="body">
+      <b>POSSIBLE PERSONAL DRIFT</b> — ${t.drift.window} recent decisions fit a different policy than before.
+      ${(t.drift.shifts||[]).map(s=>`<div class="mono" style="font-size:12px">${esc(s.option)} ← ${esc(s.feature)}: ${s.previous} → ${s.recent}</div>`).join("")}
+      <div class="muted" style="font-size:12px">possible causes: ${esc((t.drift.causes||[]).join("; "))}</div>
+      <div class="row" style="gap:6px;margin-top:6px">
+        <button class="btn sm" onclick="twinAct({action:'drift',op:'confirm'})">confirm permanent update (new kernel version)</button>
+        <button class="btn sm ghost" onclick="twinAct({action:'drift',op:'dismiss'})">dismiss — keep the old policy</button></div>
+    </div></div>` : "";
+  const qs = (t.questions||[]).map(q=>`<div class="card" style="margin:8px 0"><div class="body">
+      <div><b>${esc(q.kind==="why"?"Why?":q.kind==="policy_update"?"Policy update?":q.kind)}</b> <span class="muted" style="font-size:12px">${esc(q.reason||"")}</span></div>
+      <div style="margin:4px 0">${esc(q.text||"")}</div>
+      <div class="row" style="gap:6px;flex-wrap:wrap">
+        ${(q.candidates||[]).map(cn=>`<button class="btn sm ghost" onclick="twinAct({action:'answer',id:'${esc(q.id)}',text:'${esc(cn)}'})">${esc(cn)}</button>`).join("")}
+        <input id="qa-${esc(q.id)}" placeholder="or say it in your words" style="min-width:220px">
+        <button class="btn sm" onclick="twinAct({action:'answer',id:'${esc(q.id)}',text:document.getElementById('qa-${esc(q.id)}').value})">answer</button>
+      </div></div></div>`).join("");
+  const pr = t.predictions || {};
+  const shadow = (t.shadow||[]).slice().reverse().slice(0,12).map(p=>`<tr>
+      <td class="mono">${esc(p.point||"")}</td>
+      <td>${p.status==="sealed"?`<span class="pill">sealed · ${esc((p.sealed||"").slice(0,10))}… (hidden until you decide)</span>`
+           :p.status==="tamper"?`<span class="pill bad">TAMPER</span>`
+           :`<span class="pill ${p.hit?"ok":"bad"}">${p.hit?"hit":"miss"}</span> predicted at ${p.p_max!=null?(p.p_max*100).toFixed(0)+"%":"—"} · you chose ${esc(p.actual||"")} · Brier ${p.brier}</span>`}</td>
+      <td class="muted">${esc(p.at||"")}</td></tr>`).join("");
+  const record = `<details style="margin-top:8px"><summary class="muted" style="cursor:pointer;font-size:12.5px">record a decision the platform did not see · ask the clone · ask the Super-Self</summary>
+    <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px">
+      <input id="twSit" placeholder="situation (what was on the table)" style="min-width:260px">
+      <input id="twFeat" placeholder='features JSON e.g. {"risk":0.6,"margin":0.2}' style="min-width:220px">
+      <input id="twOpts" placeholder="options, comma-separated (grant,deny)" style="min-width:200px">
+      <input id="twCp" placeholder="counterpart" style="width:120px">
+      <input id="twChoice" placeholder="your choice" style="width:110px">
+      <input id="twWhy" placeholder="why (optional)" style="min-width:200px">
+      <button class="btn sm" onclick="twinRecord()">record</button>
+      <button class="btn sm ghost" onclick="twinPredict('predict')">what would I do?</button>
+      <button class="btn sm ghost" onclick="twinPredict('superself')">super-self</button>
+      <button class="btn sm ghost" onclick="twinAct({action:'learn'})">learn</button>
+      <button class="btn sm ghost" onclick="twinAct({action:'fidelity'})">re-run benchmark</button>
+    </div><pre class="out" id="twOut" style="margin-top:6px;display:none"></pre></details>`;
+  el.innerHTML = `${consentRow}${kernelRow}${fidRow}${drift}${qs}
+    <div class="muted" style="font-size:12px;margin:4px 0">${ep.decisions||0} decisions · ${ep.text_only||0} texts · ${ep.with_why||0} with a why · shadow: ${pr.sealed||0} sealed, ${pr.resolved||0} scored${pr.tamper?`, <b>${pr.tamper} TAMPER</b>`:""}</div>
+    ${shadow?`<div class="tablewrap"><table><thead><tr><th>decision point</th><th>shadow prediction</th><th>when</th></tr></thead><tbody>${shadow}</tbody></table></div>`:""}
+    ${t.block?`<pre class="out" style="margin-top:8px">${esc(t.block)}</pre>`:""}
+    ${record}`;
+}
+function twinInputs(){
+  let feats = {};
+  try { feats = JSON.parse(document.getElementById('twFeat').value || "{}"); } catch(e){ alert("features must be JSON"); return null; }
+  return {situation:{text:document.getElementById('twSit').value, features:feats},
+          options:(document.getElementById('twOpts').value||"").split(",").map(s=>s.trim()).filter(Boolean),
+          counterpart:document.getElementById('twCp').value||null};
+}
+async function twinRecord(){
+  const i = twinInputs(); if(!i) return;
+  i.action='observe'; i.choice=document.getElementById('twChoice').value; i.why=document.getElementById('twWhy').value||null;
+  await twinAct(i);
+}
+async function twinPredict(action){
+  const i = twinInputs(); if(!i) return;
+  i.action = action; i.expert = S.sel;
+  const r = await api('/api/twin', {method:'POST', body:i});
+  const o = document.getElementById('twOut'); if(!o) return;
+  o.style.display='block'; o.textContent = JSON.stringify(r, null, 1);
 }
 async function loadSelf(){
   const el = document.getElementById("selfBody"); if(!el) return;

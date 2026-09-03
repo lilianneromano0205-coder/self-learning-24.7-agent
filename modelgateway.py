@@ -65,7 +65,10 @@ LEDGER = os.path.join("logs", "model-calls.jsonl")
 # but naming them makes "which of these is eating the budget" answerable
 PURPOSES = ("step", "compaction", "replay", "benchmark", "probe",
             "candidate", "judge", "research", "transcription", "vision",
-            "subquery", "unknown")
+            "subquery",
+            # the Super-Self and the owner-voice draft (docs/DESIGN-P10):
+            # model calls made on the owner's behalf, metered like any other
+            "twin", "unknown")
 
 
 def _path(root):
