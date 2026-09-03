@@ -45,6 +45,11 @@ import uuid
 CONTROL_FILES = {
     "settings.toml", "mcp.json", "state.json", "prospective.json",
     "routines.json", "org.json",
+    # the reconcilers' declarations (docs/DESIGN-P9a): a desired state and
+    # the PROVEN procedure that restores it, plus the controller's own
+    # status. A worker that could write it would declare a controller over
+    # itself; the harness writes its bookkeeping, the owner its declarations.
+    "reconcilers.json",
     # identity.md is a SYSTEM PROMPT SOURCE — loop.system_sources() puts it
     # in every window, right after the constitution — and the panel writes it
     # for the OWNER, with a backup and an identity.history.jsonl line stamped

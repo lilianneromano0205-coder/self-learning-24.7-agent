@@ -1038,6 +1038,22 @@ FAILURE_CODES = ("EFFECT_FAILED", "CHECK_FAILED", "BOUND_EXCEEDED",
                  "CALL_FAILED", "EXECUTION_ERROR")
 
 
+def owner_grant(cfg):
+    """The authority the OWNER declared for model-free execution:
+    workspace-write plus every db_write, git_write and http_write token in
+    settings.toml. Nothing self-grants. The loop's zero-model route and the
+    reconcilers (docs/DESIGN-P9a) share this ONE definition, so a token the
+    owner names is granted the same way on every deterministic path."""
+    agent_cfg = (cfg or {}).get("agent", {}) or {}
+    grant = {"workspace-write"}
+    grant |= {"db-write:" + str(p).replace("\\", "/")
+              for p in (agent_cfg.get("db_write") or [])}
+    grant |= {"git-write:" + str(p).replace("\\", "/")
+              for p in (agent_cfg.get("git_write") or [])}
+    grant |= {"http-write:" + str(p) for p in (agent_cfg.get("http_write") or [])}
+    return grant
+
+
 def _refuse(code, message):
     if code not in INAPPLICABLE_CODES + FAILURE_CODES:
         raise ValueError(f"unknown procedure reason code {code!r}")

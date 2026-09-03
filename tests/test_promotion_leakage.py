@@ -68,6 +68,7 @@ IN_ROOT = [
     ("identity.md", "a system prompt source"),
     ("identity.history.jsonl", "charter edit history"),
     ("prospective.json", "prospective ledger"),
+    ("reconcilers.json", "reconciler declarations: a desired state and its proven restore"),
     ("variants/manifest.json", "variant manifest"),
     ("mcp.json", "MCP server configuration"),
     ("approvals/pending.json", "approval decisions"),
