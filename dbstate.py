@@ -173,9 +173,25 @@ def canonical_conditions(text):
     return _canonical(out)
 
 
+_ORDERED_RE = re.compile(r"\border\s+by\b", re.IGNORECASE)
+
+
+def _is_unordered(invariant):
+    """Ordered comparison is claimed only by a query that carries ORDER BY;
+    every other query is compared as a multiset, because SQLite promises
+    nothing about the order of an unordered scan. "unordered": true forces
+    the multiset reading even with ORDER BY (docs/DESIGN-P7.1, P1-A)."""
+    return bool(invariant.get("unordered")) or \
+        not _ORDERED_RE.search(invariant["query"])
+
+
 def canonical_invariants(text):
     """Invariants: [{query}] — the same rows before and after — or
-    [{query, equals}] — exactly those rows both times. '[]' when none."""
+    [{query, equals}] — exactly those rows both times. '[]' when none.
+    Row order without ORDER BY is not a guarantee SQLite makes, so the rows
+    are compared as an ordered list only when the query carries ORDER BY and
+    as a multiset otherwise; "unordered": true forces the multiset reading
+    (docs/DESIGN-P7.1, P1-A)."""
     if text is None or (isinstance(text, str) and not text.strip()):
         return "[]"
     try:
@@ -187,9 +203,14 @@ def canonical_invariants(text):
     out = []
     for entry in invariants:
         if not isinstance(entry, dict) or "query" not in entry or \
-                set(entry) - {"query", "equals"}:
-            _fail("each invariant is {query} or {query, equals}")
+                set(entry) - {"query", "equals", "unordered"}:
+            _fail("each invariant is {query} or {query, equals}, optionally "
+                  "with \"unordered\": true")
         item = {"query": _screen(entry["query"], read_only=True)}
+        if "unordered" in entry:
+            if entry["unordered"] is not True:
+                _fail("unordered must be true when present")
+            item["unordered"] = True
         if "equals" in entry:
             if not _rows_ok(entry["equals"]):
                 _fail("equals must be rows of int | str | null")
@@ -231,6 +252,18 @@ def canonical_attach(text):
     return _canonical(out)
 
 
+def _same_rows(got, want, unordered=False):
+    """Invariant comparison. Ordered by default (the query carries ORDER BY);
+    an `unordered` invariant compares multisets, because SQLite promises
+    nothing about the order of an unordered scan (docs/DESIGN-P7.1, P1-A)."""
+    if not unordered:
+        return got == want
+
+    def key(row):
+        return json.dumps(row, sort_keys=True)
+    return sorted(got, key=key) == sorted(want, key=key)
+
+
 def _rows(cursor):
     rows = cursor.fetchmany(MAX_RESULT_ROWS + 1)
     if len(rows) > MAX_RESULT_ROWS:
@@ -249,10 +282,12 @@ def _rows(cursor):
 
 def _uri(path, read_only):
     """A file: URI SQLite accepts for both connect and ATTACH, with the path
-    quoted so spaces and percent signs survive."""
+    quoted so spaces and percent signs survive. The mode is ALWAYS explicit:
+    mode=ro for observation, mode=rw for mutation — never the default that
+    lets a plain open create an empty database (docs/DESIGN-P7.1, P0-A)."""
     return "file:" + urllib.parse.quote(
         os.path.abspath(path).replace("\\", "/")) + \
-        ("?mode=ro" if read_only else "")
+        ("?mode=ro" if read_only else "?mode=rw")
 
 
 def _attach(connection, attach, *, mutating):
@@ -320,6 +355,12 @@ def transact(dbfile, statements_text, assertions_text, preconditions=None,
     assertions = json.loads(canonical_assertions(assertions_text))
     conditions = json.loads(canonical_conditions(preconditions))
     checks = json.loads(canonical_invariants(invariants))
+    if not os.path.isfile(dbfile):
+        # docs/DESIGN-P7.1, P0-A: a guarded transaction never creates a
+        # database. Creation is a separate, explicit operation (run_script),
+        # so a false precondition can leave nothing behind.
+        _fail(f"database {dbfile!r} does not exist — a guarded transaction "
+              f"never creates a database; create it explicitly first")
     connection = sqlite3.connect(_uri(dbfile, False), uri=True)
     try:
         _attach(connection, attach, mutating=True)
@@ -334,7 +375,8 @@ def transact(dbfile, statements_text, assertions_text, preconditions=None,
         before = []
         for invariant in checks:
             got = _rows(connection.execute(invariant["query"]))
-            if "equals" in invariant and got != invariant["equals"]:
+            if "equals" in invariant and not _same_rows(
+                    got, invariant["equals"], _is_unordered(invariant)):
                 connection.rollback()
                 _fail(f"invariant did not hold before the transaction — "
                       f"nothing was mutated: {invariant['query'][:80]!r} "
@@ -352,7 +394,7 @@ def transact(dbfile, statements_text, assertions_text, preconditions=None,
         for invariant, was in zip(checks, before):
             got = _rows(connection.execute(invariant["query"]))
             want = invariant.get("equals", was)
-            if got != want:
+            if not _same_rows(got, want, _is_unordered(invariant)):
                 connection.rollback()
                 _fail(f"invariant broken — rolled back: "
                       f"{invariant['query'][:80]!r} was {was!r}, now {got!r}")

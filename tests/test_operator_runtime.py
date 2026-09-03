@@ -182,8 +182,13 @@ def check_db_authority_is_owner_granted(home):
                        "authority": ["workspace-write"]}}
     root = os.path.join(home, "authcheck")
     os.makedirs(os.path.join(root, "data"), exist_ok=True)
+    # docs/DESIGN-P7.1: a guarded transaction never creates a database, so
+    # the file exists before the step — creation is explicit
+    sqlite3.connect(os.path.join(root, "data", "x.db")).close()
     result = procedure.execute(root, rb, {})
     assert not result["ok"] and "db-write:data/x.db" in result["why"], result
+    assert result["status"] == "inapplicable" and \
+        result["reason_code"] == "AUTHORITY_MISSING", result
     granted = procedure.execute(root, rb, {},
                                 authority={"workspace-write",
                                            "db-write:data/x.db"})

@@ -173,7 +173,8 @@ SYSTEMS = {
                   "test_operator_runtime.py", "test_verifier_factory.py",
                   "test_procedure_v2.py", "test_capability_signatures.py",
                   "test_git_operators.py", "test_xlsx_operators.py",
-                  "test_transactional_contracts.py"],
+                  "test_transactional_contracts.py",
+                  "test_correctness_patch.py"],
         "blind": "promotion and routing decisions are proven against seeded "
                  "outcome ledgers, not against months of real measured "
                  "performance. The design gate checks mechanics and the known "

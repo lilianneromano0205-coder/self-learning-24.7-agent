@@ -319,8 +319,15 @@ def read_bytes(root, rel, actor="agent"):
 def sha256_bytes(root, rel, actor="agent"):
     """The digest of a file AS BYTES — the only honest evidence for a
     binary artifact. A text decode with replacement lets different files
-    share one hash (docs/DESIGN-P6.1, finding 4)."""
-    return hashlib.sha256(read_bytes(root, rel, actor)).hexdigest()
+    share one hash (docs/DESIGN-P6.1, finding 4). Streamed in 1 MiB chunks
+    so a multi-gigabyte database or archive is never loaded whole
+    (docs/DESIGN-P7.1, P1-B)."""
+    p = resolve(root, rel, "read", actor)
+    digest = hashlib.sha256()
+    with open(p, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def write_bytes(root, rel, data, actor="agent"):

@@ -30,8 +30,15 @@ Nothing new can be *done*; four things can now be *trusted* that could not:
 2. A false precondition on a database that does not exist leaves **no file
    behind**; observation paths open `mode=ro`, mutation paths `mode=rw`,
    and creation is a separate explicit operation (`run_script`).
-3. An invariant either carries `ORDER BY` or declares `"unordered": true`;
-   the unordered form compares multisets. Equal data can no longer fail.
+3. An invariant is compared as an **ordered list only when its query
+   carries `ORDER BY`**; every other query is compared as a multiset, and
+   `"unordered": true` forces the multiset reading even with ORDER BY.
+   Equal data can no longer fail. (The first draft of this document refused
+   a bare query without ORDER BY outright; the benchmark showed that form
+   rejects `select sum(cents) from balances`, a single-row aggregate Phase
+   7's own benchmark already used — a false refusal of exactly the kind
+   P1-A describes. The rule above needs no author declaration and has no
+   such false case.)
 4. Byte evidence is hashed in 1 MiB chunks.
 
 ## The closed set of reason codes
@@ -70,12 +77,14 @@ registration. Each property FAILS on the tree before its fix:
    refuses naming the reason and the path is still absent afterwards;
    `query` likewise creates nothing; `run_script` remains the creation path,
    and a transaction on the created file commits.
-3. **Invariant order.** A bare invariant without ORDER BY is refused at
-   canonicalization naming the remedy; with `"unordered": true` a
+3. **Invariant order.** `_is_unordered` is true for a query without ORDER
+   BY and false with it (`"unordered": true` overrides); a bare query
+   canonicalizes unchanged and a non-boolean `unordered` refuses; a
    delete-and-reinsert (which flips SQLite's natural scan order — proven by
-   an independent sqlite3 read) commits; the ORDER BY form commits on the
-   same mutation; an unordered invariant that is actually broken rolls back
-   whole.
+   an independent sqlite3 read) commits under a **bare** invariant, which
+   was a false "invariant broken" before the fix; the ORDER BY form, the
+   explicit unordered form and the pinned form commit on the same mutation;
+   a bare invariant that is actually broken rolls back whole.
 4. **Streaming hash.** A 3 MiB file hashes to the same digest as
    `hashlib.sha256` over its bytes, and still does after the whole-file
    reader is replaced with one that raises — the hash never loads the file.
@@ -88,7 +97,7 @@ registration. Each property FAILS on the tree before its fix:
 |---|---|---|---|
 | typed verdict | every refusal in `procedure.execute` passes through `_refuse(code, …)` | a refusal raised as a bare `ValueError` from an adapter is `EXECUTION_ERROR` — a failure, never inapplicable | `procedure.execute` result fields; `runbook.status` after two inapplicable runs |
 | no file on refusal | main database checked with `os.path.isfile` before connect; attached siblings already checked | a race that creates the file between check and connect (the transaction then runs against an empty database and its precondition decides) | `os.path.exists` after the refusal |
-| ordering | the invariant query carries ORDER BY, or is declared unordered | assertions and preconditions keep ordered comparison (their claim envelope, Phase 1/7, is "these exact rows"); authors ORDER BY there | independent `sqlite3` read showing the flipped natural order |
+| ordering | an ordered comparison is claimed only by a query carrying ORDER BY; every other invariant is a multiset | assertions and preconditions keep ordered comparison (their claim envelope, Phase 1/7, is "these exact rows"); authors ORDER BY there | independent `sqlite3` read showing the flipped natural order |
 | streaming | 1 MiB chunks | memory is not measured, only the property that the whole-file reader is never called | monkeypatched `read_bytes` that raises |
 
 ## What this phase does NOT claim
