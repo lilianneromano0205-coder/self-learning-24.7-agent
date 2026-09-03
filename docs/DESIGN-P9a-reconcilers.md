@@ -135,6 +135,24 @@ is *owned*.
 | halts, never loops | `max_failures` finite | a restore that flaps (succeeds, then drifts again within `every_s`) is repaired each time and counted — flapping is visible in the ledger, not prevented | the ledger rows and `blocked.md` |
 | single controller | one held lock per tick | two experts declaring reconcilers over one shared file (each converges independently; they may fight — the owner's declarations, not the platform's) | lock semantics |
 
+## What CI found on this branch
+
+The pull-request run of PR #16 failed on one job (windows-latest, Python
+3.11) while the push run of the same commit and the five other jobs
+passed: `test_swarm`'s ledger hammer — four threads appending 25 events
+each to a goal's event ledger — lost one thread to `TimeoutError: lock
+busy` and the ledger held 75 rows. Not a reconciler defect: the lock's
+spin slept a fixed 50 ms, so waiters woke in lockstep and the same
+appender kept losing the race; on a loaded runner it starved past the
+10 s deadline, and `contract.event` let the timeout kill the thread and
+drop its rows. Locally the same hammer at 12 × 50 finishes 600/600 in
+under five seconds, three rounds running — the defect needs a slow disk,
+which is why a computer this project does not own found it. Two changes,
+neither weakening a control: the lock's spin is jittered (20–80 ms), and a
+timed-out acquisition in `contract.event` is retried a bounded number of
+times before it is allowed to raise — the retry happens before the append,
+so it can never double-write, and a row is never silently lost.
+
 ## What this phase does NOT claim
 
 No new state world, no new predicate, no model behaviour. No panel. No
