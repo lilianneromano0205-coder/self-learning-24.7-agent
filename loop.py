@@ -4121,6 +4121,59 @@ class Agent:
                                        "error": str(e)[:300]}))
             return False
 
+    def _watchdog_tick(self, force=False):
+        """Fault protection (docs/DESIGN-P9b): evaluate the owner's limits
+        from the ledgers and enter safe mode on a trip. Returns the active
+        mode record or None. Throttled to 30 s (0 when draining) — the
+        FILE is the state, so a mode entered by another process or by the
+        owner's hand is seen here too."""
+        import watchdog
+        now = time.time()
+        throttle = 0 if getattr(self, "_drain_mode", False) else 30
+        if not force and now - getattr(self, "_wd_last", 0) < throttle:
+            return getattr(self, "_wd_mode", None)
+        self._wd_last = now
+        try:
+            mode, entered = watchdog.check(self.root, self.cfg)
+        except Exception as e:
+            self.log.error(json.dumps({"event": "watchdog_failed",
+                                       "error": str(e)[:300]}))
+            mode, entered = None, False
+        if entered:
+            self.log.error(json.dumps({
+                "event": "safe_mode_entered", "trips": mode.get("trips"),
+                "why": "a declared limit tripped; model-driven work stops "
+                       "at the next step boundary; the owner clears it with "
+                       "python watchdog.py clear --why"}))
+        self._wd_mode = mode
+        return mode
+
+    def _safe_mode_hold(self, mode, drain):
+        """What the loop does while safe mode is active: claims nothing,
+        keeps its heartbeat, keeps the model-free ticks (intentions arm,
+        reconcilers keep the owner's invariants), says so once a minute,
+        and — draining — returns rather than waits."""
+        now = time.time()
+        if now - getattr(self, "_wd_said", 0) >= 60:
+            self._wd_said = now
+            self.log.info(json.dumps({
+                "event": "safe_mode_active", "since": mode.get("at"),
+                "trips": [t.get("limit") for t in mode.get("trips") or []],
+                "why": "no task is claimed until the owner clears safe mode"}))
+        self.heartbeat(note="safe_mode")
+        try:
+            self._prospective_tick()
+            self._reconcile_tick()
+        except Exception as e:
+            self.log.error(json.dumps({"event": "safe_mode_tick_failed",
+                                       "error": str(e)[:200]}))
+        if drain:
+            self.log.info(json.dumps({"event": "drain_safe_mode_stop"}))
+            self.heartbeat(note="safe_mode")
+            return True
+        time.sleep(self.poll_interval)
+        return False
+
     def _maybe_queue_chain(self, task):
         """Pipeline chaining: [agent.chain] maps a finished role to the next
         role, e.g. ripper -> watcher, so ingested material is studied without
@@ -4265,6 +4318,13 @@ class Agent:
         while True:
             if self._should_stop():
                 return
+            # FAULT PROTECTION (docs/DESIGN-P9b): a fleet in safe mode does
+            # no model-driven work until the owner clears it
+            mode = self._watchdog_tick()
+            if mode:
+                if self._safe_mode_hold(mode, drain):
+                    return
+                continue
             if self._budget_exceeded():
                 if drain:
                     self.log.info(json.dumps({"event": "drain_budget_stop"}))
@@ -4335,6 +4395,13 @@ class Agent:
                 # commits; the task stays `running` with its lease released,
                 # and the next loop to start adopts it exactly where it left
                 # off, which is the path U15 already made safe.
+                if self._watchdog_tick():
+                    self.log.info(json.dumps({
+                        "event": "safe_mode_midtask", "task": task["id"],
+                        "steps_done": n_steps(task),
+                        "why": "a limit tripped; stopping between steps — "
+                               "the task stays running and is resumable"}))
+                    break
                 if getattr(self, "_stop_requested", False):
                     self.log.info(json.dumps({
                         "event": "shutdown_midtask", "task": task["id"],

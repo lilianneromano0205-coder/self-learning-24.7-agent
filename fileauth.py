@@ -50,6 +50,11 @@ CONTROL_FILES = {
     # status. A worker that could write it would declare a controller over
     # itself; the harness writes its bookkeeping, the owner its declarations.
     "reconcilers.json",
+    # the fleet's SAFE-MODE switch (docs/DESIGN-P9b): written by the harness
+    # when a declared limit trips, cleared by the owner with a reason. A
+    # worker that could remove it would be a spacecraft overriding its own
+    # fault protection.
+    "safe_mode.json",
     # identity.md is a SYSTEM PROMPT SOURCE — loop.system_sources() puts it
     # in every window, right after the constitution — and the panel writes it
     # for the OWNER, with a backup and an identity.history.jsonl line stamped

@@ -69,6 +69,7 @@ IN_ROOT = [
     ("identity.history.jsonl", "charter edit history"),
     ("prospective.json", "prospective ledger"),
     ("reconcilers.json", "reconciler declarations: a desired state and its proven restore"),
+    ("safe_mode.json", "the fleet's safe-mode switch: fault protection the model cannot clear"),
     ("variants/manifest.json", "variant manifest"),
     ("mcp.json", "MCP server configuration"),
     ("approvals/pending.json", "approval decisions"),

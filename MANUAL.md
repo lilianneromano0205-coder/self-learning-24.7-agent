@@ -221,6 +221,7 @@ dialogs, 40 px targets.
 | `python modelrouter.py [--role R]` | measured model profiles and the routing decision |
 | `python routines.py save <task-id> --every-days 1` | turn a finished task into a standing arrangement |
 | `python reconciler.py add\|list\|tick\|pause\|resume\|remove\|status` | keep a declared state true with a PROVEN procedure, model-free: observe, restore, re-observe, back off, halt to you when it cannot converge (docs/DESIGN-P9a) |
+| `python watchdog.py status\|evaluate\|enter\|clear` | fault protection: declared limits (`[agent.watchdog]`) with one response, safe mode — no task claimed, a running task stopped at its step boundary, invariants kept — that only you clear, with a reason (docs/DESIGN-P9b) |
 | `python checkpoint.py --root <expert>` | resumable long jobs and their progress |
 | `python sandbox.py [--run CMD]` | which execution backend is active, and try it |
 | `python variants.py spawn\|trial\|list` | charter evolution, gated by evidence (promote/rollback from the panel) |

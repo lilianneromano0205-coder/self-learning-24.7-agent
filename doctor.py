@@ -49,7 +49,7 @@ CORE_MODULES = ["loop", "ingest", "verify", "memcheck", "recall", "citecheck",
                 "operators", "dbstate", "gitstate", "xlsxstate", "tabular",
                 "tabletypes", "signatures", "acquire", "frontier", "mission",
                 "knowledge", "experience", "effects", "policy", "httpstate",
-                "reconciler"]
+                "reconciler", "watchdog"]
 PROMPTS = ["constitution.md", "_grounding.md", "ripper.md", "watcher.md",
            "librarian.md", "practitioner.md", "examiner.md", "student.md",
            "reflector.md", "consultant.md"]
@@ -332,6 +332,21 @@ def readiness(home):
             add("no experts yet", "create one: python fleet.py create \"Name\" "
                                  "--identity \"...\" (or the panel)", False)
         for e in experts:
+            # fault protection (docs/DESIGN-P9b): an expert in safe mode is
+            # not ready, and the fix is a human decision with a reason
+            sm = os.path.join(e["root"], "safe_mode.json")
+            if os.path.isfile(sm):
+                try:
+                    with open(sm, encoding="utf-8") as f:
+                        rec = _json.load(f)
+                    trips = ", ".join(str(t.get("limit", "?"))
+                                      for t in rec.get("trips") or [])
+                except (OSError, ValueError):
+                    rec, trips = {}, "?"
+                add(f"{e['name']}: SAFE MODE since {rec.get('at', '?')} "
+                    f"({trips or 'no limit named'})",
+                    f"investigate, then: python watchdog.py clear --root "
+                    f"\"{e['root']}\" --why \"...\"", True)
             hp = os.path.join(e["root"], "logs", "health.json")
             try:
                 with open(hp, encoding="utf-8") as f:
