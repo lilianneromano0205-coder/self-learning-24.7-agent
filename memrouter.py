@@ -36,21 +36,26 @@ Owner override, per role, in settings.toml:
 import json
 import os
 
-ALL_KINDS = ["self", "commons", "course", "standards", "authority",
+ALL_KINDS = ["self", "owner", "commons", "course", "standards", "authority",
              "conflicts", "cases", "gotchas", "premise", "skills",
              "memory_files"]
 
 # `self` is in every row on purpose: knowing what you have verified is not
 # course material, it is the thing that makes an honest "I have not studied
 # that" possible — including in a closed-book exam.
+# `owner` (docs/DESIGN-P10) is how the person the fleet works for decides;
+# it rides with every role EXCEPT the closed-book student, whose window is
+# the course and nothing else — the owner's habits are not exam material.
 TABLE = {
     "student": ["self", "course", "memory_files"],
-    "examiner": ["self", "course", "memory_files", "premise", "gotchas",
-                 "authority", "conflicts", "cases"],
-    "consultant": ["self", "course", "memory_files", "premise", "gotchas",
-                   "authority", "conflicts"],
-    "reflector": ["self", "memory_files", "skills", "gotchas", "cases"],
-    "ripper": ["self", "memory_files", "gotchas", "course", "authority"],
+    "examiner": ["self", "owner", "course", "memory_files", "premise",
+                 "gotchas", "authority", "conflicts", "cases"],
+    "consultant": ["self", "owner", "course", "memory_files", "premise",
+                   "gotchas", "authority", "conflicts"],
+    "reflector": ["self", "owner", "memory_files", "skills", "gotchas",
+                  "cases"],
+    "ripper": ["self", "owner", "memory_files", "gotchas", "course",
+               "authority"],
 }
 # goal prefixes that always need the fleet's shared lessons
 COMMONS_PREFIXES = ("PLAN cycle", "TEAM", "JUDGE")

@@ -4099,6 +4099,33 @@ class Agent:
                                        "error": str(e)}))
             return False
 
+    def _twin_tick(self):
+        """The owner's twin (docs/DESIGN-P10) on the idle cycle: harvest the
+        owner's decisions into episodes, SEAL a shadow prediction for every
+        decision point the owner has not yet answered, score the ones they
+        have, and refit. Model-free, consent-gated inside twin.tick, and
+        it can never break the loop. Returns True only when something was
+        sealed or resolved, so a --drain run makes one more pass and sees
+        the ledger settle."""
+        now = time.time()
+        throttle = 0 if getattr(self, "_drain_mode", False) else 20
+        if now - getattr(self, "_tw_last", 0) < throttle:
+            return False
+        self._tw_last = now
+        try:
+            import twin
+            res = twin.tick(self.root, self, cfg=self.cfg)
+            if twin.acted(res):
+                self.log.info(json.dumps({"event": "twin_tick",
+                                          "sealed": res.get("sealed"),
+                                          "resolved": res.get("resolved"),
+                                          "learned": res.get("learned")}))
+            return twin.acted(res)
+        except Exception as e:
+            self.log.error(json.dumps({"event": "twin_tick_failed",
+                                       "error": str(e)[:300]}))
+            return False
+
     def _reconcile_tick(self):
         """The standing controllers (docs/DESIGN-P9a): every armed
         reconciler that is due observes its declared state and, on drift,
@@ -4337,6 +4364,7 @@ class Agent:
             if task is None:
                 self.heartbeat(note="idle")
                 if (self._prospective_tick() or self._reconcile_tick()
+                        or self._twin_tick()
                         or self._inbox_tick()
                         or self._gap_tick() or self._exam_tick()
                         or self._reexam_tick()):

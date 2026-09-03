@@ -21,6 +21,36 @@ PY = sys.executable
 
 # (label, file, find, replace, test, what the test must notice)
 MUTATIONS = [
+    # ---- the owner's twin (docs/DESIGN-P10): four laws, each broken once
+    ("twin: sealed prediction revealed before the decision", "twin.py",
+     '''    if p.get("status") == "sealed":
+        return {"id": pid, "status": "sealed", "sealed": p["sealed"],''',
+     '''    if False:
+        return {"id": pid, "status": "sealed", "sealed": p["sealed"],''',
+     "test_twin.py",
+     "a shadow prediction shown to the owner before they decided"),
+
+    ("twin: the clone predicts without consent", "twin.py",
+     '''    need_scope(root, "predict")
+    k = kernel or load_kernel(root)''',
+     '''    k = kernel or load_kernel(root)''',
+     "test_twin.py",
+     "a prediction about the owner with no consent on record"),
+
+    ("twin: the label dropped from the clone's output", "twin.py",
+     '''    return {"label": LABEL, "kernel_version": v["v"], "kernel_hash": v["hash"],''',
+     '''    return {"label": "", "kernel_version": v["v"], "kernel_hash": v["hash"],''',
+     "test_twin.py",
+     "a clone output that does not say it is a model of the owner"),
+
+    ("twin: act runs without a definition of done", "twin.py",
+     '''    if not done_check:
+        raise Refused("a twin acting for the owner must be gated: pass "''',
+     '''    if False:
+        raise Refused("a twin acting for the owner must be gated: pass "''',
+     "test_twin.py",
+     "the twin queuing ungated work on the owner's behalf"),
+
     ("docker: egress allowed by default", "sandbox.py",
      '''    if not _cfg(cfg).get("sandbox_network"):
         argv += ["--network", "none"]           # default-deny egress''',

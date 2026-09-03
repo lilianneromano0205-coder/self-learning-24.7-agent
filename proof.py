@@ -102,6 +102,26 @@ REGISTRY = {
                          "test_reliability.py"],
         "live": "a real provider answers a real task",
     },
+    "twin-self-kernel": {
+        "capability": "A measured, versioned model of how the OWNER decides "
+                      "(docs/DESIGN-P10): learned from their own decisions, "
+                      "sealed in shadow before they act, scored against what "
+                      "they do, honest below 20 held-out rows, read into "
+                      "every window as the OWNER block, consent-gated and "
+                      "labeled on every path; the Super-Self shows where a "
+                      "better-informed owner diverges and asks.",
+        "invariants": ["twin/ is CONTROL: the worker never writes its owner",
+                       "a shadow prediction is sealed before the decision "
+                       "and hidden until it lands",
+                       "no output without verified consent; every output "
+                       "carries the label",
+                       "drift is a notice and a question, never a silent "
+                       "update"],
+        "code": ["twin.py", "twinmath.py"],
+        "tests": ["test_twin.py"],
+        "stress_tests": [],
+        "live": "the Super-Self answers through a real provider role",
+    },
     "execution-authority": {
         "capability": "Every process the platform runs passes one typed "
                       "gateway, so a new feature cannot quietly add an "

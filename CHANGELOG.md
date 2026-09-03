@@ -1,5 +1,57 @@
 # Changelog
 
+## v12 — the twin: a Self Kernel of the owner beneath every agent (2026-09-03)
+
+Phase 10 (docs/DESIGN-P10-twin.md, committed before the code). The
+platform could say what an agent had verified about itself; it could say
+nothing about how the person it works for decides. This release adds that
+model — and keeps it honest the way everything else here is kept honest:
+measured, sealed, versioned, consent-gated, labeled.
+
+### What was added
+
+- `twin.py`, `twinmath.py` — the Self Kernel. Episodes harvested from
+  decided approvals, steering notes and answers (or recorded/imported);
+  a deterministic conditional-logit fit with pairwise interactions;
+  behavioral programs mined and proven on held-out rows; per-counterpart
+  social record; a Burrows' Delta style profile; the Clone
+  (`predict`: a distribution, the driving features, novelty, ask mass,
+  the label); the Super-Self (`superself`: a model role thinks as the
+  owner with more to know; divergence detected mechanically and queued
+  as a policy-update question; the kernel never moves); `draft`; `act`
+  (queues a gated task, refuses ungated work).
+- **Shadow mode.** Every pending approval gets a prediction sealed
+  (SHA-256) before the owner decides and hidden until they do; resolved
+  predictions are scored (hit, Brier, log-loss); an edited body is TAMPER.
+- **Elicitation.** One open question at a time, asked only on a confident
+  miss or a novel decision without a note; the answer lands on the episode.
+- **Drift.** Page-Hinkley over prediction loss; a trip is a notice with
+  both estimates and candidate causes; `confirm` freezes a new kernel
+  version, `dismiss` keeps the old; `learn` is HELD while a notice is open.
+- **The benchmark** (`fidelity`): choice fidelity, Brier, ECE, reliability
+  curve, high-confidence error rate, novel-situation fidelity, ranking
+  fidelity, self-consistency ceiling and normalized fidelity, correction
+  speed, writing fidelity; INSUFFICIENT EVIDENCE below 20 held-out rows.
+- **Consent** as a sealed chain under the learning authority (owner-only,
+  first-seal-wins, each record naming the digest of the one before);
+  scopes nest predict < advise < draft < act; revoke; TAMPER on edit.
+- **The OWNER block** in every window (`context.py` source `owner`,
+  after `self`; every role except the closed-book student).
+- Panel: an agent → Mind → *Twin* (consent, kernel, benchmark, shadow
+  ledger, questions, drift notice, record/predict/super-self).
+- Registration: `twin/` is CONTROL; `twin/kernel.json` is a harness
+  ledger and in the leakage enumeration; gateway purpose `twin`; doctor;
+  four mutation checks; `tests/test_twin.py` (13 preregistered checks).
+- `docs/research/P10-twin-research-{A,B}.md` — the literature the design
+  rests on, verified with URLs (~80 citations).
+
+### What it does not claim
+
+No weights are trained; no screen or keystroke capture; no claim that a
+mind is copied. The target, in the design's words: *behaviorally
+indistinguishable within measured domains, with calibrated uncertainty
+outside them* — and the fidelity report names the domains.
+
 ## v11 — the learning loop was a set of parts; now it is a loop (2026-08-31)
 
 The verified-learning layer had been built and never connected. Its modules
