@@ -48,7 +48,7 @@ CORE_MODULES = ["loop", "ingest", "verify", "memcheck", "recall", "citecheck",
                 "scheduler", "procedure", "verifier", "verification",
                 "operators", "dbstate", "gitstate", "xlsxstate", "tabular",
                 "tabletypes", "signatures", "acquire", "frontier", "mission",
-                "knowledge", "experience", "effects", "policy"]
+                "knowledge", "experience", "effects", "policy", "httpstate"]
 PROMPTS = ["constitution.md", "_grounding.md", "ripper.md", "watcher.md",
            "librarian.md", "practitioner.md", "examiner.md", "student.md",
            "reflector.md", "consultant.md"]

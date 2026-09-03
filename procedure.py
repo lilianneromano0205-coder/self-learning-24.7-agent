@@ -119,7 +119,8 @@ RETRY_MAX = 3
 CALL_DEPTH_MAX = 4
 NEST_MAX = 6
 DETERMINISTIC_TOOLS = ("write_file", "copy_file", "transform_table",
-                       "db_transaction", "git_op", "xlsx_import", "xlsx_export")
+                       "db_transaction", "git_op", "xlsx_import", "xlsx_export",
+                       "http_effect")
 # the one argument each adapter MUTATES; every other file argument is read
 _WRITE_KEY = {"write_file": "path", "copy_file": "path",
               "transform_table": "path", "db_transaction": "database",
@@ -181,6 +182,32 @@ def _normalize(action):
         raise ProcedureError("action must identify a tool and structured arguments")
     action = copy.deepcopy(action)
     action.setdefault("args", {})
+    if action["tool"] == "http_effect":
+        # the outward-facing family (docs/DESIGN-P8): method, path, body and
+        # readback canonicalized HERE, so byte-different equal meanings
+        # align across trajectories and an unacceptable request never
+        # becomes evidence. The endpoint is a NAME in the owner's table,
+        # screened as such; the host is never in the action.
+        import httpstate
+        args = action["args"]
+        for key in ("endpoint", "method", "path", "readback"):
+            if not isinstance(args.get(key), str):
+                raise ProcedureError("http actions require string arguments")
+        if "body" in args and not isinstance(args["body"], str):
+            raise ProcedureError("http actions require string arguments")
+        try:
+            if not httpstate._NAME_RE.match(args["endpoint"]):
+                raise ValueError("http state: endpoint name is not acceptable")
+            args["method"] = httpstate.canonical_method(args["method"])
+            args["path"] = httpstate.canonical_path(args["path"])
+            args["readback"] = httpstate.canonical_readback(args["readback"])
+            if args.get("body"):
+                args["body"] = httpstate.canonical_json(args["body"])
+            else:
+                args.pop("body", None)
+        except ValueError as exc:
+            raise ProcedureError(str(exc))
+        return action
     if action["tool"] in ("write_file", "copy_file", "read_file",
                           "transform_table", "db_transaction", "db_query",
                           "git_op", "xlsx_import", "xlsx_export"):
@@ -268,6 +295,21 @@ def _snapshot(root, action):
         result["repo"] = {"exists": gitstate.is_repository(path),
                           "hash": gitstate.ref_state_digest(path),
                           "index_clean": gitstate.index_clean(path)}
+        return result
+    if action["tool"] == "http_effect":
+        # the remote record's before/after evidence is the declared readback
+        # observed NOW through the owner's endpoint: whether it answered
+        # canonical JSON, and the hash of that body (docs/DESIGN-P8). An
+        # endpoint that cannot be resolved, or a credential that is not
+        # set, reads as "not observable" — never as an exception
+        import httpstate
+        try:
+            entry = httpstate.load_endpoint(root, action["args"]["endpoint"])
+            bearer = httpstate.resolve_token(entry, root)
+            result["readback"] = httpstate.readback_state(
+                entry, action["args"]["readback"], bearer)
+        except (OSError, ValueError):
+            result["readback"] = {"exists": False, "hash": None}
         return result
     for key in ("path", "source", "source2", "database", "out"):
         value = action["args"].get(key)
@@ -405,6 +447,22 @@ def finish_action(root, task_id, token, succeeded):
                     success = success and f.read() == data
             except (OSError, ValueError, fileauth.Denied):
                 success = False
+        if action["tool"] == "http_effect":
+            # the declared readback re-performed NOW through the owner's
+            # endpoint — independent of the tool's own verdict, which is
+            # the point: the evidence is what the harness re-observed
+            import httpstate
+            try:
+                entry = httpstate.load_endpoint(root, action["args"]["endpoint"])
+                # named `bearer`, never `token`: `token` is this function's
+                # trajectory-token parameter, and shadowing it made every
+                # trajectory verification unbound (found by the benchmark)
+                bearer = httpstate.resolve_token(entry, root)
+                ok, _why = httpstate.check(entry, action["args"]["readback"],
+                                           bearer)
+                success = success and ok
+            except (OSError, ValueError):
+                success = False
         item.update({"complete": True, "succeeded": success, "after": after,
                      "latency_seconds": max(0, time.time() - item["started"])})
         return success
@@ -461,6 +519,20 @@ def _perform(root, action):
             tabletypes.conforms(args["schema"], text)
         fileauth.write_bytes(root, args["path"],
                              xlsxstate.export_bytes(text, args["sheet"]))
+    elif action["tool"] == "http_effect":
+        # write, then the declared readback, or refuse as unverified. The
+        # idempotency key is a function of the canonical arguments, so an
+        # API that honours the header dedupes an identical write on a
+        # retry; the readback still decides (docs/DESIGN-P8)
+        import hashlib
+        import httpstate
+        entry = httpstate.load_endpoint(root, args["endpoint"])
+        bearer = httpstate.resolve_token(entry, root)
+        key = "proc|" + hashlib.sha256(json.dumps(
+            args, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        ).hexdigest()[:24]
+        httpstate.effect(entry, args["method"], args["path"], args.get("body"),
+                         args["readback"], bearer, key)
     elif action["tool"] == "read_file":
         fileauth.read_text(root, args["path"])
     else:
@@ -721,6 +793,18 @@ def _compile_aligned(trajectories, sequences, schema, minted, auto, prefix):
             target = args["repo"]
             effect = {"predicate": "repo_satisfies", "path": target,
                       "assertions": args["assertions"]}
+            step["effects"].append(effect)
+            effects = [e for e in effects if e["path"] != target] + [effect]
+            touched.append(target)
+        elif tool == "http_effect":
+            # the outward-facing family (docs/DESIGN-P8): the target is a
+            # REMOTE record, so no file-existence guard and no IF guard;
+            # the effect is the declared readback re-performed, and the
+            # endpoint stays the literal name the owner tabled
+            target = args["path"]
+            effect = {"predicate": "http_satisfies", "path": target,
+                      "endpoint": args["endpoint"],
+                      "readback": args["readback"]}
             step["effects"].append(effect)
             effects = [e for e in effects if e["path"] != target] + [effect]
             touched.append(target)
@@ -1005,6 +1089,11 @@ def _run_leaf(root, workspace, step, authority, receipts):
         if token not in authority:
             raise _refuse("AUTHORITY_MISSING",
                           f"required authority was not granted: missing {token}")
+    if action["tool"] == "http_effect":
+        token = "http-write:" + str(action["args"]["endpoint"])
+        if token not in authority:
+            raise _refuse("AUTHORITY_MISSING",
+                          f"required authority was not granted: missing {token}")
     if not all(operators.observe(workspace, item)
                for item in step.get("preconditions", [])):
         raise _refuse("PRECONDITION_MISMATCH", "step precondition changed")
@@ -1148,6 +1237,9 @@ def execute(root, rb, inputs, workspace=None, authority=None, _stack=None):
             if step.get("action", {}).get("tool") == "git_op":
                 required.add("git-write:" + str(step["action"]["args"]
                                                 ["repo"]).replace("\\", "/"))
+            if step.get("action", {}).get("tool") == "http_effect":
+                required.add("http-write:"
+                             + str(step["action"]["args"]["endpoint"]))
         if not required <= authority:
             raise _refuse("AUTHORITY_MISSING",
                           "required authority was not granted: missing "
@@ -1274,6 +1366,15 @@ def evaluate(root, name, suite_id):
                         item["content"])
                 else:
                     fileauth.write_text(arena, item["path"], item["content"])
+            # the owner's endpoint table travels with the arena so an http
+            # step resolves the same hosts wherever it runs (docs/DESIGN-P8);
+            # credentials do not travel — they resolve from the environment
+            settings = os.path.join(root, "settings.toml")
+            if os.path.isfile(settings):
+                with open(settings, "rb") as src:
+                    data = src.read()
+                with open(os.path.join(arena, "settings.toml"), "wb") as dst:
+                    dst.write(data)
             grant = {"workspace-write"} | set(suite.get("authority", []))
             result = execute(root, rb, case["inputs"], workspace=arena,
                              authority=grant)

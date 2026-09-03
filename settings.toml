@@ -42,6 +42,23 @@ git_write = []                      # git repositories (relative directories)
                                     # a worker's git_op may mutate and the
                                     # zero-model route may commit into. EMPTY
                                     # grants nothing, exactly like db_write.
+http_write = []                     # endpoint NAMES (from the table below) a
+                                    # worker's http_effect may write through
+                                    # and the zero-model route may write
+                                    # through. EMPTY grants nothing, exactly
+                                    # like db_write; observation needs only
+                                    # that the endpoint exists.
+# The outward-facing world (docs/DESIGN-P8): a worker never names a host, it
+# names one of these. Uncomment and edit to table an endpoint:
+#
+# [agent.http_endpoints.tickets]
+# base = "https://api.example.com/v1"   # http(s), host only, no query/userinfo
+# methods = ["GET", "POST", "PUT"]      # DELETE absent = refused
+# auth_env = "TICKETS_TOKEN"            # the NAME of the variable holding the
+#                                       # bearer (agent.env or the environment);
+#                                       # unset = the endpoint refuses, it never
+#                                       # calls anonymously
+# max_bytes = 1048576                   # response cap
 inbox_settle_seconds = 10           # ignore files still being copied in
 max_task_retries = 3                # retries of a failed task before it rests
 candidates_max = 5                  # test-time compute: attempts to score

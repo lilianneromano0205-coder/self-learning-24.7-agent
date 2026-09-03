@@ -1,8 +1,8 @@
 # Phase 8 — Safe HTTP/API operators (design, committed before code)
 
-**Status: DESIGN** (flips to BUILT when the preregistered benchmark below is
-green in the acceptance suite on all six CI jobs). **Branch:**
-`phase8/http-operators`. **Order:** the owner's operator-universe order
+**Status: BUILT** (this document was committed first; the build commit
+follows it and cites this file; the benchmark below is green in the
+acceptance suite). **Branch:** `phase8/http-operators`. **Order:** the owner's operator-universe order
 after SQL — *"4. Safe HTTP/API operators — with read-after-write
 verification and effect semantics"* — reopened by the owner on 2026-09-02
 ("the agents don't have the hands an agent needs"), after Phase 7.1 and
@@ -161,6 +161,26 @@ touches the internet.
 | no double write | the API honours `Idempotency-Key`, or the retry is in the same lineage | an API that ignores the header on a retry with a lost local record | fixture PUT count |
 | no credential leak | the credential is a bearer from a named variable | a response body that echoes the bearer (data, returned as data — the model would see it); non-bearer schemes | grep of output and ledger |
 | data not orders | canonical JSON | prompt injection remains "not a boundary" (REMEDIATION); the body is bounded, not neutralised | reply shape |
+
+## What the benchmark found while being built
+
+Two defects in the first build, both caught by the benchmark before any
+commit, recorded here because a design that hides its own misses is the
+kind of documentation the Ledger flagged:
+
+- `finish_action` re-checks the readback with a bearer; the first build
+  named that variable `token`, which is the function's own trajectory-token
+  parameter, so Python made it local to the closure and **every**
+  trajectory verification — for every tool, not only HTTP — raised an
+  unbound-variable error. Every trajectory benchmark (Phases 1–7) was
+  rerun after the rename and is green; the variable is `bearer` everywhere.
+- The compiler binds a varying argument to a declared input only when the
+  captured bytes equal the declared bytes. The adapter captures canonical
+  JSON; a task that declares its inputs as ordinary `json.dumps` text sees
+  the compiler mint extra inputs (`body_4`, `readback_5`) and the replay
+  cannot bind. The rule, already true of SQL statements, is now stated:
+  **declare http inputs in canonical form** (`canonical_json`,
+  `canonical_readback`).
 
 ## What this phase does NOT claim
 

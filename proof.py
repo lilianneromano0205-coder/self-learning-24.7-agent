@@ -339,6 +339,7 @@ for _name, _code, _description in (
     ("procedural-learning",
      ["procedure.py", "operators.py", "runbook.py", "tabular.py",
       "tabletypes.py", "dbstate.py", "gitstate.py", "xlsxstate.py",
+      "httpstate.py",
       "verifier.py", "signatures.py", "capability_graph.py"],
      "Independently judged trajectories compile into an executable procedure "
      "that a later matching task runs deterministically, with the task's own "
@@ -359,7 +360,8 @@ for _name, _code, _description in (
                                  "test_git_operators.py",
                                  "test_xlsx_operators.py",
                                  "test_transactional_contracts.py",
-                                 "test_correctness_patch.py"]
+                                 "test_correctness_patch.py",
+                                 "test_http_operators.py"]
                                 if _name == "procedural-learning"
                                 else ["test_advanced_learning.py"]),
                       "invariants": ["offline tests never establish model lift", "judges remain independent"],
