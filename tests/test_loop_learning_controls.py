@@ -83,7 +83,13 @@ class LoopLearningControlsTests(unittest.TestCase):
         a = loop.Agent(root)
         self.assertIn("ok, wrote", a._exec_tool(
             task, "write_file", {"path": "out/proc.txt", "content": "ok"}))
-        self.assertEqual(a._exec_tool(task, "read_file", {"path": skill_rel}), "demo")
+        # what a file says enters the window as MARKED DATA (DESIGN-P11):
+        # the bytes are exact, between the untrusted markers
+        seen = a._exec_tool(task, "read_file", {"path": skill_rel})
+        self.assertTrue(seen.startswith(
+            "<<<TOOL-RESULT read_file " + skill_rel + ">>>\n"), seen)
+        self.assertIn("\ndemo\n<<<END-TOOL-RESULT read_file " + skill_rel + ">>>",
+                      seen)
         trajectory = procedure.finish_trajectory(root, "task-1")
         self.assertTrue(trajectory["accepted"])
         self.assertEqual(task["skill_trace"][-1]["event"], "referenced")

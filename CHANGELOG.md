@@ -1,5 +1,71 @@
 # Changelog
 
+## v13 — the clean window: only marked data enters (2026-09-03)
+
+Phase 11 (docs/DESIGN-P11-clean-window.md). An audit of the context
+compiler and the memory layer, prompted by one question: does this
+platform's context get polluted the way an ordinary agent's does? The
+window's design held — per-source budgets, the trim pointer, the manifest,
+the closed-book router, the compaction-cliff law. The defects were at the
+edges, where text crosses into the window, and every one of them was
+invisible to a green suite because no test read what a *tool* returned.
+
+### What changed
+
+- **Every channel is marked.** `read_file`, `run_command`, `http_observe`
+  and `subquery` return their text between `<<<TOOL-RESULT …>>>` markers,
+  the shape MCP results already had. A fetched page was fenced in the
+  first window and unfenced on every re-read; now it is data both times.
+  `run_command` keeps `exit=<rc>` outside the fence — `step_failed` and
+  `trace.py` judge a command by that line alone.
+- **A file can no longer close its own fence.** `context.neutralize`
+  escapes marker tokens inside untrusted text, visibly
+  (`<<[fence-escaped]<END-…`), so the attempt stays reportable; only
+  marker tokens are touched. `context.fence_label` keeps a crafted
+  filename out of the delimiter.
+- **One unit of pressure.** Compaction fires on the provider gate's own
+  UTF-8 byte bound (`context.window_pressure`, at 0.8 of the maximum) as
+  well as on the chars/4 estimate — the two disagreed by ~40%, with the
+  gate the tighter one, so a long transcript was refused before the
+  compactor ran.
+- **An overflow is a recovered step, not an internal error.**
+  `_call_within_window` compacts by force, archives every oversize tool
+  result verbatim (pointer in its place, `recall.py` finds the bytes) and
+  calls again; a second overflow stops the task with the reason named.
+- **The summarizer is grounded.** It was called with `"You compress agent
+  transcripts."` and its prose re-entered as a `user` message — a higher
+  trust position than the fenced tool result a payload arrived in. It now
+  reads the transcript as fenced untrusted data and reports directives
+  under UNCERTAIN, and the note comes back labelled a record.
+- **Handed files go through the File Authority.** `task["memory_files"]`
+  was the one road into the window that skipped the gateway: no traversal
+  check, no symlink check, no credential refusal.
+- **The viewer stops overstating.** `context.render` prints blocks dropped
+  at the global limit, not only at a source budget.
+- **Four more ledgers out of the worker's reach.**
+  `courses/<c>/conflicts.json` (BINDING in the window, read by the gate),
+  its scan stamp, and the two exam state files are CONTROL;
+  `test_promotion_leakage.py` walks 41 paths.
+- **Fleet ledgers append under their lock.** `memory`, `cases`, `commons`
+  and `twin` joined the six modules that already did, with one lock held
+  across each read-then-append. `twin._write_json` gained the UUID temp
+  name.
+
+### Evidence
+
+`[tool-fence]`, `[grounded]`, `[pressure]`, `[overflow]`, `[authority]`,
+`[concurrent]`, and 41 paths in `[static]`/`[dynamic]`. Six new mutations,
+one per load-bearing behaviour.
+
+### What it does not claim
+
+A fence is not a security boundary (AD-6): marking makes untrusted text
+legible, it does not stop a model obeying it. An atom is still
+model-written. Several ledgers are still unbounded. The validity-gated
+retrieval layer is still not on the compile path, and freshness is still
+advisory. All five are stated in the design and in
+GAPS_RISKS_AND_UNFINISHED.md (U23–U26).
+
 ## v12 — the twin: a Self Kernel of the owner beneath every agent (2026-09-03)
 
 Phase 10 (docs/DESIGN-P10-twin.md, committed before the code). The

@@ -54,6 +54,7 @@ import os
 import re
 import sys
 import time
+import uuid
 
 HOME = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HOME)
@@ -127,7 +128,10 @@ def _read_json(path, default):
 
 def _write_json(path, obj):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = f"{path}.{os.getpid()}.tmp"
+    # a UUID, not the PID alone: two threads of one process aiming at the
+    # same twin file must never share a scratch name (fileauth.write_text
+    # and checkpoint._atomic_write learned this; DESIGN-P11, memory G9)
+    tmp = f"{path}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(obj, f, indent=1, ensure_ascii=False)
     os.replace(tmp, path)
@@ -151,9 +155,13 @@ def _read_jsonl(path):
 
 
 def _append_jsonl(path, rec):
+    """Under the ledger lock: the episode, prediction and question ledgers
+    are appended by the loop, the panel and the CLI (DESIGN-P11, G4)."""
+    import locks
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    with locks.holding(path):
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 
 def _parse_at(s):

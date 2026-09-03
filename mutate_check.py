@@ -21,6 +21,45 @@ PY = sys.executable
 
 # (label, file, find, replace, test, what the test must notice)
 MUTATIONS = [
+    # ---- the clean window (docs/DESIGN-P11): marked data, grounded compaction
+    ("window: read_file returns its bytes unmarked", "loop.py",
+     '''                    result = context.fence_tool("read_file", rel, truncate(f.read()))''',
+     '''                    result = truncate(f.read())''',
+     "test_guardrails.py",
+     "a directive inside a file indistinguishable from harness text"),
+
+    ("window: a marker inside data closes the fence", "context.py",
+     '''    return _FENCE_RE.sub(FENCE_ESCAPE, str(text))''',
+     '''    return str(text)''',
+     "test_guardrails.py",
+     "a poisoned file closing its own fence early"),
+
+    ("compaction: the summarizer reads the transcript as instructions", "loop.py",
+     '''                    {"role": "system", "content": COMPACTION_SYSTEM},''',
+     '''                    {"role": "system", "content": "You compress agent transcripts."},''',
+     "test_compaction.py",
+     "a summarizer with no grounding contract"),
+
+    ("compaction: the byte bound ignored until the gate refuses", "loop.py",
+     '''        return used > COMPACT_AT_FRACTION * maximum''',
+     '''        return False''',
+     "test_compaction.py",
+     "a transcript refused by the provider before the compactor ran"),
+
+    ("fileauth: conflict rulings back in the worker's workspace", "fileauth.py",
+     '''    "courses": {"source-overrides.json", "conflicts.json",''',
+     '''    "courses": {"source-overrides.json",''',
+     "test_promotion_leakage.py",
+     "a worker forging BINDING rulings"),
+
+    ("memory: the fleet ledger appended without its lock", "memory.py",
+     '''    with locks.holding(path):
+        existing = _read_jsonl(path)''',
+     '''    if True:
+        existing = _read_jsonl(path)''',
+     "test_memory.py",
+     "two writers filing the same recurrence count"),
+
     # ---- the owner's twin (docs/DESIGN-P10): four laws, each broken once
     ("twin: sealed prediction revealed before the decision", "twin.py",
      '''    if p.get("status") == "sealed":
