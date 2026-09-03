@@ -111,9 +111,10 @@ CONTROL_DIRS = {"prompts", "approvals", "variants", "effects", "org",
 # Bundled scripts run on that verdict.
 #
 # The general shape of the bug: four of harness.LEDGERS were control and the
-# fifth was not, and nothing compared the two lists. test_fileauth now walks
-# harness.LEDGERS and asserts every one lands in ZONE_CONTROL, so a ledger
-# added later cannot quietly land in the workspace.
+# fifth was not, and nothing compared the two lists. tests/test_invariants.py
+# walks harness.LEDGERS and asserts every one lands in ZONE_CONTROL, and
+# tests/test_promotion_leakage.py enumerates every trust-defining path by
+# name, so a ledger added later cannot quietly land in the workspace.
 CONTROL_PATHS = {"skills/graph.json"}
 # Files that are CONTROL wherever they appear under a workspace head. The
 # goal contract is the definition of done, frozen before work begins, and
@@ -170,6 +171,14 @@ CONTROL_NAMES_IN = {
     # capability's badge without any test having run. Found by the
     # promotion-leakage suite (docs/DESIGN-P6.1, finding 11).
     "proof": {"observations.jsonl"},
+    # memory/cases.jsonl records whether a FIX HELD — a case moves to
+    # "fixed" only when a later gated task in the same subject passed, and
+    # the record is injected into windows as "verified by a gate, not by
+    # opinion" and read by the repeat-failure metric. memory/ was in no
+    # zone table at all, so it fell to ZONE_ROOT, which the agent's file
+    # tool may write: a worker could file its own fixes as verified. Found
+    # by the Capability Ledger (docs/DESIGN-P7.2, finding 5).
+    "memory": {"cases.jsonl"},
 }
 RUNTIME_DIRS = {"logs", "contexts", "checkpoints", "events", "archive"}
 # the agent's own workspace: everything it is FOR

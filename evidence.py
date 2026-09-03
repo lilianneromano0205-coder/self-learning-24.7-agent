@@ -190,7 +190,8 @@ SYSTEMS = {
                   "test_federation.py", "test_providers.py", "test_check.py",
                   "test_trace.py", "test_bootstrap.py", "test_backup.py",
                   "test_preflight.py", "test_ecosystem.py",
-                  "test_mcp_hardening.py", "test_ui_auth_hardening.py"],
+                  "test_mcp_hardening.py", "test_ui_auth_hardening.py",
+                  "test_ledger_defects.py"],
         "blind": "the panel is driven through its HTTP API and its HTML is "
                  "parsed, but no test renders it in a browser. Layout, "
                  "contrast and touch targets are verified by eye, not by CI.",

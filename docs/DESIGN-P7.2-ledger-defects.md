@@ -24,7 +24,7 @@ here together, as one branch with one benchmark.
 | 7 | `fileauth.py:114` | a docstring cites `test_fileauth`, which does not exist (the assertion lives in `test_invariants.py`) |
 | 8 | `harness.py:283` vs `federation.py:292` | the manifest reports an A2A version "1.0" while federation declares `a2a_task_api: false` |
 | 9 | `tests/test_acquire.py:503` | the skip says "docker not available" when the condition is a settings check (`_use_docker`) or docker's absence — the evidence report quoted the wrong reason in a run where docker tests passed |
-| 10 | prose | REFERENCE says twenty templates (code: 24) and four intention kinds (code: seven); MANUAL and REFERENCE say 19 proof capabilities (code: 21); the README badges say 120 tests and 56/56 mutations (code: 148 tests, 32 mutations) |
+| 10 | prose | REFERENCE says twenty templates (code: 24) and four intention kinds (code: seven); the README badges say 120 tests and 56/56 mutations (code: 149 tests, 32 mutations). The Ledger also claimed MANUAL and REFERENCE undercount proof capabilities (19 versus 21); the benchmark's own count of `proof.REGISTRY` is 19, so the prose was right and the Ledger was wrong — corrected there, pinned here |
 
 ## What measurable capability this adds
 
@@ -55,8 +55,9 @@ reach; the manifest and the prose agree with the code.
 7. **Manifest.** The harness manifest's A2A entry states what federation
    states: a card is served, the task API is not implemented.
 8. **Prose.** REFERENCE names 24 templates and seven intention kinds;
-   MANUAL and REFERENCE say 21 capabilities; the README badges carry the
-   test and mutation counts the tree has.
+   MANUAL and REFERENCE state the registry's own count of proof
+   capabilities; the README badges carry the test and mutation counts the
+   tree has — every number read from the tree, never typed.
 
 ## Claim envelope
 

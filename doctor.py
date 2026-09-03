@@ -38,7 +38,17 @@ CORE_MODULES = ["loop", "ingest", "verify", "memcheck", "recall", "citecheck",
                 "confidence", "cases",
                 "goal", "contract", "runbook", "repair", "swarm",
                 "discover", "universal", "grants", "capability", "mastery",
-                "steer", "freshness"]
+                "steer", "freshness",
+                # the modules that DECIDE authority and trust were never on
+                # this list (docs/DESIGN-P7.2, finding 1): a doctor that does
+                # not import the file authority cannot say the platform is
+                # healthy
+                "org", "controlplane", "fileauth", "execution", "credentials",
+                "modelgateway", "workers", "training", "metrics", "gates",
+                "scheduler", "procedure", "verifier", "verification",
+                "operators", "dbstate", "gitstate", "xlsxstate", "tabular",
+                "tabletypes", "signatures", "acquire", "frontier", "mission",
+                "knowledge", "experience", "effects", "policy"]
 PROMPTS = ["constitution.md", "_grounding.md", "ripper.md", "watcher.md",
            "librarian.md", "practitioner.md", "examiner.md", "student.md",
            "reflector.md", "consultant.md"]
@@ -62,12 +72,16 @@ def check_runtime(r):
         r.ok("python", sys.version.split()[0])
     else:
         r.bad("python", f"{sys.version.split()[0]} — 3.11+ required (tomllib)")
+    # a `for … else` with no `break` ran the else on EVERY path, so the
+    # all-clear printed after a failed import (docs/DESIGN-P7.2, finding 1)
+    failed = False
     for m in CORE_MODULES:
         try:
             __import__(m)
         except Exception as e:
+            failed = True
             r.bad("import", f"{m}.py failed: {e}")
-    else:
+    if not failed:
         r.ok("modules", f"all {len(CORE_MODULES)} core modules import")
     try:
         import ast

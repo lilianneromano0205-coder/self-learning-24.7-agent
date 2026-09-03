@@ -6,11 +6,11 @@ continuously, prove what they did, and remember what they learned.**
 [![tests](https://github.com/reda-baqechame/self-learning-24.7-agent/actions/workflows/tests.yml/badge.svg)](https://github.com/reda-baqechame/self-learning-24.7-agent/actions/workflows/tests.yml)
 ![python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![dependencies](https://img.shields.io/badge/dependencies-stdlib%20only-brightgreen)
-![tests](https://img.shields.io/badge/tests-120%20passing%20%C2%B7%206%20platforms-brightgreen)
-![mutations](https://img.shields.io/badge/mutation%20tests-56%2F56%20killed-brightgreen)
+![tests](https://img.shields.io/badge/tests-149%20passing%20%C2%B7%206%20platforms-brightgreen)
+![mutations](https://img.shields.io/badge/mutation%20tests-32%20mutations%20%C2%B7%200%20missed-brightgreen)
 ![license](https://img.shields.io/badge/license-AGPL--3.0-orange)
 
-112 Python modules · 148 acceptance tests · one HTML control panel · no
+112 Python modules · 149 acceptance tests · one HTML control panel · no
 database, no framework, no build step. Python 3.11+ and your own API keys.
 
 ```bash
@@ -162,7 +162,7 @@ are laws with tests that would fail, not features with descriptions.**
 | Long context | a bigger window | **recursive sub-calls** (the RLM result, MIT 2025): the material never enters the window — slices go to disposable sub-calls on the cheapest rail, only distilled answers return, metered and contained like every call |
 | New tools | a fixed integration catalogue, or an agent that installs what it likes | **the capability frontier**: an agent may PROPOSE a tool it lacks, never author the test — it declares an import or a binary, the *platform* generates the probe, and the probe must FAIL before anything is installed. Readiness is decided by a seal outside the agent's reach, and a human adopts it from a terminal |
 | Knowing what a goal needs | a prompt asking the model to list its tools | two measured corpora, 50 goals across 40+ trades, pinned as tests. The broad set went **24% → 100%** honest coverage; the adversarial set found that **5 goals carrying irreversible physical or financial effects did not stop for the owner** — cutting power to a heater, changing a CNC feed rate, filing a claim in your name — because every authority rule was about a digital permission and none about a machine that moves. Now 0 |
-| Dependencies | large stacks | Python stdlib. Zero. 120 tests on 6 CI platforms |
+| Dependencies | large stacks | Python stdlib. Zero. 149 tests on 6 CI platforms |
 | Your state | often hosted, often theirs | files you own, provider-universal (any key, or a zero-key local model) — the model is a swappable part; the memory, graders, runbooks and ledgers are the asset |
 
 Four shipped archetypes cover the famous products' ground on this
@@ -588,7 +588,7 @@ build is cleared.** The full table is in
 
 ```bash
 python demo.py            # the whole platform, keyless, in one run
-python tests/run_all.py   # 148 acceptance tests
+python tests/run_all.py   # 149 acceptance tests
 python proof.py           # what is proven, and to what level
 python evidence.py        # why we believe it, and where belief runs out
 python metrics.py         # is it working — and the numbers it refuses to invent
