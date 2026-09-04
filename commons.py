@@ -39,6 +39,8 @@ import subprocess
 import sys
 import time
 
+import locks
+
 HOME = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HOME)
 
@@ -51,10 +53,23 @@ def commons_dir(home):
     return d
 
 
-def _append(path, text):
+def _ledger_lock(home):
+    """ONE lock for the whole commons: every expert loop and the panel write
+    these files, and learn()/note() read before they append (dedupe,
+    corroboration). Serialising the commons costs microseconds; a lost
+    update costs a lesson (docs/DESIGN-P11, memory G4)."""
+    return os.path.join(commons_dir(home), "ledger")
+
+
+def _append(path, text, locked=False):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(text)
+    if locked:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(text)
+        return
+    with locks.holding(path):
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(text)
 
 
 def learn(home, lesson, from_expert="unknown", tag=""):
@@ -64,16 +79,18 @@ def learn(home, lesson, from_expert="unknown", tag=""):
     path = os.path.join(commons_dir(home), "lessons.md")
     stamp = time.strftime("%Y-%m-%d")
     lesson = " ".join(lesson.split())
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            existing = f.read()
-    except OSError:
-        existing = "# FLEET LESSONS — learned from real failures, never repeat these\n\n"
-        _append(path, existing)
-    if lesson.lower() in existing.lower():
-        _append(path, f"  ↑ hit again {stamp} by {from_expert}\n")
-        return False
-    _append(path, f"- [{stamp}] ({from_expert}){f' #{tag}' if tag else ''} {lesson}\n")
+    with locks.holding(_ledger_lock(home)):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                existing = f.read()
+        except OSError:
+            existing = "# FLEET LESSONS — learned from real failures, never repeat these\n\n"
+            _append(path, existing, locked=True)
+        if lesson.lower() in existing.lower():
+            _append(path, f"  ↑ hit again {stamp} by {from_expert}\n", locked=True)
+            return False
+        _append(path, f"- [{stamp}] ({from_expert}){f' #{tag}' if tag else ''} {lesson}\n",
+                locked=True)
     return True
 
 
@@ -101,15 +118,27 @@ def note(home, topic, fact, from_expert="unknown", src="", corroborate=True):
         except OSError:
             return False
 
+    with locks.holding(_ledger_lock(home)):
+        return _note_locked(kpath, cpath, topic, fact, key, from_expert, src,
+                            corroborate, stamp, _has)
+
+
+def _note_locked(kpath, cpath, topic, fact, key, from_expert, src, corroborate,
+                 stamp, _has):
+    """note()'s body, under the commons lock: the corroboration rule reads
+    the candidates file and then appends to it, and two experts reporting
+    the same fact at once must not both park it as an uncorroborated
+    candidate — that is the exact event the rule exists to promote."""
     if _has(kpath, key):
-        _append(kpath, f"  ↑ corroborated {stamp} by {from_expert}\n")
+        _append(kpath, f"  ↑ corroborated {stamp} by {from_expert}\n", locked=True)
         return "known", kpath
 
     # a cited claim carries its own evidence; promote it directly
     if src:
         if not os.path.exists(kpath):
-            _append(kpath, f"# {topic}\n\n")
-        _append(kpath, f"- [{stamp}] ({from_expert}) {fact} [origin: {src}]\n")
+            _append(kpath, f"# {topic}\n\n", locked=True)
+        _append(kpath, f"- [{stamp}] ({from_expert}) {fact} [origin: {src}]\n",
+                locked=True)
         return "promoted", kpath
 
     # uncited: park it, and promote only on independent corroboration
@@ -118,17 +147,18 @@ def note(home, topic, fact, from_expert="unknown", src="", corroborate=True):
         with open(cpath, "r", encoding="utf-8") as f:
             prior = f.read()
     except OSError:
-        _append(cpath, f"# {topic} — CANDIDATES (uncorroborated, do not cite)\n\n")
+        _append(cpath, f"# {topic} — CANDIDATES (uncorroborated, do not cite)\n\n",
+                locked=True)
     if corroborate and key in prior.lower():
         others = [ln for ln in prior.splitlines()
                   if key in ln.lower() and f"({from_expert})" not in ln]
         if others:
             if not os.path.exists(kpath):
-                _append(kpath, f"# {topic}\n\n")
+                _append(kpath, f"# {topic}\n\n", locked=True)
             _append(kpath, f"- [{stamp}] {fact} [corroborated independently by "
-                           f"{from_expert} and another expert]\n")
+                           f"{from_expert} and another expert]\n", locked=True)
             return "promoted", kpath
-    _append(cpath, f"- [{stamp}] ({from_expert}) {fact}\n")
+    _append(cpath, f"- [{stamp}] ({from_expert}) {fact}\n", locked=True)
     return "candidate", cpath
 
 

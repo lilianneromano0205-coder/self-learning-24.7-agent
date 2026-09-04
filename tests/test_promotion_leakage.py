@@ -56,6 +56,12 @@ IN_ROOT = [
     ("missions/m1/mission.json", "the mission contract"),
     ("mastery/pack1/events.jsonl", "mastery verdict evidence"),
     ("courses/source-overrides.json", "source authority re-ratings"),
+    # docs/DESIGN-P11: rulings the window calls BINDING and the gate reads,
+    # the stamp that decides whether they are recomputed, the exam ledgers
+    ("courses/c/conflicts.json", "conflict rulings: BINDING in the window, read by the gate"),
+    ("courses/c/conflicts-scan.json", "the stamp that decides whether rulings are recomputed"),
+    ("courses/c/exam/gaps-state.json", "the gap-set key that suppresses gap dispatch"),
+    ("courses/c/exam/exam-state.json", "the exam attempt ledger"),
     ("frontier/frontier.json", "capability frontier ledger"),
     ("frontier/probes/p1.json", "a sealed capability probe"),
     ("acquisitions.json", "acquisition grants"),

@@ -540,6 +540,19 @@ what was cut and why. Measured over 42 windows in the endurance soak, window
 size is **flat at 1083 tokens** while fleet history grows — the window is
 bounded by its budget, not by how much the fleet remembers.
 
+**And only marked data enters it** (docs/DESIGN-P11-clean-window.md). Every
+byte the harness did not write itself — a handed file, a file the agent read
+back, a command's output, an endpoint's body, a sub-call's answer, an MCP
+result, a transcript being summarized — arrives between `<<<FILE-CONTENT>>>`
+or `<<<TOOL-RESULT>>>` markers the grounding contract names as UNTRUSTED, and
+a marker appearing *inside* that text is escaped visibly so only the harness
+can close a fence. Handed files go through the File Authority like every
+other read. Compaction fires on the provider gate's own byte bound as well as
+the token estimate, and an overflow is a forced compaction with the payload
+archived — never a traceback, never a silent truncation. This is data
+marking, not a security boundary (AD-6): it makes untrusted text legible as
+untrusted; the boundaries are the six authorities.
+
 **The student is closed-book by mechanism, not by instruction.** The memory
 router excludes course material from the Student role, *and* the role's tool
 allowlist excludes `read_file`. Two independent layers, because one of them

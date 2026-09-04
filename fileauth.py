@@ -180,7 +180,17 @@ CONTROL_NAMES_IN = {
     # re-rating lives (sources.set_tier writes it), because a tier recorded
     # in the workspace ledger is now re-derived rather than trusted — see
     # sources.tier_of.
-    "courses": {"source-overrides.json"},
+    # conflicts.json is injected into the window as "These rulings are
+    # BINDING" and read by conflicts.check, the contested-assertion GATE;
+    # conflicts-scan.json is the fingerprint that decides whether those
+    # rulings are ever recomputed. Both sat in the workspace: a worker could
+    # forge a ruling AND the stamp that keeps it from being rescanned. The
+    # harness writes them (conflicts.write); the agent does not. The exam
+    # state files are the loop's own ledgers — writing the current gap-set
+    # key suppressed gap dispatch forever (docs/DESIGN-P11, memory G1/G3).
+    "courses": {"source-overrides.json", "conflicts.json",
+                "conflicts-scan.json", "conflicts.md",
+                "gaps-state.json", "exam-state.json"},
     # proof/observations.jsonl is what proof.evaluate derives every proof
     # LEVEL from — hash-bound evidence that a subsystem earned its badge.
     # proof/ is the agent's workspace for proof packs, and the ledger inside

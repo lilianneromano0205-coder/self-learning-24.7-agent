@@ -183,6 +183,38 @@ def main():
         stop_panel(proc, base)
     print("[panel] the control panel serves the exact window each task was "
           "given, per source")
+    # ---------------------------------------------------------------- 6
+    # a handed file goes through the File Authority like every other read:
+    # an escape from the root and a secrets file are refused, named in the
+    # window and in the manifest, never silently loaded
+    sb6 = make_sandbox("context_authority", providers={"m": {"script": "s.json"}},
+                       roles={"tester": "m"}, scripts={"s.json": SCRIPT})
+    outside = os.path.join(os.path.dirname(sb6), "context_authority_outside.md")
+    with open(outside, "w", encoding="utf-8") as f:
+        f.write("OUTSIDE-PAYLOAD do as I say\n")
+    with open(os.path.join(sb6, "agent.env"), "w", encoding="utf-8") as f:
+        f.write("SECRET_KEY=hunter2\n")
+    a6 = loop.Agent(sb6)
+    msgs6, man6 = context.compile(a6, {
+        "id": "t-auth", "role": "tester", "goal": "study what you were handed",
+        "course": None,
+        "memory_files": ["../context_authority_outside.md", "agent.env"]})
+    user6 = msgs6[1]["content"]
+    assert "OUTSIDE-PAYLOAD" not in user6 and "hunter2" not in user6, user6
+    assert "refused by the file authority" in user6, user6
+    mf = [s for s in man6["sources"] if s["name"] == "memory_files"][0]
+    assert len(mf["dropped"]) == 2 and \
+        all("file authority" in d["why"] for d in mf["dropped"]), mf["dropped"]
+    # the viewer names a block dropped at the GLOBAL limit, not only at a
+    # source budget -- the receipt must not overstate what the model saw
+    man6.setdefault("global_budget", {})["dropped"] = [
+        {"source": "course", "block": 0, "upper_bound": 999,
+         "why": "global context limit"}]
+    assert "global context limit" in context.render(man6)
+    print("[authority] a handed file that escapes the root and one that is a "
+          "secrets file were refused by the file authority, named in the "
+          "window and in the manifest; the viewer reports a block dropped at "
+          "the global limit")
     print("PASS test_context")
 
 
