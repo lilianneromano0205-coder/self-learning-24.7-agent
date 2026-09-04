@@ -15,6 +15,7 @@ Critical sections here are milliseconds, so contention is rare and short.
 """
 
 import os
+import random
 import time
 import uuid
 from contextlib import contextmanager
@@ -57,7 +58,12 @@ def holding(path, timeout=10.0, stale=8.0):
                 continue                # vanished between check and remove
             if time.time() > deadline:
                 raise TimeoutError(f"lock busy: {lock}")
-            time.sleep(0.05)
+            # JITTERED, not fixed: waiters that all sleep exactly 50 ms wake
+            # in lockstep and the same one keeps losing the race. CI (PR #16,
+            # windows-latest 3.11) starved one of four appenders past this
+            # deadline under a loaded runner — 25 rows lost to a lock that
+            # was never held for long, only contended in step.
+            time.sleep(0.02 + random.random() * 0.06)
         except PermissionError:
             # Windows only in practice: creating the lockfile while a
             # releasing holder's os.remove is still pending reports EACCES —
@@ -73,7 +79,7 @@ def holding(path, timeout=10.0, stale=8.0):
                     f"lock busy: {lock} (EACCES on every attempt — "
                     f"delete-pending contention or a real permission "
                     f"problem on the directory)")
-            time.sleep(0.05)
+            time.sleep(0.02 + random.random() * 0.06)
     try:
         yield
     finally:

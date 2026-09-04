@@ -166,6 +166,15 @@ def check_the_shell_cannot_move_the_control_plane():
         json.dump(script, f)
     agent_setting(sb, f"max_steps = {len(script) + 5}")
     agent_setting(sb, "max_task_retries = 0")
+    # The matrix is DERIVED from fileauth's zone tables, so it grows with
+    # them: 31 control paths make 103 shell steps in ONE task, and every
+    # step's result carries the sandbox path. On a CI runner whose checkout
+    # path is long (D:\a\<repo>\<repo>\...) the conversation crossed the
+    # scripted provider's default 131072-byte context bound at the last
+    # step — the budget guard did its job and the 103rd command never ran.
+    # The mock has no real window; declare a larger one for this fixture
+    # so the containment matrix, not the context budget, is what is tested.
+    agent_setting(sb, "context_limit = 262144")
 
     a = loop.Agent(sb)
     assert "run_command" in a.allowed_tools("practitioner"), (

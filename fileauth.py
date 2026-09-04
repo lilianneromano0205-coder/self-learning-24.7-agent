@@ -34,15 +34,27 @@ crash mid-write cannot leave a half-file where a whole one was.
 """
 
 import errno
+import hashlib
 import json
 import os
 import time
+import uuid
 
 # ------------------------------------------------------------------- zones
 
 CONTROL_FILES = {
     "settings.toml", "mcp.json", "state.json", "prospective.json",
     "routines.json", "org.json",
+    # the reconcilers' declarations (docs/DESIGN-P9a): a desired state and
+    # the PROVEN procedure that restores it, plus the controller's own
+    # status. A worker that could write it would declare a controller over
+    # itself; the harness writes its bookkeeping, the owner its declarations.
+    "reconcilers.json",
+    # the fleet's SAFE-MODE switch (docs/DESIGN-P9b): written by the harness
+    # when a declared limit trips, cleared by the owner with a reason. A
+    # worker that could remove it would be a spacecraft overriding its own
+    # fault protection.
+    "safe_mode.json",
     # identity.md is a SYSTEM PROMPT SOURCE — loop.system_sources() puts it
     # in every window, right after the constitution — and the panel writes it
     # for the OWNER, with a backup and an identity.history.jsonl line stamped
@@ -94,7 +106,14 @@ CONTROL_DIRS = {"prompts", "approvals", "variants", "effects", "org",
                 # there); nothing in the platform writes the per-root one, so
                 # it existed only as an agent-forgeable alias for a
                 # fleet-attributed warning the next window is told to obey.
-                "commons"}
+                "commons",
+                # THE OWNER'S TWIN (docs/DESIGN-P10): the kernel that says how
+                # the person this fleet works for decides, the episodes it was
+                # learned from, the sealed shadow predictions and the consent
+                # projection. A worker that could write any of it would author
+                # its own owner — and the context compiler reads the kernel
+                # into every window as the OWNER block.
+                "twin"}
 # Root-relative paths that are CONTROL wherever they sit, because the
 # DIRECTORY around them is legitimately the agent's own workspace.
 #
@@ -109,9 +128,10 @@ CONTROL_DIRS = {"prompts", "approvals", "variants", "effects", "org",
 # Bundled scripts run on that verdict.
 #
 # The general shape of the bug: four of harness.LEDGERS were control and the
-# fifth was not, and nothing compared the two lists. test_fileauth now walks
-# harness.LEDGERS and asserts every one lands in ZONE_CONTROL, so a ledger
-# added later cannot quietly land in the workspace.
+# fifth was not, and nothing compared the two lists. tests/test_invariants.py
+# walks harness.LEDGERS and asserts every one lands in ZONE_CONTROL, and
+# tests/test_promotion_leakage.py enumerates every trust-defining path by
+# name, so a ledger added later cannot quietly land in the workspace.
 CONTROL_PATHS = {"skills/graph.json"}
 # Files that are CONTROL wherever they appear under a workspace head. The
 # goal contract is the definition of done, frozen before work begins, and
@@ -160,7 +180,32 @@ CONTROL_NAMES_IN = {
     # re-rating lives (sources.set_tier writes it), because a tier recorded
     # in the workspace ledger is now re-derived rather than trusted — see
     # sources.tier_of.
-    "courses": {"source-overrides.json"},
+    # conflicts.json is injected into the window as "These rulings are
+    # BINDING" and read by conflicts.check, the contested-assertion GATE;
+    # conflicts-scan.json is the fingerprint that decides whether those
+    # rulings are ever recomputed. Both sat in the workspace: a worker could
+    # forge a ruling AND the stamp that keeps it from being rescanned. The
+    # harness writes them (conflicts.write); the agent does not. The exam
+    # state files are the loop's own ledgers — writing the current gap-set
+    # key suppressed gap dispatch forever (docs/DESIGN-P11, memory G1/G3).
+    "courses": {"source-overrides.json", "conflicts.json",
+                "conflicts-scan.json", "conflicts.md",
+                "gaps-state.json", "exam-state.json"},
+    # proof/observations.jsonl is what proof.evaluate derives every proof
+    # LEVEL from — hash-bound evidence that a subsystem earned its badge.
+    # proof/ is the agent's workspace for proof packs, and the ledger inside
+    # it was writable too: a worker could append observations and lift a
+    # capability's badge without any test having run. Found by the
+    # promotion-leakage suite (docs/DESIGN-P6.1, finding 11).
+    "proof": {"observations.jsonl"},
+    # memory/cases.jsonl records whether a FIX HELD — a case moves to
+    # "fixed" only when a later gated task in the same subject passed, and
+    # the record is injected into windows as "verified by a gate, not by
+    # opinion" and read by the repeat-failure metric. memory/ was in no
+    # zone table at all, so it fell to ZONE_ROOT, which the agent's file
+    # tool may write: a worker could file its own fixes as verified. Found
+    # by the Capability Ledger (docs/DESIGN-P7.2, finding 5).
+    "memory": {"cases.jsonl"},
 }
 RUNTIME_DIRS = {"logs", "contexts", "checkpoints", "events", "archive"}
 # the agent's own workspace: everything it is FOR
@@ -281,7 +326,10 @@ def write_text(root, rel, text, actor="agent", encoding="utf-8"):
     truncated one, and two writers cannot share a scratch name."""
     p = resolve(root, rel, "write", actor)
     os.makedirs(os.path.dirname(p) or root, exist_ok=True)
-    tmp = f"{p}.{os.getpid()}.{int(time.time() * 1000) % 100000}.tmp"
+    # a UUID, not PID + milliseconds: two writers in one process aiming at
+    # one target inside the same millisecond must never share a scratch
+    # name (docs/DESIGN-P6.1, finding 6)
+    tmp = f"{p}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
     with open(tmp, "w", encoding=encoding) as f:
         f.write(text)
     for attempt in range(8):
@@ -289,6 +337,52 @@ def write_text(root, rel, text, actor="agent", encoding="utf-8"):
             os.replace(tmp, p)
             return p
         except PermissionError:            # OneDrive briefly holds the target
+            time.sleep(0.05 * (attempt + 1))
+        except OSError as e:
+            if e.errno != errno.EACCES:
+                raise
+            time.sleep(0.05 * (attempt + 1))
+    os.replace(tmp, p)
+    return p
+
+
+def read_bytes(root, rel, actor="agent"):
+    p = resolve(root, rel, "read", actor)
+    with open(p, "rb") as f:
+        return f.read()
+
+
+def sha256_bytes(root, rel, actor="agent"):
+    """The digest of a file AS BYTES — the only honest evidence for a
+    binary artifact. A text decode with replacement lets different files
+    share one hash (docs/DESIGN-P6.1, finding 4). Streamed in 1 MiB chunks
+    so a multi-gigabyte database or archive is never loaded whole
+    (docs/DESIGN-P7.1, P1-B)."""
+    p = resolve(root, rel, "read", actor)
+    digest = hashlib.sha256()
+    with open(p, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def write_bytes(root, rel, data, actor="agent"):
+    """The binary twin of write_text — same containment, same atomic
+    temp-beside-target-then-replace — for artifacts that are not text (a
+    workbook). One mutation semantic, whatever the payload."""
+    p = resolve(root, rel, "write", actor)
+    os.makedirs(os.path.dirname(p) or root, exist_ok=True)
+    # a UUID, not PID + milliseconds: two writers in one process aiming at
+    # one target inside the same millisecond must never share a scratch
+    # name (docs/DESIGN-P6.1, finding 6)
+    tmp = f"{p}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+    with open(tmp, "wb") as f:
+        f.write(data)
+    for attempt in range(8):
+        try:
+            os.replace(tmp, p)
+            return p
+        except PermissionError:
             time.sleep(0.05 * (attempt + 1))
         except OSError as e:
             if e.errno != errno.EACCES:

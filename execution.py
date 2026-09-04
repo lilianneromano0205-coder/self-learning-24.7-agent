@@ -330,6 +330,16 @@ ALLOWED_RAW = {
               "policy/approvals inside mcp.py itself)",
     "benchmark.py": "ARM A deliberately runs a bare model with no harness; "
                     "its CHECK commands go through the authority as op='gate'",
+    "learn_bench.py": "LEARN-001 owner-side instrument: drives loop.py by "
+                      "argv exactly like demo.py/benchmark.py; every task it "
+                      "queues runs under the loop's own authority stack, and "
+                      "no model input reaches the argv",
+    "gitstate.py": "trusted deterministic Git adapter (docs/DESIGN-P5): a "
+                   "CLOSED verb set builds argv structurally — no shell, no "
+                   "model-authored flag, no network verb exists — under "
+                   "pinned identity, isolated configuration, neutralized "
+                   "hooks and a control-file integrity check that fails "
+                   "closed; the model chooses a verb, never a command line",
 }
 
 _SUBPROC_RE = re.compile(r"subprocess\.(run|Popen|call|check_output)\(|os\.system\(")

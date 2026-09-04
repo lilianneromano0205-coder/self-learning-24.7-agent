@@ -33,6 +33,56 @@ max_skills_loaded = 3               # skills/ playbooks auto-loaded per task
 # --- found ten of them; two decide containment, so an operator reading only
 # --- settings.toml could not see what their fleet was actually doing.
 auto_scan_inbox = true              # the idle tick scans inbox/ by itself
+db_write = []                       # SQLite files (relative paths) a worker's
+                                    # db_transaction may mutate and the
+                                    # zero-model route may write. EMPTY grants
+                                    # nothing: every db mutation refuses until
+                                    # the owner names its file here.
+git_write = []                      # git repositories (relative directories)
+                                    # a worker's git_op may mutate and the
+                                    # zero-model route may commit into. EMPTY
+                                    # grants nothing, exactly like db_write.
+http_write = []                     # endpoint NAMES (from the table below) a
+                                    # worker's http_effect may write through
+                                    # and the zero-model route may write
+                                    # through. EMPTY grants nothing, exactly
+                                    # like db_write; observation needs only
+                                    # that the endpoint exists.
+# The outward-facing world (docs/DESIGN-P8): a worker never names a host, it
+# names one of these. Uncomment and edit to table an endpoint:
+#
+# [agent.http_endpoints.tickets]
+# base = "https://api.example.com/v1"   # http(s), host only, no query/userinfo
+# methods = ["GET", "POST", "PUT"]      # DELETE absent = refused
+# auth_env = "TICKETS_TOKEN"            # the NAME of the variable holding the
+#                                       # bearer (agent.env or the environment);
+#                                       # unset = the endpoint refuses, it never
+#                                       # calls anonymously
+# max_bytes = 1048576                   # response cap
+#
+# FAULT PROTECTION (docs/DESIGN-P9b): declared limits with ONE response —
+# safe mode, held in safe_mode.json, which only the owner clears
+# (python watchdog.py clear --root <expert> --why "..."). Off until you turn
+# it on; the metrics are still reported by `python watchdog.py evaluate`.
+#
+# [agent.watchdog]
+# enabled = false
+# window_calls = 50            # the last N tool results considered
+# tool_error_rate_max = 0.6    # errors / calls over the window
+# crash_max = 3                # step_crash events inside window_s
+# refusal_streak_max = 8       # consecutive finish claims the gate refused
+# spend_usd_per_hour_max = 0   # 0 = off; model spend over the last window_s
+# disk_free_gb_min = 1.0
+# window_s = 3600
+# THE OWNER'S TWIN (docs/DESIGN-P10): a measured model of how YOU decide,
+# learned from your own approvals, notes and recorded decisions, scored in
+# shadow against what you do next, and read into every window as the OWNER
+# block. Off until you consent: python twin.py consent grant --scope predict
+# (scopes nest predict < advise < draft < act; act only queues gated work).
+# The Super-Self and owner-voice drafts need a model role; name one here.
+#
+# [agent.twin]
+# role = "consultant"          # the role the Super-Self and drafts think with
 inbox_settle_seconds = 10           # ignore files still being copied in
 max_task_retries = 3                # retries of a failed task before it rests
 candidates_max = 5                  # test-time compute: attempts to score

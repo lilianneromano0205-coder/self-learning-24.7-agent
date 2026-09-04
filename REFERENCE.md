@@ -7,8 +7,8 @@ logic it runs, how you interact with it, and what it does **not** do.
 written by reading the code, not from memory; where a claim could rot, the
 test that keeps it honest is named.
 
-**Scale, so you know what you are reading about:** 105 Python modules,
-one HTML file for the whole UI, 139 acceptance tests, zero third-party
+**Scale, so you know what you are reading about:** 117 Python modules,
+one HTML file for the whole UI, 154 acceptance tests, zero third-party
 dependencies. Python 3.11+ and your own API keys.
 
 ---
@@ -22,7 +22,7 @@ dependencies. Python 3.11+ and your own API keys.
 5. [The context compiler](#5-the-context-compiler)
 6. [The memory institution](#6-the-memory-institution)
 7. [Knowing what it knows: sources, conflicts, standards, self](#7-knowing-what-it-knows)
-8. [Creating agents: the five lanes, eight roles, twenty templates](#8-creating-agents)
+8. [Creating agents: the five lanes, eight roles, twenty-four templates](#8-creating-agents)
 9. [The work systems](#9-the-work-systems)
 10. [Governance and improvement](#10-governance-and-improvement)
 11. [The control plane](#11-the-control-plane)
@@ -61,7 +61,7 @@ Six systems, and the modules that implement each:
 | 1 | **Harness & loop** | `loop.py` `harness.py` `policy.py` `effects.py` `locks.py` `checkpoint.py` `sandbox.py` `context.py` |
 | 2 | **Fleet & creation lanes** | `fleet.py` `quick.py` `templates.py` `team.py` |
 | 3 | **Work systems** | `goal.py` `workflows.py` `consult.py` `prospective.py` `routines.py` `research.py` |
-| 4 | **Memory institution** | `memory.py` `skills.py` `commons.py` `recall.py` `gotchas.py` `premise.py` `memrouter.py` `sources.py` `conflicts.py` `standards.py` `selfmodel.py` `curriculum.py` `cases.py` |
+| 4 | **Memory institution** | `memory.py` `skills.py` `commons.py` `recall.py` `gotchas.py` `premise.py` `memrouter.py` `sources.py` `conflicts.py` `standards.py` `selfmodel.py` `curriculum.py` `cases.py` `twin.py` `twinmath.py` |
 | 5 | **Improvement & governance** | `variants.py` `approvals.py` `replay.py` `benchmark.py` `verify.py` `citecheck.py` `memcheck.py` `designcheck.py` `candidates.py` `evidence.py` `confidence.py` |
 | 6 | **Control plane & interop** | `ui.py` `ui.html` `chief.py` `doctor.py` `bootstrap.py` `preflight.py` `backup.py` `providers.py` `toolbox.py` `mcp.py` `federation.py` `trace.py` `uicards.py` `modelrouter.py` |
 
@@ -626,6 +626,62 @@ consciousness, and the platform never makes one.**
 python selfmodel.py --root experts/<slug>
 ```
 
+### 7.4b The owner's twin — `twin.py`, `twinmath.py` (docs/DESIGN-P10-twin.md)
+
+`selfmodel.py` says what an agent has verified; the twin says how the
+**person the fleet works for** actually decides — a Self Kernel learned
+from the owner's own decisions, beneath every agent. Two layers, never
+mixed:
+
+- **The Clone** — `predict()`: a calibrated distribution over the options
+  ("grant 0.72 · deny 0.19 · ask 0.09"), the features that drove it, a
+  novelty score, the kernel version, and the label. Three mechanical arms:
+  a conditional-logit fit over declared features (with pairwise
+  interactions), behavioral programs mined from the episodes (candidate →
+  proven on held-out rows, bonus capped by lift over the base rate), and
+  the nearest past decisions (a held-out row is never its own precedent).
+- **The Super-Self** — `superself()`: the same identity and objectives,
+  handed a model role (`[agent.twin] role`), asked what the owner would do
+  knowing more; where it diverges from the Clone a *policy-update
+  question* is queued. The kernel is never moved by the Super-Self.
+
+What it keeps, all CONTROL, under `twin/`: `episodes.jsonl` (the
+experience stream — harvested from decided approvals, steering notes and
+answers, or recorded with `observe`/`import`), `kernel.json` (versions,
+each a hashed fit: preferences, attention, proven habits, per-counterpart
+social record, style profile), `predictions.jsonl` + `shadow/` (shadow
+predictions **sealed before the owner decides and hidden until they do**;
+a body edited under its seal scores as TAMPER), `questions.jsonl` (one
+open "why" at a time, asked only on a confident miss or a novel decision),
+`drift.json` (Page-Hinkley over prediction loss; a trip is a notice with
+both estimates and a question — `confirm` freezes a new version,
+`dismiss` keeps the old), `fidelity.json` (choice fidelity, Brier, ECE,
+high-confidence error rate, novel-situation fidelity, self-consistency
+ceiling and normalized fidelity, correction speed, Burrows' Delta writing
+fidelity — **INSUFFICIENT EVIDENCE** below 20 held-out rows), and
+`authority.json`, the projection of the consent chain sealed under
+`org/learning` (owner-only, first-seal-wins; scopes nest `predict <
+advise < draft < act`; `act` only queues a gated task; every output on
+every path carries `TWIN — a computational model of the owner, not the
+owner`).
+
+Every window then carries an **OWNER** block after `self` — principles in
+the owner's words, what they look at first, the trade-offs they make, the
+proven habits, the counterpart rules, how they write, and the measured
+fidelity — for every role except the closed-book student.
+
+```bash
+python twin.py consent grant --scope predict --root experts/<slug>
+python twin.py observe --situation "..." --options "grant,deny" --choice deny \
+    --features '{"risk":0.7,"margin":0.1}' --counterpart supplier-x --why "..."
+python twin.py learn | fidelity | render | status
+python twin.py predict --situation "..." --options "grant,deny" --features '{...}'
+python twin.py shadow [--reveal ID] · questions · answer ID --text "..."
+python twin.py drift status|confirm|dismiss · superself · draft · act --done-check CMD
+```
+
+(`test_twin.py`, 13 preregistered checks.)
+
 ### Learning smart, not just learning (`curriculum.py`)
 
 Material used to be studied in arrival order. Now a plan is computed first,
@@ -763,7 +819,7 @@ python designcheck.py out/index.html --root experts/<slug> --course design
 |---|---|---|
 | 🎓 **Trained expert** | `fleet.py create` + teach | studies whole courses into cited notes, proves skills, sits closed-book exams |
 | ⚡ **Quick specialist** | `quick.py "goal"` | briefed from files you drop and working in seconds, still caged by every gate |
-| 🧬 **From an archetype** | panel → template | one of 20 pre-built specialists |
+| 🧬 **From an archetype** | panel → template | one of 24 pre-built specialists |
 | 📚 **Learner** | panel → learner | give it a topic; it finds and ingests its own material |
 | 🤝 **Team** | `team.py run` | chosen specialists, lead decomposes, handoffs are files |
 
@@ -789,14 +845,20 @@ Each has a prompt in `prompts/` and a distinct job:
 Above them all: `constitution.md` (overrides everything) and `_grounding.md`
 (the tool contract, the fence rule, the escalation marker).
 
-### The twenty templates
+### The twenty-four templates
 
 `frontend-developer` · `ui-ux-designer` · `code-reviewer` · `data-analyst` ·
 `technical-writer` · `copywriter` · `seo-auditor` · `research-analyst` ·
 `contract-analyst` · `devops-runner` · `ux-reviewer` · `scout` ·
 `critic-sentinel` · `market-researcher` · `competitive-intel` ·
 `trend-forecaster` · `treasurer-analyst` · `tradeops-landed-cost` ·
-`local-radar` · `seo-orchestrator`
+`local-radar` · `seo-orchestrator` · `chief-of-staff` · `deep-researcher` ·
+`nightwatch` · `privacy-warden`
+
+The last four are the platform's answers to the 2026 agent-product
+categories (personal automation, compounding research, long-horizon
+optimisation, zero-egress operation), built on the same graders, earned
+trust and control-zoned ledgers as the rest.
 
 ```bash
 python templates.py                     # list them with their deliverables
@@ -836,14 +898,21 @@ For fields an agent cannot execute: the answer must cite defined atoms or say
 
 ### Prospective memory — `prospective.py`
 
-Remembering to **act**, not just remembering facts. Four kinds:
+Remembering to **act**, not just remembering facts. Ten kinds, every
+one evaluated mechanically by the scheduler:
 
 | Kind | Fires when |
 |---|---|
-| `every_days` | a period elapses |
+| `every_days` | a period elapses (re-arms itself) |
 | `at` | a timestamp passes |
-| `watch` | a file or folder changes |
+| `file_exists` | a contained path appears |
+| `file_contains` | a contained file gains a needle (read up to 2 MB) |
+| `task_done` | a named task finishes — the chain workflows use |
 | `event` | a named event arrives at `/wake` |
+| `check` | a probe command exits 0, run as a gate through the execution authority and rate-limited (30 s floor) |
+| `file_changed` | a contained file's SHA-256 differs from the last one seen (removal and reappearance are changes; an identical rewrite is not); polite (`every_s`, 30 s floor); the first look is a baseline; fires once per change with both hashes in the goal and re-arms — docs/DESIGN-P9c |
+| `tree_changed` | a contained directory's manifest hash (paths, sizes, content hashes; `max_files` ≤ 2000) differs |
+| `http_changed` | the canonical readback of an owner-named endpoint path (Phase 8) hashes differently; a failed readback is not a change; only hashes are stored |
 
 Firing queues a normal gated task — a fired intention earns no shortcuts.
 `repeat: true` stays armed; consumed events are capped at 200.
@@ -1027,7 +1096,7 @@ Two tabs.
 **Work proof** — every mission with its criteria, the evidence behind each met
 one, and which are still open.
 
-**Platform proof** — 19 capabilities, each with its level (0 SPEC → 5
+**Platform proof** — 20 capabilities, each with its level (0 SPEC → 5
 PRODUCTION PROVEN), the reason for that level, what a user can actually do
 with it, the invariants it must hold, the code hash the evidence is bound to,
 and the exact `python tests/…` command that reproduces it.
@@ -1401,6 +1470,7 @@ beside the expert, then at the fleet home, then beside the code:
 | `python conflicts.py --course C [--write\|--check FILE\|--goal G]` | contradiction rulings |
 | `python standards.py --course C [--extract\|--add TEXT]` | the bar |
 | `python selfmodel.py --root <e> [--role R]` | the self-model |
+| `python twin.py status\|consent\|observe\|learn\|predict\|fidelity\|shadow\|questions\|answer\|drift\|render\|superself\|draft\|act` | the owner's twin: consent, episodes, the kernel, shadow scoring, the benchmark, drift, the Super-Self (docs/DESIGN-P10) |
 | `python designcheck.py <file\|dir> [--course C] [--strict]` | the design gate |
 | `python gotchas.py [--goal G]` | what it already burned itself on |
 | `python premise.py "goal" --root <e>` | does memory contradict this task? |

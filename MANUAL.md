@@ -159,7 +159,7 @@ one is still routed **and** still reachable from something a person can click.
   use each), **Tools**, **Knowledge** (the fleet map, failures, competence,
   retired agents) and **Skills**.
 - **Proof** — *Work proof* (every mission's criteria and their evidence) and
-  *Platform proof* (19 capabilities, each with its level 0–5, the reason,
+  *Platform proof* (20 capabilities, each with its level 0–5, the reason,
   the invariants, the code hash the evidence is bound to, and the exact command
   that reproduces it). **No endpoint can set a level.**
 - **Admin** — *Health* (doctor, harness manifest, pulses, tool error rates,
@@ -220,6 +220,12 @@ dialogs, 40 px targets.
 | `python trace.py --task <id>` / `--tools` | spans for one task / per-tool error rates |
 | `python modelrouter.py [--role R]` | measured model profiles and the routing decision |
 | `python routines.py save <task-id> --every-days 1` | turn a finished task into a standing arrangement |
+| `python reconciler.py add\|list\|tick\|pause\|resume\|remove\|status` | keep a declared state true with a PROVEN procedure, model-free: observe, restore, re-observe, back off, halt to you when it cannot converge (docs/DESIGN-P9a) |
+| `python watchdog.py status\|evaluate\|enter\|clear` | fault protection: declared limits (`[agent.watchdog]`) with one response, safe mode — no task claimed, a running task stopped at its step boundary, invariants kept — that only you clear, with a reason (docs/DESIGN-P9b) |
+| `python twin.py consent grant --scope predict\|advise\|draft\|act` | turn the owner's twin on (a sealed, revocable consent chain; off until you do) |
+| `python twin.py observe\|import\|harvest\|learn\|predict\|fidelity\|render\|status` | the twin: record a decision, fit the kernel, ask "what would I do?", run the benchmark, see the OWNER block every window reads (docs/DESIGN-P10) |
+| `python twin.py shadow [--reveal ID]\|questions\|answer ID --text\|drift status\|confirm\|dismiss` | shadow predictions (sealed before you decide, hidden until you do), the one open "why", and drift — a notice with numbers that only you turn into a new kernel version |
+| `python twin.py superself\|draft\|act --done-check CMD` | the Super-Self (needs `[agent.twin] role`): where a better-informed you diverges, as a question; a draft in your voice, never sent; a gated task on your behalf, never executed by the twin |
 | `python checkpoint.py --root <expert>` | resumable long jobs and their progress |
 | `python sandbox.py [--run CMD]` | which execution backend is active, and try it |
 | `python variants.py spawn\|trial\|list` | charter evolution, gated by evidence (promote/rollback from the panel) |
@@ -273,6 +279,10 @@ experts/<slug>/
   effects.jsonl          the exactly-once ledger of external effects
   routines/*.json        saved routines (skill + schedule)
   variants/              charter experiments, their trials and predictions
+  twin/                  the OWNER's twin (CONTROL): episodes.jsonl, kernel.json
+                         (versioned fits), predictions.jsonl + shadow/ (sealed
+                         before you decide), questions.jsonl, drift.json,
+                         fidelity.json, authority.json (consent projection)
   logs/agent.log         one JSON line per step and event
   logs/model-outcomes.jsonl   the evidence capability routing uses
   logs/health.json       the harness health ritual at loop start
@@ -561,6 +571,56 @@ Owner overrides: `python sources.py --course design --set S-3 --tier 1 --why
 rewrites a line you wrote, and a contested point can never become a standard.
 
 ---
+
+## 13b. The owner's twin: how YOU decide, measured
+
+`selfmodel.py` tells an agent what *it* has verified. The twin tells every
+agent how the person it works for actually decides — learned from your
+own decisions, scored in shadow against the ones you make next, versioned
+when you change, and read into every window as the **OWNER** block
+(docs/DESIGN-P10-twin.md).
+
+It is off until you consent, and consent is a sealed chain, not a setting:
+
+```bash
+python twin.py consent grant --scope predict --root experts/<slug>
+```
+
+Then it watches what you already do on that expert — every approval you
+grant or deny (with your note as the *why*), every steering note, every
+answer to a blocked question — and turns each into an attributed episode.
+Decisions the platform did not see, you record or import:
+
+```bash
+python twin.py observe --root experts/<slug> \
+  --situation "supplier offer, 30-day terms" --features '{"risk":0.7,"margin":0.12}' \
+  --options "grant,deny" --choice deny --counterpart supplier-x --why "margin too thin"
+python twin.py learn --root experts/<slug>        # fit the kernel (deterministic, hashed)
+python twin.py fidelity --root experts/<slug>     # the benchmark, held-out rows only
+python twin.py predict --root experts/<slug> --situation "..." --options "grant,deny" \
+  --features '{"risk":0.9,"margin":0.05}'         # what would I do? — a distribution
+```
+
+What you get back is never a verdict: `grant 0.72 · deny 0.19 · ask 0.09`,
+the features that drove it, a novelty score, and the label **TWIN — a
+computational model of the owner, not the owner**. Below 20 held-out
+decisions the benchmark says **INSUFFICIENT EVIDENCE** in those words.
+
+The panel (an agent → **Mind** → *Twin*) shows consent, the kernel, the
+benchmark, the shadow ledger (a sealed prediction shows its hash and
+nothing else until you decide — a shown prediction would contaminate the
+signal it is measured against), the one open *why* question, and any
+**drift notice**: when your recent decisions fit a different policy than
+before, you see both estimates and choose *confirm* (a new kernel version)
+or *dismiss* (the old policy stays). Nothing moves the kernel but you.
+
+Scopes nest: `predict` (shadow scoring, "what would I do") < `advise`
+(`superself`: a model role thinks as you with more to know, and where it
+diverges from the clone you get a policy-update question — the kernel is
+never edited by the model) < `draft` (text in your voice, labeled, never
+sent) < `act` (queues a *gated* task on your behalf; the twin executes
+nothing, and a task without `--done-check` is refused). `revoke` returns
+everything to refusal.
 
 ## 14. The design gate
 

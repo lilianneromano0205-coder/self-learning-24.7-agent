@@ -529,10 +529,12 @@ def run(root, name, allow_candidate=False, cfg=None, record_outcome=True,
                 result["accepted"] = bool(accept())
             except Exception:
                 result["accepted"] = False
-        if record_outcome:
+        if record_outcome and result.get("status") != "inapplicable":
             # the acceptance verdict travels — dropping it here silently
             # zeroed accepted_wins for every compiled procedure, so the
-            # promotion gate could never be reached from this path
+            # promotion gate could never be reached from this path.
+            # An INAPPLICABLE verdict (docs/DESIGN-P7.1: the guard or the
+            # grant, not the procedure) is not an outcome and records nothing.
             record(root, name, result["ok"], why=result["why"],
                    accepted=bool(result.get("accepted")))
         return result

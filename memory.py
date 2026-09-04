@@ -41,6 +41,8 @@ import shutil
 import sys
 import time
 
+import locks
+
 HOME = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HOME)
 
@@ -107,10 +109,22 @@ def retired_dir(home):
     return d
 
 
-def _append_jsonl(path, rec):
+def _append_jsonl(path, rec, locked=False):
+    """One row, UNDER THE LEDGER LOCK. The commons ledgers are fleet-wide:
+    every expert loop and the panel append to the same files, and an
+    unlocked append beside a read-modify-append (record_failure counts
+    recurrences from what it just read) is a lost update by construction.
+    Every reader tolerates a torn line, so the loss was silent. `locked`
+    is for a caller that already holds the lock — locks.holding is not
+    reentrant (docs/DESIGN-P11, memory G4)."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    if locked:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        return
+    with locks.holding(path):
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 
 def _read_jsonl(path, limit=None):
@@ -163,14 +177,20 @@ def record_failure(home, expert, task=None, category=None, expected="",
         "recurrence": 1,
         "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
-    existing = _read_jsonl(path)
-    for prior in reversed(existing):
-        if prior.get("signature") == sig_src:
-            rec["failure_id"] = prior["failure_id"]
-            rec["recurrence"] = prior.get("recurrence", 1) + 1
-            rec["first_seen"] = prior.get("first_seen", prior.get("at"))
-            break
-    _append_jsonl(path, rec)
+    # read-then-append under ONE lock: the recurrence count is derived from
+    # the last row with this signature, and two writers reading the same
+    # last row filed the same count twice — a recurring failure that looked
+    # less recurrent than it was
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with locks.holding(path):
+        existing = _read_jsonl(path)
+        for prior in reversed(existing):
+            if prior.get("signature") == sig_src:
+                rec["failure_id"] = prior["failure_id"]
+                rec["recurrence"] = prior.get("recurrence", 1) + 1
+                rec["first_seen"] = prior.get("first_seen", prior.get("at"))
+                break
+        _append_jsonl(path, rec, locked=True)
     return rec
 
 

@@ -58,7 +58,14 @@ TESTS = ["test_resume.py", "test_lock.py", "test_json_toolcall.py",
          "test_research_discovery.py", "test_release_checks.py",
          "test_loop_learning_controls.py", "test_capability_graph.py",
          "test_use_cases.py", "test_tabular.py",
-         "test_vision_preservation.py"]
+         "test_vision_preservation.py", "test_operator_runtime.py",
+         "test_verifier_factory.py", "test_procedure_v2.py",
+         "test_capability_signatures.py", "test_git_operators.py",
+         "test_xlsx_operators.py", "test_promotion_leakage.py",
+         "test_transactional_contracts.py", "test_correctness_patch.py",
+         "test_ledger_defects.py", "test_http_operators.py",
+         "test_reconciler.py", "test_watchdog.py", "test_sentinels.py",
+         "test_twin.py"]
 
 
 def main():

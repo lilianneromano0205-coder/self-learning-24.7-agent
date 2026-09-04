@@ -63,7 +63,7 @@ def _env_with_file(root):
 #
 # Versions are pinned because acquire.inspect requires it, and pinned to
 # releases that existed on 2026-08-25 (resolved from pypi.org/pypi/<p>/json).
-# A pin ages: `python toolbox.py recipes` prints them, and settings.toml's
+# A pin ages: `python toolbox.py --recipes` prints them, and settings.toml's
 # [acquire.versions] table overrides any of them without editing code.
 ACQUIRE = {
     "pdf_text":       {"source": "pypi", "package": "pymupdf",
@@ -336,7 +336,32 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--root", default=None)
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--recipes", action="store_true",
+                    help="print every pinned acquisition recipe (the ACQUIRE "
+                         "table, as settings.toml [acquire.versions] may "
+                         "override it)")
     args = ap.parse_args()
+    if args.recipes:
+        # the pins age; this is how a person reads them without opening the
+        # code, with the owner's [acquire.versions] overrides applied
+        # (docs/DESIGN-P7.2, finding 6)
+        base = args.root or os.path.dirname(os.path.abspath(__file__))
+        cfg = {}
+        try:
+            import tomllib
+            with open(os.path.join(base, "settings.toml"), "rb") as f:
+                cfg = tomllib.loads(f.read().decode("utf-8-sig"))
+        except (OSError, ValueError):
+            cfg = {}
+        for name in sorted(ACQUIRE):
+            r = recipe(name, cfg) or {}
+            if "package" in r:
+                print(f"{name:<16} {r.get('source', '?'):<6} "
+                      f"{r['package']}=={r.get('version', '?')}")
+            else:
+                line = r.get("command") or "owner action"
+                print(f"{name:<16} owner  {line}")
+        return
     s = scan(args.root)
     if args.json:
         print(json.dumps(s, indent=2))
