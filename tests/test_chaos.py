@@ -54,8 +54,21 @@ def main():
     # invariant.
     deadline = time.time() + 120
     stepped = False
+    raced = 0
     while time.time() < deadline:
-        st = read_state(sb)
+        # The child replaces state.json (temp file + os.replace) on every
+        # step, so a poll that lands inside the replace is the reader racing
+        # the writer, not a torn file: on Windows open() raises
+        # PermissionError while the rename holds the target (CI run
+        # 33776721150, job 100720144752), and a half-visible file would
+        # raise JSONDecodeError. Retry for the rest of the deadline. The read
+        # AFTER the kill below has no writer to race and stays strict.
+        try:
+            st = read_state(sb)
+        except (json.JSONDecodeError, OSError):
+            raced += 1
+            time.sleep(0.05)
+            continue
         if st["tasks"] and st["tasks"][0].get("steps"):
             stepped = True
             break
@@ -72,8 +85,9 @@ def main():
         f"(a step had{'' if stepped else ' NOT'} started before the kill)")
     for f in ("out/a.txt", "out/b.txt", "out/c.txt"):
         assert os.path.exists(os.path.join(sb, f.replace("/", os.sep))), f
-    print("[kill] killed mid-task with no cleanup: state parsed, the task "
-          "resumed and finished, every artifact landed")
+    print(f"[kill] killed mid-task with no cleanup: state parsed, the task "
+          f"resumed and finished, every artifact landed; {raced} poll "
+          f"read(s) raced the writer's replace and were retried, not failed")
 
     # ---------------------------------------------------------------- 2
     # every ledger corrupted in turn: quarantine or ignore, never a crash
