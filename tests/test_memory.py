@@ -179,6 +179,42 @@ def main():
     print("[automatic] finishing a task files its own competence outcome and, "
           "on failure, a categorized failure record — retries count as "
           "occurrences but never as extra competence attempts")
+    # --- 7. the fleet ledger is appended by every loop at once: the
+    #        recurrence chain must survive concurrent writers intact
+    import threading
+    home3 = make_sandbox("memory_concurrent", providers={"m": {"script": "s.json"}},
+                         roles={"tester": "m"}, scripts={"s.json": []})
+    errors = []
+
+    def hammer(n):
+        try:
+            for i in range(25):
+                memory.record_failure(home3, "hammer",
+                                      {"id": "t%d-%d" % (n, i), "goal": "same job"},
+                                      cause="same boom every time")
+        except Exception as e:                       # noqa: BLE001
+            errors.append(repr(e))
+
+    threads = [threading.Thread(target=hammer, args=(n,)) for n in range(8)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    assert not errors, errors
+    fdir = os.path.join(memory.mem_dir(home3), "failures")
+    rows = []
+    for name in os.listdir(fdir):
+        if name.endswith(".jsonl"):
+            with open(os.path.join(fdir, name), encoding="utf-8") as f:
+                rows += [json.loads(ln) for ln in f if ln.strip()]
+    assert len(rows) == 200, "rows lost or torn: %d" % len(rows)
+    chain = sorted(r["recurrence"] for r in rows)
+    assert chain == list(range(1, 201)), \
+        "a lost update: recurrence counted %s..%s" % (chain[:5], chain[-5:])
+    assert not [n for n in os.listdir(fdir) if n.endswith(".lock")], \
+        "no ledger lock may be left behind"
+    print("[concurrent] 8 writers x 25 identical failures at once: 200 rows, "
+          "recurrence counted 1..200 with no lost update and no lock left behind")
     print("PASS test_memory")
 
 

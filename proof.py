@@ -93,12 +93,34 @@ REGISTRY = {
         "invariants": ["a task is claimed exactly once",
                        "finish_task is refused until the gate passes",
                        "every step is traced with its cost"],
-        "code": ["loop.py", "harness.py", "context.py", "memrouter.py"],
+        "code": ["loop.py", "harness.py", "context.py", "memrouter.py",
+                 "watchdog.py"],
         "tests": ["test_harness.py", "test_layers.py", "test_e2e.py",
-                  "test_context.py", "test_stop.py"],
+                  "test_context.py", "test_stop.py", "test_watchdog.py",
+                  "test_sentinels.py"],
         "stress_tests": ["test_chaos.py", "test_e2e_crash.py", "test_faults.py",
                          "test_reliability.py"],
         "live": "a real provider answers a real task",
+    },
+    "twin-self-kernel": {
+        "capability": "A measured, versioned model of how the OWNER decides "
+                      "(docs/DESIGN-P10): learned from their own decisions, "
+                      "sealed in shadow before they act, scored against what "
+                      "they do, honest below 20 held-out rows, read into "
+                      "every window as the OWNER block, consent-gated and "
+                      "labeled on every path; the Super-Self shows where a "
+                      "better-informed owner diverges and asks.",
+        "invariants": ["twin/ is CONTROL: the worker never writes its owner",
+                       "a shadow prediction is sealed before the decision "
+                       "and hidden until it lands",
+                       "no output without verified consent; every output "
+                       "carries the label",
+                       "drift is a notice and a question, never a silent "
+                       "update"],
+        "code": ["twin.py", "twinmath.py"],
+        "tests": ["test_twin.py"],
+        "stress_tests": [],
+        "live": "the Super-Self answers through a real provider role",
     },
     "execution-authority": {
         "capability": "Every process the platform runs passes one typed "
@@ -156,8 +178,9 @@ REGISTRY = {
         "code": ["controlplane.py", "fileauth.py", "execution.py",
                  "sandbox.py", "policy.py", "loop.py"],
         "tests": ["test_controlplane.py", "test_invariants.py",
-                  "test_hardening.py", "test_guardrails.py"],
-        "stress_tests": ["test_controlplane.py"],
+                  "test_hardening.py", "test_guardrails.py",
+                  "test_promotion_leakage.py"],
+        "stress_tests": ["test_controlplane.py", "test_promotion_leakage.py"],
         "live": "a docker container refuses a write to /work/settings.toml",
     },
     "credential-authority": {
@@ -337,7 +360,9 @@ for _name, _code, _description in (
     # point of the proof system.
     ("procedural-learning",
      ["procedure.py", "operators.py", "runbook.py", "tabular.py",
-      "capability_graph.py"],
+      "tabletypes.py", "dbstate.py", "gitstate.py", "xlsxstate.py",
+      "httpstate.py", "reconciler.py",
+      "verifier.py", "signatures.py", "capability_graph.py"],
      "Independently judged trajectories compile into an executable procedure "
      "that a later matching task runs deterministically, with the task's own "
      "gate still deciding acceptance."),
@@ -349,7 +374,17 @@ for _name, _code, _description in (
                       "tests": (["test_procedural_learning.py",
                                  "test_loop_learning_controls.py",
                                  "test_capability_graph.py",
-                                 "test_tabular.py", "test_use_cases.py"]
+                                 "test_tabular.py", "test_use_cases.py",
+                                 "test_operator_runtime.py",
+                                 "test_verifier_factory.py",
+                                 "test_procedure_v2.py",
+                                 "test_capability_signatures.py",
+                                 "test_git_operators.py",
+                                 "test_xlsx_operators.py",
+                                 "test_transactional_contracts.py",
+                                 "test_correctness_patch.py",
+                                 "test_http_operators.py",
+                                 "test_reconciler.py"]
                                 if _name == "procedural-learning"
                                 else ["test_advanced_learning.py"]),
                       "invariants": ["offline tests never establish model lift", "judges remain independent"],

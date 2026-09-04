@@ -2,7 +2,7 @@
 
 **What this is.** A file-backed, stdlib-only platform for building expert AI
 agents that work continuously, prove what they did, and remember what they
-learned. 105 Python modules, 139 acceptance tests, one HTML control panel, no
+learned. 117 Python modules, 154 acceptance tests, one HTML control panel, no
 database, no framework, no build step. Python 3.11+ and your own API keys.
 
 **Who this document is for.** Somebody who has just been handed the
@@ -540,6 +540,19 @@ what was cut and why. Measured over 42 windows in the endurance soak, window
 size is **flat at 1083 tokens** while fleet history grows — the window is
 bounded by its budget, not by how much the fleet remembers.
 
+**And only marked data enters it** (docs/DESIGN-P11-clean-window.md). Every
+byte the harness did not write itself — a handed file, a file the agent read
+back, a command's output, an endpoint's body, a sub-call's answer, an MCP
+result, a transcript being summarized — arrives between `<<<FILE-CONTENT>>>`
+or `<<<TOOL-RESULT>>>` markers the grounding contract names as UNTRUSTED, and
+a marker appearing *inside* that text is escaped visibly so only the harness
+can close a fence. Handed files go through the File Authority like every
+other read. Compaction fires on the provider gate's own byte bound as well as
+the token estimate, and an overflow is a forced compaction with the payload
+archived — never a traceback, never a silent truncation. This is data
+marking, not a security boundary (AD-6): it makes untrusted text legible as
+untrusted; the boundaries are the six authorities.
+
 **The student is closed-book by mechanism, not by instruction.** The memory
 router excludes course material from the Student role, *and* the role's tool
 allowlist excludes `read_file`. Two independent layers, because one of them
@@ -647,7 +660,7 @@ last one is the only one produced on a computer this project does not own.
 
 ### 10.1 The suite passes — the weakest claim
 
-139 acceptance tests, green on Windows and Linux under
+154 acceptance tests, green on Windows and Linux under
 Python 3.11 and 3.13. Each test prints a sentence describing what it
 observed, and those sentences are the report — `EVIDENCE.md` quotes them
 verbatim rather than summarising.
@@ -871,7 +884,7 @@ packs — the exam the student cannot touch) `mastery.py` (pretest → study →
 practice → sealed exam → diagnose → verdict → distill → retest)
 
 **Memory** — `memory.py` `skills.py` `commons.py` `recall.py` `gotchas.py`
-`premise.py` `memrouter.py` `cases.py` `selfmodel.py`
+`premise.py` `memrouter.py` `cases.py` `selfmodel.py` `twin.py` `twinmath.py`
 
 **Knowing what it knows** — `sources.py` `conflicts.py` `standards.py`
 `curriculum.py` `ingest.py` `verify.py` `memcheck.py` `citecheck.py`
@@ -943,7 +956,7 @@ python loop.py run --drain --root experts/<slug>    # work the queue
 
 ```bash
 python demo.py            # the whole platform, keyless, in one run
-python tests/run_all.py   # 139 acceptance tests
+python tests/run_all.py   # 154 acceptance tests
 python proof.py           # what is proven, and to what level
 python evidence.py        # why we believe it, and where belief runs out
 python metrics.py         # is it working — and the numbers we refuse to invent

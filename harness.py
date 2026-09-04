@@ -56,6 +56,8 @@ LEDGERS = [
     ("frontier/frontier.json", "capability frontier ledger"),
     ("acquisitions.json", "acquisition ledger"),
     ("training/registry.json", "training model registry"),
+    ("reconcilers.json", "reconciler declarations"),
+    ("twin/kernel.json", "twin kernel (the owner's self-model)"),
 ]
 STALE_LOCK_SECONDS = 60
 CORE_FILES = ["loop.py", "context.py", "policy.py", "effects.py",
@@ -280,7 +282,12 @@ def manifest(root=None):
             "harness": HARNESS_VERSION,
             "mcp_legacy": getattr(__import__("mcp"), "LEGACY_VERSION", None),
             "mcp_modern": getattr(__import__("mcp"), "MODERN_VERSION", None),
-            "a2a": "1.0",
+            # what federation actually states: a discoverable card is
+            # served; the A2A task API (SendMessage/GetTask) is not
+            # implemented — a bare "1.0" here claimed otherwise
+            # (docs/DESIGN-P7.2, finding 8)
+            "a2a": {"card": True, "task_api": False,
+                    "transport": "custom federation (signed HMAC, ask/fetch)"},
             "prompts": {p: _sha(os.path.join(
                 root if os.path.isdir(os.path.join(root, "prompts")) else HOME,
                 "prompts", p))

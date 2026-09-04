@@ -71,7 +71,8 @@ def briefing(home):
     b = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "experts": len(experts),
          "needs_you": [], "approvals": [], "stalled": [], "unfunded": [], "gaps": [],
          "due_soon": [], "quarantined_skills": [], "recent_failures": [],
-         "goals": [], "spend_today": 0.0, "recommendations": []}
+         "goals": [], "spend_today": 0.0, "recommendations": [],
+         "safe_mode": []}
 
     now = time.time()
     for e in experts:
@@ -100,6 +101,19 @@ def briefing(home):
                                        "reason": rec.get("reason", "")})
         except Exception:
             pass
+
+        # 1c. fault protection (docs/DESIGN-P9b): an expert in safe mode
+        # does no model-driven work until the owner clears it
+        sm = os.path.join(root, "safe_mode.json")
+        if os.path.isfile(sm):
+            try:
+                with open(sm, encoding="utf-8") as f:
+                    rec = json.load(f)
+            except (OSError, ValueError):
+                rec = {}
+            b["safe_mode"].append({"expert": e["name"], "since": rec.get("at"),
+                                   "trips": [t.get("limit") for t in
+                                             rec.get("trips") or []]})
 
         # 2. stalled pulse (claims work exists, pulse cold > 15 min)
         hb = e.get("heartbeat")
@@ -209,6 +223,12 @@ def briefing(home):
 
     # ---- the ranked answer to "what should I do today?"
     rec = b["recommendations"]
+    for x in b["safe_mode"]:
+        rec.append({"rank": 0, "verb": "RESTORE",
+                    "what": f"{x['expert']} is in SAFE MODE since "
+                            f"{x['since']} ({', '.join(str(t) for t in x['trips']) or 'by hand'})"
+                            f" — investigate, then clear it with a reason",
+                    "where": f"python watchdog.py clear --root <{x['expert']}> --why ..."})
     for x in b["approvals"]:
         rec.append({"rank": 1, "verb": "APPROVE",
                     "what": f"{x['expert']} wants to run {x['what']} "

@@ -155,21 +155,36 @@ def event(root, gid, kind, **data):
     row = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "kind": str(kind)}
     row.update(data)
     import locks
-    with locks.holding(p, timeout=10.0, stale=8.0):
-        # Declare the append to the Control Plane Authority BEFORE making it.
-        # This ledger is CONTROL state, and it grows while model-authored
-        # commands are in flight (swarm.py runs its workers as threads), so
-        # the seal around those commands has to be able to tell the
-        # platform's own append apart from a worker appending
-        # `{"kind": "state", "to": "verified"}` to grade itself — replay()
-        # below lets this ledger overrule the snapshot, so that line would
-        # not be a note, it would be the verdict.
+    import random
+    # A row is NEVER dropped for want of the lock. The lock's own deadline is
+    # a bound on one acquisition; under a loaded runner an appender can lose
+    # that race repeatedly (CI, PR #16: one of four threads timed out and its
+    # 25 events were silently gone from the source of truth). So a timed-out
+    # acquisition is retried — it happens BEFORE the append, so a retry can
+    # never double-write — and only the last of a few is allowed to raise.
+    for attempt in range(3):
         try:
-            import controlplane
-            controlplane.harness_wrote(p)
-        except Exception:                    # pragma: no cover — defensive
-            pass
-        _append(p, row)
+            with locks.holding(p, timeout=10.0, stale=8.0):
+                # Declare the append to the Control Plane Authority BEFORE
+                # making it. This ledger is CONTROL state, and it grows while
+                # model-authored commands are in flight (swarm.py runs its
+                # workers as threads), so the seal around those commands has
+                # to be able to tell the platform's own append apart from a
+                # worker appending `{"kind": "state", "to": "verified"}` to
+                # grade itself — replay() below lets this ledger overrule the
+                # snapshot, so that line would not be a note, it would be the
+                # verdict.
+                try:
+                    import controlplane
+                    controlplane.harness_wrote(p)
+                except Exception:            # pragma: no cover — defensive
+                    pass
+                _append(p, row)
+            return row
+        except TimeoutError:
+            if attempt == 2:
+                raise
+            time.sleep(0.1 + random.random() * 0.4)
     return row
 
 

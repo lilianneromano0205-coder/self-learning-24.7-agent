@@ -44,7 +44,13 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-SECTION_RE = re.compile(r"^\[([a-z0-9_-]+)\]\s+(.*)$", re.I)
+# A test's observation label may carry spaces and a few marks ("[phase 1]",
+# "[csv->sql]", "[re-exam failure]"); it never carries a colon, which is
+# what keeps run_all's "[skipped: ...]" note and a tool's "[UNSAFE developer
+# host: ...]" out of the count. The old grammar ([a-z0-9_-] only) silently
+# dropped every spaced label, so ~20 observations the suite printed never
+# reached this document (docs/DESIGN-P6.1, finding 10).
+SECTION_RE = re.compile(r"^\[([a-z0-9][a-z0-9_ .><\-/]{0,39})\]\s+(.*)$", re.I)
 TEST_RE = re.compile(r"^=== (test_\w+\.py) ===$")
 PASS_RE = re.compile(r"^PASS (\S+)")
 # A unittest file ends with a bare "OK" (or "OK (skipped=1)"), never "PASS
@@ -92,7 +98,8 @@ SYSTEMS = {
                   "test_candidates.py",
                   "test_retention.py", "test_context.py",
                   "test_loop_learning_controls.py",
-                  "test_use_cases.py", "test_vision_preservation.py"],
+                  "test_use_cases.py", "test_vision_preservation.py",
+                  "test_watchdog.py"],
         "blind": "every model call in these tests is the scripted mock "
                  "provider. They prove the harness holds around a model; they "
                  "prove nothing about any real provider's behaviour.",
@@ -119,7 +126,8 @@ SYSTEMS = {
                   "test_inbox.py", "test_material.py", "test_url.py",
                   "test_curriculum.py",
                   "test_e2e.py",
-                  "test_research_discovery.py"],
+                  "test_research_discovery.py", "test_reconciler.py",
+                  "test_sentinels.py"],
         "blind": "schedules are tested with tiny intervals inside one run. "
                  "Nothing here proves a month of unattended drift, clock "
                  "changes across daylight saving, or a real cron environment.",
@@ -127,8 +135,8 @@ SYSTEMS = {
     "4. Memory institution": {
         "what": "courses and atoms, skills graph, commons, failures, gotchas, "
                 "premise, competence, recall, sources, conflicts, standards, "
-                "self-model",
-        "tests": ["test_knowledge.py",
+                "self-model, the owner's twin",
+        "tests": ["test_knowledge.py", "test_twin.py",
                   "test_memory.py", "test_memcheck.py", "test_skills.py",
                   "test_skillgraph.py", "test_skillmd.py", "test_recall.py",
                   "test_associative.py", "test_memory_kinds.py",
@@ -163,7 +171,12 @@ SYSTEMS = {
                   "test_replay.py", "test_benchmark.py", "test_governance.py",
                   "test_design.py", "test_modelrouter.py",
                   "test_procedural_learning.py", "test_scheduler_verifier.py",
-                  "test_advanced_learning.py", "test_tabular.py"],
+                  "test_advanced_learning.py", "test_tabular.py",
+                  "test_operator_runtime.py", "test_verifier_factory.py",
+                  "test_procedure_v2.py", "test_capability_signatures.py",
+                  "test_git_operators.py", "test_xlsx_operators.py",
+                  "test_transactional_contracts.py",
+                  "test_correctness_patch.py", "test_http_operators.py"],
         "blind": "promotion and routing decisions are proven against seeded "
                  "outcome ledgers, not against months of real measured "
                  "performance. The design gate checks mechanics and the known "
@@ -179,7 +192,8 @@ SYSTEMS = {
                   "test_federation.py", "test_providers.py", "test_check.py",
                   "test_trace.py", "test_bootstrap.py", "test_backup.py",
                   "test_preflight.py", "test_ecosystem.py",
-                  "test_mcp_hardening.py", "test_ui_auth_hardening.py"],
+                  "test_mcp_hardening.py", "test_ui_auth_hardening.py",
+                  "test_ledger_defects.py"],
         "blind": "the panel is driven through its HTTP API and its HTML is "
                  "parsed, but no test renders it in a browser. Layout, "
                  "contrast and touch targets are verified by eye, not by CI.",
@@ -188,7 +202,8 @@ SYSTEMS = {
         "what": "one mandatory gateway per kind of power — execution, file, "
                 "credential, model gateway, effect, control plane — plus the "
                 "invariant tests that enumerate every caller of each",
-        "tests": ["test_invariants.py", "test_controlplane.py",
+        "tests": ["test_invariants.py", "test_promotion_leakage.py",
+                  "test_controlplane.py",
                   "test_execution_containment.py"],
         "blind": "these tests enumerate every path in THIS tree. They cannot "
                  "see a path added by a plugin, an MCP server or a future "
@@ -365,9 +380,30 @@ def run_suite(capture_path=None):
     return out, failed
 
 
+FAILED_LINE_RE = re.compile(r"^FAILED: (test_\w+\.py)\b")
+RUNALL_TAIL_RE = re.compile(r"^\d+ executed: \d+ passed, \d+ skipped, "
+                            r"(\d+) failed")
+
+
 def parse(output):
-    """-> {test file: {"sections": [...], "passed": bool}}"""
+    """-> {test file: {"sections": [...], "passed": bool}}
+
+    A `--from` log produced by run_all.py under ONE pipe is exactly the
+    shape run_suite()'s docstring warns about: the parent's `=== test ===`
+    headers and each child's stdout/stderr flush independently, so a
+    passing test's own OK line can land under the NEXT header, leaving its
+    section empty. Parsed naively, that reported a green test as FAILING —
+    the inverse of the UNITTEST_OK_RE bug, and just as corrosive: a report
+    that can cry wolf teaches its reader to ignore wolves.
+
+    run_all's tail is authoritative — it counts EXIT CODES and names every
+    failed file in a `FAILED: <name>` line. So when that tail is present,
+    a test with no recognized pass marker and no skip is failed ONLY if
+    the tail names it; otherwise its verdict is the exit code's (passed)
+    and only its observations are lost to the interleaving, which the
+    report can afford — verdicts cannot."""
     per, current = {}, None
+    named_failed, tail_seen = set(), False
     for line in output.splitlines():
         line = line.strip()
         m = TEST_RE.match(line)
@@ -375,6 +411,13 @@ def parse(output):
             current = m.group(1)
             per.setdefault(current, {"sections": [], "passed": False,
                                      "skipped": None})
+            continue
+        m = FAILED_LINE_RE.match(line)
+        if m:
+            named_failed.add(m.group(1))
+            continue
+        if RUNALL_TAIL_RE.match(line):
+            tail_seen = True
             continue
         if current is None:
             continue
@@ -388,6 +431,19 @@ def parse(output):
         m = SKIP_RE.match(line)
         if m:
             per[current]["skipped"] = m.group(2).strip() or "no reason given"
+    if tail_seen:
+        for name, rec in per.items():
+            if not rec["passed"] and not rec["skipped"] \
+                    and name not in named_failed:
+                rec["passed"] = True
+        # the authority cuts BOTH ways: a test the tail names failed is
+        # failed, however green a stray PASS line inside its section looks
+        # (a test can print PASS and then die in teardown — the exit code
+        # saw it, the prose did not)
+        for name in named_failed:
+            if name in per:
+                per[name]["passed"] = False
+                per[name]["skipped"] = None
     return per
 
 

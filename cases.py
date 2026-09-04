@@ -37,6 +37,8 @@ import os
 import re
 import time
 
+import locks
+
 LEDGER = os.path.join("memory", "cases.jsonl")
 STOP = {"the", "a", "an", "and", "or", "of", "to", "in", "for", "with", "on",
         "at", "by", "from", "into", "that", "this", "it", "is", "are", "be",
@@ -68,11 +70,20 @@ def _read(root):
     return out
 
 
-def _append(root, rec):
+def _append(root, rec, locked=False):
+    """Under the ledger lock unless the caller already holds it: the case
+    ledger is read (load) and then appended by the harness of every task
+    that ends, and an unlocked append beside that read loses rows
+    (docs/DESIGN-P11, memory G4)."""
     p = _path(root)
     os.makedirs(os.path.dirname(p), exist_ok=True)
-    with open(p, "a", encoding="utf-8") as f:
-        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    if locked:
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        return rec
+    with locks.holding(p):
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
     return rec
 
 
@@ -113,26 +124,31 @@ def open_case(root, task, failure):
     """A failure opens (or reopens) a case. Returns the case record."""
     sig = failure.get("signature") or f"{failure.get('category')}|{task.get('goal')}"
     cid = case_id(sig)
-    existing = {c["case"]: c for c in load(root)}.get(cid)
-    now = time.strftime("%Y-%m-%dT%H:%M:%S")
-    if existing and existing.get("status") == "fixed":
-        # the most valuable event in the ledger: the fix did not hold
+    p = _path(root)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    # load-then-append under one lock: two tasks failing on the same
+    # signature at once must open ONE case, not two
+    with locks.holding(p):
+        existing = {c["case"]: c for c in load(root)}.get(cid)
+        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        if existing and existing.get("status") == "fixed":
+            # the most valuable event in the ledger: the fix did not hold
+            return _append(root, {
+                "case": cid, "event": "recurred", "at": now,
+                "task": task.get("id"), "problem": (task.get("goal") or "")[:200],
+                "cause": (failure.get("cause") or "")[:300],
+                "note": "came back after being marked fixed -- the fix was wrong "
+                        "or incomplete"}, locked=True)
+        if existing:
+            return existing
         return _append(root, {
-            "case": cid, "event": "recurred", "at": now,
-            "task": task.get("id"), "problem": (task.get("goal") or "")[:200],
-            "cause": (failure.get("cause") or "")[:300],
-            "note": "came back after being marked fixed -- the fix was wrong "
-                    "or incomplete"})
-    if existing:
-        return existing
-    return _append(root, {
-        "case": cid, "event": "opened", "at": now,
-        "signature": sig[:200], "category": failure.get("category"),
-        "problem": (task.get("base_goal") or task.get("goal") or "")[:200],
-        "cause": (failure.get("cause") or failure.get("actual") or "")[:300],
-        "failure_id": failure.get("failure_id"), "task": task.get("id"),
-        "course": task.get("course"), "role": task.get("role"),
-        "terms": sorted(words(task.get("goal")))[:12]})
+            "case": cid, "event": "opened", "at": now,
+            "signature": sig[:200], "category": failure.get("category"),
+            "problem": (task.get("base_goal") or task.get("goal") or "")[:200],
+            "cause": (failure.get("cause") or failure.get("actual") or "")[:300],
+            "failure_id": failure.get("failure_id"), "task": task.get("id"),
+            "course": task.get("course"), "role": task.get("role"),
+            "terms": sorted(words(task.get("goal")))[:12]}, locked=True)
 
 
 def record_fix(root, task):

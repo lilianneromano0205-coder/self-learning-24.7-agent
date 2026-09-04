@@ -87,7 +87,7 @@ is accurate rather than decorative. `[CODE]`
 
 58 modules resolve into eight subsystems. Full per-module detail — SHA, imports,
 reverse-imports, CLI surface, whether it writes state, executes commands, or
-touches the network — is in `BUILD_MANIFEST.json`.
+touches the network — is in `historical/audits/BUILD_MANIFEST-2026-08-22.json` (a 2026-08-22 snapshot of 58 modules — historical, not current truth).
 
 | Subsystem | Modules | Role |
 |---|---|---|
@@ -896,7 +896,7 @@ was commissioned to hunt, now confirmed across nine subsystems.
 
 | File | Contents |
 |---|---|
-| `BUILD_MANIFEST.json` | Machine-readable: every module and test, SHA, subsystem, imports, reverse-imports, CLI surface, security flags, coverage |
+| `historical/audits/BUILD_MANIFEST-2026-08-22.json` (a 2026-08-22 snapshot of 58 modules — historical, not current truth) | Machine-readable: every module and test, SHA, subsystem, imports, reverse-imports, CLI surface, security flags, coverage |
 | `TRACEABILITY_MATRIX.md` | Capability → implementation → test → evidence, with unproven rows named |
 | `ARCHITECTURE_DECISIONS.md` | The decisions the code embodies, with the alternative rejected and the cost paid |
 | `GAPS_RISKS_AND_UNFINISHED.md` | Every finding, ranked P1–P4, with reproduction and options |
