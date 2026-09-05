@@ -321,6 +321,13 @@ def check_a_skip_is_not_a_failure(work):
                      f"SKIP {t[:-3]}: {WHY}"] if t == victim else b))
                for t, b in every]
     rep = evidence.build(run_text(skipped))
+    # Docker's live test currently prints SKIP and then PASS. Skip wins in
+    # either order, matching run_all's three-outcome accounting.
+    for body in (["SKIP test_docker_live: unavailable", "PASS test_docker_live"],
+                 ["PASS test_docker_live", "SKIP test_docker_live: unavailable"]):
+        parsed = evidence.parse(run_text([("test_docker_live.py", body)]))
+        assert not parsed["test_docker_live.py"]["passed"], "SKIP became a pass"
+        assert parsed["test_docker_live.py"]["skipped"] == "unavailable"
     sysrep = next(x for x in rep["systems"] if x["system"] == sysname)
     assert sysrep["verdict"] != "FAILING", (
         f"a test that deliberately skipped was reported as a FAILURE, so a "

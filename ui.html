@@ -3140,11 +3140,11 @@ async function loadTwin(){
   const kernelRow = k ? `<div class="row" style="gap:6px;margin-bottom:6px">
       <span class="pill">kernel v${k.version} · ${esc(k.hash)}</span>
       <span class="pill">${k.n_fit} fit / ${k.n_holdout} held out</span>
-      <span class="pill">${k.proven_rules}/${k.rules} habits proven</span>
+      <span class="pill">${k.supported_rules??k.proven_rules}/${k.rules} habits supported</span>
       <span class="muted" style="font-size:12px">looks at: ${(k.attention||[]).map(a=>esc(a.feature.replace(/^(sit|feat|cp|sterm|term):/,''))).join(", ")||"—"}</span>
     </div>` : `<p class="muted" style="font-size:12.5px">no kernel yet — ${ep.decisions||0} decision(s) recorded; approve or deny something, or record a decision below, then <b>learn</b>.</p>`;
   const fidRow = f ? `<div class="row" style="gap:6px;margin-bottom:6px">
-      <span class="pill ${f.verdict==="high"?"ok":f.verdict==="INSUFFICIENT EVIDENCE"?"warn":f.verdict==="low"?"bad":""}">fidelity: ${esc(f.verdict)}</span>
+      <span class="pill ${f.verdict==="high"?"ok":f.verdict==="INSUFFICIENT EVIDENCE"||f.verdict==="STALE"?"warn":f.verdict==="low"?"bad":""}">retrospective diagnostic: ${esc(f.verdict)}</span>
       ${f.choice_fidelity!=null?`<span class="pill" title="held-out argmax agreement">choice ${(f.choice_fidelity*100).toFixed(0)}%</span>`:""}
       ${f.brier!=null?`<span class="pill" title="multi-class Brier">Brier ${f.brier}</span>`:""}
       ${f.ece!=null?`<span class="pill" title="expected calibration error">ECE ${f.ece}</span>`:""}

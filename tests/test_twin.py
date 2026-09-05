@@ -65,6 +65,7 @@ import loop                     # noqa: E402
 import modelgateway             # noqa: E402
 import twin                     # noqa: E402
 import twinmath as M            # noqa: E402
+import twinmeasurement as TM    # noqa: E402
 
 GRANT_DENY = [{"id": "grant", "text": "approve the offer"},
               {"id": "deny", "text": "reject the offer"}]
@@ -203,7 +204,7 @@ def check_learning(home):
     v = twin.current_version(twin.load_kernel(root))
     top = [a["feature"] for a in v["attention"][:3]]
     assert "sit:risk" in top and "sit:margin" in top, top
-    proven = [r for r in v["rules"] if r["status"] == "proven"]
+    proven = [r for r in v["rules"] if r["status"] == "supported"]
     assert any("alice" in r["text"] and r["then"] == "grant" for r in proven), \
         [r["text"] for r in proven]
     assert any(("risk" in r["text"] or "margin" in r["text"]) for r in proven)
@@ -221,7 +222,7 @@ def check_learning(home):
     print(f"[learning] a synthetic owner (alice always yes; deny when risk > "
           f"0.5 and margin < 0.3) gave held-out choice fidelity "
           f"{rep['choice_fidelity']:.2f} on {rep['n_holdout']} rows; "
-          f"attention ranked {', '.join(top)}; {len(proven)} habits proven "
+          f"attention ranked {', '.join(top)}; {len(proven)} habits supported "
           f"including the alice rule; the fit is byte-stable; a random owner "
           f"scored {rrep['choice_fidelity']:.2f} and the verdict was "
           f"{rrep['verdict']!r}, not 'high'")
@@ -237,7 +238,7 @@ def check_calibration(root):
     # a contaminated split is refused: put a fit id among the held-out ids
     k = twin.load_kernel(root)
     v = twin.current_version(k)
-    held = [e for e in twin.decisions(twin.episodes(root)) if M.is_holdout(e["id"])]
+    held = [e for e in twin.decisions(twin.episodes(root)) if TM.partition(e) == "test"]
     v["fit_ids"] = sorted(set(v["fit_ids"]) | {held[0]["id"]})
     twin.save_kernel(root, k)
     try:

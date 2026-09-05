@@ -203,9 +203,10 @@ def check_prose_matches_the_tree():
     assert f"{n_caps} capabilities" in ref and f"{n_caps} capabilities" in manual
     tests = len([f for f in os.listdir(os.path.join(AGENT_DIR, "tests"))
                  if f.startswith("test_") and f.endswith(".py")])
-    assert f"tests-{tests}%20passing" in readme, "README test badge is stale"
+    # A static registry count cannot claim every test passed on this host.
+    assert f"tests-{tests}%20registered" in readme, "README test badge is stale"
     import mutate_check
-    assert f"{len(mutate_check.MUTATIONS)}%20mutations" in readme, \
+    assert f"mutation%20tests-{len(mutate_check.MUTATIONS)}%20registered" in readme, \
         "README mutation badge is stale"
     print(f"[prose] REFERENCE names {n_templates} templates and all {len(kinds)} "
           f"intention kinds; MANUAL and REFERENCE say {n_caps} capabilities; "

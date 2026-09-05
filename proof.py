@@ -117,8 +117,8 @@ REGISTRY = {
                        "carries the label",
                        "drift is a notice and a question, never a silent "
                        "update"],
-        "code": ["twin.py", "twinmath.py"],
-        "tests": ["test_twin.py"],
+        "code": ["twin.py", "twinmath.py", "twinmeasurement.py"],
+        "tests": ["test_twin.py", "test_twin_measurement.py"],
         "stress_tests": [],
         "live": "the Super-Self answers through a real provider role",
     },

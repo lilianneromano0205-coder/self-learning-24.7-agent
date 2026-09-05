@@ -136,7 +136,7 @@ SYSTEMS = {
         "what": "courses and atoms, skills graph, commons, failures, gotchas, "
                 "premise, competence, recall, sources, conflicts, standards, "
                 "self-model, the owner's twin",
-        "tests": ["test_knowledge.py", "test_twin.py",
+        "tests": ["test_knowledge.py", "test_twin.py", "test_twin_measurement.py",
                   "test_memory.py", "test_memcheck.py", "test_skills.py",
                   "test_skillgraph.py", "test_skillmd.py", "test_recall.py",
                   "test_associative.py", "test_memory_kinds.py",
@@ -426,11 +426,12 @@ def parse(output):
             per[current]["sections"].append((m.group(1), m.group(2).strip()))
             continue
         if PASS_RE.match(line) or UNITTEST_OK_RE.match(line):
-            per[current]["passed"] = True
+            per[current]["passed"] = not bool(per[current]["skipped"])
             continue
         m = SKIP_RE.match(line)
         if m:
             per[current]["skipped"] = m.group(2).strip() or "no reason given"
+            per[current]["passed"] = False
     if tail_seen:
         for name, rec in per.items():
             if not rec["passed"] and not rec["skipped"] \

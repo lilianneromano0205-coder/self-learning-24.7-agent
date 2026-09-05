@@ -21,6 +21,41 @@ PY = sys.executable
 
 # (label, file, find, replace, test, what the test must notice)
 MUTATIONS = [
+    ("measurement: evaluation skips record validation", "twin.py",
+     '        held = TM.split(rows)["test"]',
+     '        held = [e for e in rows if TM.partition(e) == "test"]',
+     "test_twin_measurement.py", "post-fit malformed records are accepted"),
+
+    ("measurement: intervening input changes ignored", "twinmeasurement.py",
+     '        raise twin.Refused("inputs changed during evaluation; rerun fidelity")',
+     '        pass',
+     "test_twin_measurement.py", "concurrent updates do not refuse archival"),
+
+    ("measurement: final labels select rules", "twin.py",
+     '    rules = M.validate_rules(M.mine_rules(fitset), validation)',
+     '    rules = M.validate_rules(M.mine_rules(fitset), holdout)',
+     "test_twin_measurement.py", "final rows enter actual rule validation"),
+
+    ("measurement: split depends on the answer", "twinmeasurement.py",
+     '    bucket = int(group(row), 16) % 5',
+     '    bucket = int(digest([group(row), row.get("choice")]), 16) % 5',
+     "test_twin_measurement.py", "choice changes partition membership"),
+
+    ("measurement: live neighbors leak into the frozen predictor", "twin.py",
+     '            v["neighbors"] if "neighbors" in v else decisions(episodes(root)))',
+     '            decisions(episodes(root)))',
+     "test_twin_measurement.py", "poisoned live rows change predictions"),
+
+    ("measurement: stale report treated as current", "twinmeasurement.py",
+     '        if report != authoritative or report["binding"] != expected:',
+     '        if False:',
+     "test_twin_measurement.py", "old evidence survives policy changes"),
+
+    ("measurement: cold-start novelty is treated as policy drift", "twin.py",
+     '    if row.get("novelty", 1.0) >= NOVEL:',
+     '    if False:',
+     "test_twin_measurement.py", "cold errors freeze the owner model"),
+
     # ---- the clean window (docs/DESIGN-P11): marked data, grounded compaction
     ("window: read_file returns its bytes unmarked", "loop.py",
      '''                    result = context.fence_tool("read_file", rel, truncate(f.read()))''',
