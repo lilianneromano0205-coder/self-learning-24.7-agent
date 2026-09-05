@@ -2,7 +2,7 @@
 
 **What this is.** A file-backed, stdlib-only platform for building expert AI
 agents that work continuously, prove what they did, and remember what they
-learned. 117 Python modules, 154 acceptance tests, one HTML control panel, no
+learned. 118 Python modules, 155 registered acceptance tests, one HTML control panel, no
 database, no framework, no build step. Python 3.11+ and your own API keys.
 
 **Who this document is for.** Somebody who has just been handed the
@@ -660,8 +660,8 @@ last one is the only one produced on a computer this project does not own.
 
 ### 10.1 The suite passes — the weakest claim
 
-154 acceptance tests, green on Windows and Linux under
-Python 3.11 and 3.13. Each test prints a sentence describing what it
+155 registered acceptance tests, configured for Windows and Linux under
+Python 3.11, 3.12 and 3.13. Actual passes and skips require a run receipt. Each test prints a sentence describing what it
 observed, and those sentences are the report — `EVIDENCE.md` quotes them
 verbatim rather than summarising.
 
@@ -956,7 +956,7 @@ python loop.py run --drain --root experts/<slug>    # work the queue
 
 ```bash
 python demo.py            # the whole platform, keyless, in one run
-python tests/run_all.py   # 154 acceptance tests
+python tests/run_all.py   # 155 registered acceptance tests
 python proof.py           # what is proven, and to what level
 python evidence.py        # why we believe it, and where belief runs out
 python metrics.py         # is it working — and the numbers we refuse to invent

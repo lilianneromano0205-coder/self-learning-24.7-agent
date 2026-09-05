@@ -1,5 +1,14 @@
 # Expert Fleet — the manual
 
+Twin measurement update: `python twin.py --root <expert> learn` produces a
+train/validation/test diagnostic fit. `fidelity` archives a content-addressed
+receipt under `twin/evaluations/`; `replay-evaluation <receipt>` verifies and
+replays its choice scores with the same runtime. The status/OWNER view says
+STALE after relevant live-state or code changes. These are retrospective
+diagnostics, not validated human-clone accuracy. Legacy fits require `learn`
+before new diagnostics; existing decisions are retained. See
+`docs/DESIGN-twin-measurement-integrity.md` for scope and limitations.
+
 A file-backed, stdlib-only platform for building expert AI agents that work
 24/7, prove what they did, and remember what they learned. No database, no
 framework, no build step: Python 3.11+ and your own API keys.
@@ -603,8 +612,8 @@ python twin.py predict --root experts/<slug> --situation "..." --options "grant,
 
 What you get back is never a verdict: `grant 0.72 · deny 0.19 · ask 0.09`,
 the features that drove it, a novelty score, and the label **TWIN — a
-computational model of the owner, not the owner**. Below 20 held-out
-decisions the benchmark says **INSUFFICIENT EVIDENCE** in those words.
+computational model of the owner, not the owner**. Below 20 distinct test
+groups the diagnostic says **INSUFFICIENT EVIDENCE** in those words.
 
 The panel (an agent → **Mind** → *Twin*) shows consent, the kernel, the
 benchmark, the shadow ledger (a sealed prediction shows its hash and
@@ -612,7 +621,9 @@ nothing else until you decide — a shown prediction would contaminate the
 signal it is measured against), the one open *why* question, and any
 **drift notice**: when your recent decisions fit a different policy than
 before, you see both estimates and choose *confirm* (a new kernel version)
-or *dismiss* (the old policy stays). Nothing moves the kernel but you.
+or *dismiss* (learning resumes in the same version). Ordinary refitting can
+update a version as decisions arrive; immutable owner-approved releases are
+not yet implemented. Evaluation receipts preserve the evaluated snapshot.
 
 Scopes nest: `predict` (shadow scoring, "what would I do") < `advise`
 (`superself`: a model role thinks as you with more to know, and where it

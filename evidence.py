@@ -136,7 +136,7 @@ SYSTEMS = {
         "what": "courses and atoms, skills graph, commons, failures, gotchas, "
                 "premise, competence, recall, sources, conflicts, standards, "
                 "self-model, the owner's twin",
-        "tests": ["test_knowledge.py", "test_twin.py",
+        "tests": ["test_knowledge.py", "test_twin.py", "test_twin_measurement.py",
                   "test_memory.py", "test_memcheck.py", "test_skills.py",
                   "test_skillgraph.py", "test_skillmd.py", "test_recall.py",
                   "test_associative.py", "test_memory_kinds.py",
@@ -426,11 +426,12 @@ def parse(output):
             per[current]["sections"].append((m.group(1), m.group(2).strip()))
             continue
         if PASS_RE.match(line) or UNITTEST_OK_RE.match(line):
-            per[current]["passed"] = True
+            per[current]["passed"] = not bool(per[current]["skipped"])
             continue
         m = SKIP_RE.match(line)
         if m:
             per[current]["skipped"] = m.group(2).strip() or "no reason given"
+            per[current]["passed"] = False
     if tail_seen:
         for name, rec in per.items():
             if not rec["passed"] and not rec["skipped"] \
@@ -486,11 +487,17 @@ def build(output):
         "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "tests_seen": len(per),
         "tests_passed": sum(1 for v in per.values() if v["passed"]),
-        "observations": sum(len(v["sections"]) for v in per.values()),
+        "observations": sum(s["observations"] for s in systems),
         "unclassified_tests": unclassified,
         "declared_but_unregistered": missing,
         "systems": systems, "caveat": GLOBAL_CAVEAT,
     }
+
+
+def public_sentence(sentence):
+    """Keep fixture-relative detail while removing machine-specific home names."""
+    return re.sub(r"(?:[A-Za-z]:[\\/]Users[\\/]|/(?:home|Users)/)[^\\/\r\n]+",
+                  "[user-home]", sentence)
 
 
 def render(rep):
@@ -499,7 +506,7 @@ def render(rep):
          f"**{rep['tests_passed']}/{rep['tests_seen']} tests passed**, "
          f"**{rep['observations']} observations** recorded.", "",
          "Each test below prints its own sentence describing what it proved; "
-         "those sentences are quoted verbatim, not summarised. Every system "
+         "those sentences are not summarised; user-home paths are redacted. Every system "
          "also carries a **blind spot** — what these tests do not cover.", "",
          f"> {rep['caveat']}", ""]
     if rep["unclassified_tests"]:
@@ -525,11 +532,11 @@ def render(rep):
         if s["tests_failed"]:
             L.append(f"**FAILING:** {', '.join(s['tests_failed'])}")
         for t, why in s.get("tests_skipped") or []:
-            L.append(f"**NOT RUN HERE — {t}:** {why}")
+            L.append(f"**NOT RUN HERE — {t}:** {public_sentence(why)}")
         L += ["", "<details><summary>What the tests observed "
               f"({s['observations']})</summary>", ""]
         for t, kind, sentence in s["evidence"]:
-            L.append(f"- `{t}` **[{kind}]** {sentence}")
+            L.append(f"- `{t}` **[{kind}]** {public_sentence(sentence)}")
         L += ["", "</details>", "",
               f"**Blind spot.** {s['blind_spot']}", ""]
     return "\n".join(L)

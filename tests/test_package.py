@@ -232,7 +232,8 @@ def check_it_is_actually_runnable(zpath, work):
     assert r.returncode == 0, (
         "a freshly unzipped archive does not pass its own contract check:\n"
         + (r.stdout + r.stderr)[-700:])
-    print(f"[runnable] the archive carries {n_mods} modules, {n_tests} tests, "
+    print(f"[runnable] the archive carries {n_mods} non-test Python files "
+          f"(including nested support scripts), {n_tests} tests, "
           f"the prompts and settings.toml — and unzipped into an empty "
           f"directory it passes `harness.py --check` with no setup at all")
     return root
@@ -321,6 +322,15 @@ def check_a_skip_is_not_a_failure(work):
                      f"SKIP {t[:-3]}: {WHY}"] if t == victim else b))
                for t, b in every]
     rep = evidence.build(run_text(skipped))
+    assert rep["observations"] == sum(s["observations"] for s in rep["systems"]), \
+        "headline counted observations omitted from the passing evidence ledger"
+    # Docker's live test currently prints SKIP and then PASS. Skip wins in
+    # either order, matching run_all's three-outcome accounting.
+    for body in (["SKIP test_docker_live: unavailable", "PASS test_docker_live"],
+                 ["PASS test_docker_live", "SKIP test_docker_live: unavailable"]):
+        parsed = evidence.parse(run_text([("test_docker_live.py", body)]))
+        assert not parsed["test_docker_live.py"]["passed"], "SKIP became a pass"
+        assert parsed["test_docker_live.py"]["skipped"] == "unavailable"
     sysrep = next(x for x in rep["systems"] if x["system"] == sysname)
     assert sysrep["verdict"] != "FAILING", (
         f"a test that deliberately skipped was reported as a FAILURE, so a "
@@ -332,6 +342,12 @@ def check_a_skip_is_not_a_failure(work):
         f"{sysrep['verdict']}")
     # …and the reason reaches the published document, not just the JSON
     md = evidence.render(rep)
+    private = evidence.build(run_text([(healthy, [
+        "[obs] C:/Users/Example Person/AppData/Local/Temp/fixture/result.txt verified",
+        f"PASS {healthy[:-3]}"])]))
+    public = evidence.render(private)
+    assert "Example Person" not in public and "[user-home]/AppData" in public
+    assert "redacted" in public and "fixture/result.txt verified" in public
     assert "NOT RUN HERE" in md and WHY in md, (
         "the artifact does not say WHICH claim went unbacked or why; "
         "'proven except skipped' with no named reason is not accountability")

@@ -201,11 +201,16 @@ def check_prose_matches_the_tree():
     import proof
     n_caps = len(proof.REGISTRY)
     assert f"{n_caps} capabilities" in ref and f"{n_caps} capabilities" in manual
-    tests = len([f for f in os.listdir(os.path.join(AGENT_DIR, "tests"))
-                 if f.startswith("test_") and f.endswith(".py")])
-    assert f"tests-{tests}%20passing" in readme, "README test badge is stale"
+    test_files = {f for f in os.listdir(os.path.join(AGENT_DIR, "tests"))
+                  if f.startswith("test_") and f.endswith(".py")}
+    import run_all
+    assert len(run_all.TESTS) == len(set(run_all.TESTS)), "duplicate suite entries"
+    assert set(run_all.TESTS) == test_files, "suite registry differs from test files"
+    tests = len(run_all.TESTS)
+    # A static registry count cannot claim every test passed on this host.
+    assert f"tests-{tests}%20registered" in readme, "README test badge is stale"
     import mutate_check
-    assert f"{len(mutate_check.MUTATIONS)}%20mutations" in readme, \
+    assert f"mutation%20tests-{len(mutate_check.MUTATIONS)}%20registered" in readme, \
         "README mutation badge is stale"
     print(f"[prose] REFERENCE names {n_templates} templates and all {len(kinds)} "
           f"intention kinds; MANUAL and REFERENCE say {n_caps} capabilities; "
