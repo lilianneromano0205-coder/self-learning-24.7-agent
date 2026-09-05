@@ -31,13 +31,17 @@ def partition(row):
 
 
 def split(rows):
+    import twin
     out = {"train": [], "validation": [], "test": []}
     seen = set()
     for row in rows:
         if row["id"] in seen:
             raise ValueError("duplicate decision ID")
         seen.add(row["id"])
-        if str(row["choice"]) not in {str(o["id"]) for o in row["options"]}:
+        option_ids = [o["id"] for o in twin._norm_options(row["options"])]
+        if len(set(option_ids)) != len(option_ids):
+            raise ValueError("duplicate option ID after normalization")
+        if str(row["choice"]) not in option_ids:
             raise ValueError("decision choice outside options")
         out[partition(row)].append(copy.deepcopy(row))
     for values in out.values():

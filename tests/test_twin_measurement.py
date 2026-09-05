@@ -99,6 +99,14 @@ class Measurement(unittest.TestCase):
         malformed[0]["choice"] = "not-an-option"
         with self.assertRaises(ValueError):
             TM.split(malformed)
+        for ids in (("same", "same"), (1, "1")):
+            ambiguous = copy.deepcopy(data[0])
+            ambiguous["options"][0]["id"], ambiguous["options"][1]["id"] = ids
+            ambiguous["choice"] = str(ids[0])
+            for _ in range(2):
+                with self.assertRaisesRegex(ValueError, "duplicate option ID"):
+                    TM.split([ambiguous])
+                ambiguous["options"].reverse()
         print("[grouping] 100 answer/ID/time/retest permutations kept their inferred partition; duplicates and malformed choices refused")
 
     def test_frozen_neighbors_and_tampered_fit(self):

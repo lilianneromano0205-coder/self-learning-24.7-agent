@@ -81,7 +81,33 @@ reporting-only change; post-change verification is the complete package test and
 evidence regeneration, not another full sweep. Independent re-review of this
 last reporting correction was unavailable due to the reviewer's usage limit.
 
-## Local UI observation
+## PR 22 review corrections
+
+CodeRabbit identified five actionable issues on d27e423. New regressions
+reproduced acceptance of duplicate normalized option IDs and inflation of the
+headline observation count by skipped tests. The split now refuses ambiguous
+IDs in either order; the evidence headline counts the same passing classified
+ledger as its system rows. Rendering redacts user-home names (and discloses
+that transformation). Archive output distinguishes all non-test Python files,
+including nested support scripts, from root module inventory. The badge check
+now compares the actual suite registry with the test files and rejects duplicate
+registrations. Three registered mutations exercise these load-bearing checks.
+The earlier 831-observation statement above is historical, not the corrected
+count. Fresh full-suite evidence and remote CI are required for this revision.
+
+The first correction sweep retained one setup failure: Windows could not
+recreate an old Git-operator fixture directory. A direct rerun reproduced that
+setup error; using a new AGENT_TEST_TMP directory passed the exact test without
+product changes. The failed log remains local. A subsequent complete sweep in
+a fresh isolated fixture directory passed **153/155**, with **two skips and zero
+failures** (`measurement-review-isolated-suite.log`). The skips are
+`test_shutdown.py` and `test_acquire.py`; Docker was available for this run.
+Generated EVIDENCE.md contains **841 observations**, exactly the sum of its
+passing classified system rows. All three new mutations were caught, none
+missed or skipped. The final execution audit reported zero violations across
+118 modules. Remote CI must still validate this exact correction commit.
+
+## Local UI observation (prior revision)
 
 Served the existing synthetic Twin fixture on loopback port 7789 with no expert
 loop started. Browser inspection of learner / Skills showed "retrospective

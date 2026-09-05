@@ -21,6 +21,21 @@ PY = sys.executable
 
 # (label, file, find, replace, test, what the test must notice)
 MUTATIONS = [
+    ("review: ambiguous option IDs accepted", "twinmeasurement.py",
+     '            raise ValueError("duplicate option ID after normalization")',
+     '            pass',
+     "test_twin_measurement.py", "normalized duplicate IDs must refuse in either order"),
+
+    ("review: skipped observations inflate headline", "evidence.py",
+     '"observations": sum(s["observations"] for s in systems)',
+     '"observations": sum(len(v["sections"]) for v in per.values())',
+     "test_package.py", "headline must equal the passing classified ledger"),
+
+    ("review: suite registry silently omits a file", "tests/run_all.py",
+     'TESTS = ["test_resume.py", "test_lock.py",',
+     'TESTS = ["test_lock.py",',
+     "test_ledger_defects.py", "badge check must reject missing registered tests"),
+
     ("measurement: evaluation skips record validation", "twin.py",
      '        held = TM.split(rows)["test"]',
      '        held = [e for e in rows if TM.partition(e) == "test"]',
